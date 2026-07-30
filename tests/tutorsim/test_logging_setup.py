@@ -254,17 +254,27 @@ def test_per_run_log_file_registered_worker_thread_captured(tmp_path):
     log = logging.getLogger("tutorsim.client")
 
     with per_run_log_file(str(log_file)) as handle:
+        # Keep both threads alive at once via a barrier. threading ident()s are
+        # recycled after a thread exits, so running these sequentially could
+        # hand the unregistered "stranger" the just-freed id of the registered
+        # worker -- letting it pass the thread filter and flaking the final
+        # assertion. Concurrent liveness guarantees distinct ids, which is also
+        # how real worker-pool and main threads coexist during a run.
+        both_alive = threading.Barrier(2)
 
         def worker():
             bind_worker_logging(handle, "tutor-x/plain")
+            both_alive.wait()
             log.warning("retry warning from worker")
 
         def stranger():
+            both_alive.wait()
             log.warning("record from unregistered thread")
 
-        for target in (worker, stranger):
-            t = threading.Thread(target=target)
+        threads = [threading.Thread(target=t) for t in (worker, stranger)]
+        for t in threads:
             t.start()
+        for t in threads:
             t.join()
 
     content = log_file.read_text(encoding="utf-8")

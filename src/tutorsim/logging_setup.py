@@ -210,6 +210,9 @@ def per_run_log_file(
     handler = logging.FileHandler(log_file, mode="a", encoding="utf-8")
     handler.setFormatter(logging.Formatter(_FILE_FORMAT, datefmt=_DATE_FORMAT))
     handler.addFilter(_CellTagFilter())
+    # Registered ids assume the threads outlive the block: a recycled id from a
+    # dead registered thread would wrongly pass this filter. The opening thread
+    # and worker-pool threads are long-lived, so that holds in practice.
     thread_ids = {threading.get_ident()}
     if current_thread_only:
         handler.addFilter(lambda record: record.thread in thread_ids)
