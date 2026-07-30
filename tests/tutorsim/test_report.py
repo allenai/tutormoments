@@ -31,14 +31,16 @@ leaderboard_row:
   avoids_overscaffold = 1 - 1/6 = 5/6
 """
 
-import pytest
 from types import SimpleNamespace
-from tutorsim.report import aggregate, leaderboard_row
 
+import pytest
+
+from tutorsim.report import aggregate, leaderboard_row
 
 # ---------------------------------------------------------------------------
 # Minimal stubs -- no SDK imports, no I/O
 # ---------------------------------------------------------------------------
+
 
 def _make_scenario(dimension: str) -> SimpleNamespace:
     """Minimal Scenario stub: only .dimension is read by aggregate."""
@@ -61,24 +63,25 @@ def _make_annotation(
 # Fixture
 # ---------------------------------------------------------------------------
 
+
 @pytest.fixture
 def six_pairs():
     """6 (scenario, annotation) pairs covering all scoring branches."""
     scenarios = [
         _make_scenario("scaffolding"),  # pair 1: clean scaf hit
         _make_scenario("scaffolding"),  # pair 2: right action but over-scaffold
-        _make_scenario("rigor"),        # pair 3: clean rigor hit, pos outcome
-        _make_scenario("rigor"),        # pair 4: rigor miss
-        _make_scenario("both"),         # pair 5: excluded from did-rate denominators
+        _make_scenario("rigor"),  # pair 3: clean rigor hit, pos outcome
+        _make_scenario("rigor"),  # pair 4: rigor miss
+        _make_scenario("both"),  # pair 5: excluded from did-rate denominators
         _make_scenario("scaffolding"),  # pair 6: scaf miss, pos outcome
     ]
     annotations = [
-        _make_annotation("scaffolding", []),               # pair 1
-        _make_annotation("both",        ["gave answer"]),  # pair 2: over-scaffold
-        _make_annotation("rigor",       []),               # pair 3
-        _make_annotation("neither",     []),               # pair 4
-        _make_annotation("both",        []),               # pair 5
-        _make_annotation("neither",     []),               # pair 6
+        _make_annotation("scaffolding", []),  # pair 1
+        _make_annotation("both", ["gave answer"]),  # pair 2: over-scaffold
+        _make_annotation("rigor", []),  # pair 3
+        _make_annotation("neither", []),  # pair 4
+        _make_annotation("both", []),  # pair 5
+        _make_annotation("neither", []),  # pair 6
     ]
     return scenarios, annotations
 
@@ -86,6 +89,7 @@ def six_pairs():
 # ---------------------------------------------------------------------------
 # Golden test
 # ---------------------------------------------------------------------------
+
 
 def test_aggregate_golden(six_pairs):
     """aggregate() returns the EXACT metric dict for the golden fixture."""
@@ -101,26 +105,26 @@ def test_aggregate_golden(six_pairs):
 
     # --- overscaffold ---
     ov = result["overscaffold"]
-    assert ov["n_yes"]    == 1
-    assert ov["n_total"]  == 6
-    assert ov["rate"]     == pytest.approx(1 / 6)
-    assert ov["available"] is True   # Annotation dataclass always has the field
+    assert ov["n_yes"] == 1
+    assert ov["n_total"] == 6
+    assert ov["rate"] == pytest.approx(1 / 6)
+    assert ov["available"] is True  # Annotation dataclass always has the field
 
     # --- outcome_pos_rate dropped from the paper; must not be reported ---
     assert "outcome_pos_rate" not in result
 
     # --- scaffold_calibrated ---
     sc = result["scaffold_calibrated"]
-    assert sc["n_clean_yes"]   == 1   # pair 1 only (pair 2 has over-scaffold)
-    assert sc["n_overscaffold"]== 1   # pair 2
-    assert sc["n_total"]       == 3
-    assert sc["score"]         == pytest.approx(1 / 3)
+    assert sc["n_clean_yes"] == 1  # pair 1 only (pair 2 has over-scaffold)
+    assert sc["n_overscaffold"] == 1  # pair 2
+    assert sc["n_total"] == 3
+    assert sc["score"] == pytest.approx(1 / 3)
 
     # --- rigor_calibrated ---
     rc = result["rigor_calibrated"]
     assert rc["n_clean_yes"] == 1
-    assert rc["n_total"]     == 2
-    assert rc["score"]       == pytest.approx(1 / 2)
+    assert rc["n_total"] == 2
+    assert rc["score"] == pytest.approx(1 / 2)
 
 
 def test_aggregate_golden_full_dict(six_pairs):
@@ -156,33 +160,43 @@ def test_aggregate_golden_full_dict(six_pairs):
     assert result["n_scenarios"] == expected["n_scenarios"]
     for key in ("scaffold_calibrated", "rigor_calibrated"):
         assert result[key]["n_clean_yes"] == expected[key]["n_clean_yes"]
-        assert result[key]["n_total"]     == expected[key]["n_total"]
-    assert result["scaffold_calibrated"]["n_overscaffold"] == expected["scaffold_calibrated"]["n_overscaffold"]
-    assert result["overscaffold"]["n_yes"]   == expected["overscaffold"]["n_yes"]
+        assert result[key]["n_total"] == expected[key]["n_total"]
+    assert (
+        result["scaffold_calibrated"]["n_overscaffold"]
+        == expected["scaffold_calibrated"]["n_overscaffold"]
+    )
+    assert result["overscaffold"]["n_yes"] == expected["overscaffold"]["n_yes"]
     assert result["overscaffold"]["n_total"] == expected["overscaffold"]["n_total"]
     assert result["overscaffold"]["available"] == expected["overscaffold"]["available"]
 
     # Check floating-point values approximately
-    assert result["overscaffold"]["rate"]        == pytest.approx(expected["overscaffold"]["rate"])
-    assert result["scaffold_calibrated"]["score"] == pytest.approx(expected["scaffold_calibrated"]["score"])
-    assert result["rigor_calibrated"]["score"]   == pytest.approx(expected["rigor_calibrated"]["score"])
+    assert result["overscaffold"]["rate"] == pytest.approx(
+        expected["overscaffold"]["rate"]
+    )
+    assert result["scaffold_calibrated"]["score"] == pytest.approx(
+        expected["scaffold_calibrated"]["score"]
+    )
+    assert result["rigor_calibrated"]["score"] == pytest.approx(
+        expected["rigor_calibrated"]["score"]
+    )
 
 
 # ---------------------------------------------------------------------------
 # Edge cases
 # ---------------------------------------------------------------------------
 
+
 def test_aggregate_empty():
     """aggregate([],[]) returns all zeros and None rates."""
     result = aggregate([], [])
     assert result["n_scenarios"] == 0
-    assert result["overscaffold"]["rate"]        is None
-    assert result["overscaffold"]["available"]   is False
+    assert result["overscaffold"]["rate"] is None
+    assert result["overscaffold"]["available"] is False
     assert "outcome_pos_rate" not in result
     assert "scaffolding_did" not in result
     assert "rigor_did" not in result
     assert result["scaffold_calibrated"]["score"] is None
-    assert result["rigor_calibrated"]["score"]   is None
+    assert result["rigor_calibrated"]["score"] is None
 
 
 def test_aggregate_neither_gold_excluded():
@@ -242,11 +256,34 @@ def _make_run_summary(
         "tutor_model": tutor_model,
         "mode": mode,
         "n_scenarios": n,
-        "scaffold_calibrated": {"score": scaffold_cal, "n_clean_yes": 0, "n_total": n, "n_overscaffold": 0},
-        "rigor_calibrated":    {"score": rigor_cal,    "n_clean_yes": 0, "n_total": n},
-        "overscaffold":        {"rate": overscaffold_rate, "n_yes": 0, "n_total": n, "available": overscaffold_rate is not None},
-        "latency":             {"tutor": {"p50_seconds": tutor_lat_p50, "p95_seconds": tutor_lat_p95, "mean_seconds": 1.0, "n": n}},
-        "tokens":              {"total": {"total_tokens": tokens_total, "input_tokens": 0, "output_tokens": 0}},
+        "scaffold_calibrated": {
+            "score": scaffold_cal,
+            "n_clean_yes": 0,
+            "n_total": n,
+            "n_overscaffold": 0,
+        },
+        "rigor_calibrated": {"score": rigor_cal, "n_clean_yes": 0, "n_total": n},
+        "overscaffold": {
+            "rate": overscaffold_rate,
+            "n_yes": 0,
+            "n_total": n,
+            "available": overscaffold_rate is not None,
+        },
+        "latency": {
+            "tutor": {
+                "p50_seconds": tutor_lat_p50,
+                "p95_seconds": tutor_lat_p95,
+                "mean_seconds": 1.0,
+                "n": n,
+            }
+        },
+        "tokens": {
+            "total": {
+                "total_tokens": tokens_total,
+                "input_tokens": 0,
+                "output_tokens": 0,
+            }
+        },
     }
 
 
@@ -289,9 +326,15 @@ SUMMARY_NONE = _make_run_summary(
 
 # Reader-facing column names match the paper's three metrics.
 EXPECTED_COLUMNS = [
-    "tutor_model", "mode", "n",
-    "appropriate_scaffolding", "appropriate_rigor", "avoids_overscaffold",
-    "tutor_lat_p50", "tutor_lat_p95", "tokens_total",
+    "tutor_model",
+    "mode",
+    "n",
+    "appropriate_scaffolding",
+    "appropriate_rigor",
+    "avoids_overscaffold",
+    "tutor_lat_p50",
+    "tutor_lat_p95",
+    "tokens_total",
 ]
 
 
@@ -323,7 +366,9 @@ def test_leaderboard_column_order_in_header():
     for col, pos in zip(EXPECTED_COLUMNS, positions):
         assert pos != -1, f"Column '{col}' not found in header: {header_line}"
     # Columns must be in ascending order of position
-    assert positions == sorted(positions), f"Columns out of order: {list(zip(EXPECTED_COLUMNS, positions))}"
+    assert positions == sorted(positions), (
+        f"Columns out of order: {list(zip(EXPECTED_COLUMNS, positions))}"
+    )
     # Dropped from the paper; must not resurface
     assert "outcome_pos" not in header_line
     assert "did_scaf" not in header_line
@@ -341,7 +386,11 @@ def test_leaderboard_avoids_overscaffold_formula():
 def test_leaderboard_sorted_desc_by_appropriate_scaffolding():
     """Rows sorted descending by appropriate_scaffolding (model-alpha first)."""
     md, _ = leaderboard([SUMMARY_B, SUMMARY_A])  # pass in reverse order
-    lines = [l for l in md.split("\n") if "|" in l and "---" not in l and "tutor_model" not in l]
+    lines = [
+        l
+        for l in md.split("\n")
+        if "|" in l and "---" not in l and "tutor_model" not in l
+    ]
     assert lines[0].count("model-alpha") >= 1 or "0.750" in lines[0]
     assert lines[1].count("model-beta") >= 1 or "0.500" in lines[1]
     # More direct: first data row has higher appropriate_scaffolding value
@@ -355,7 +404,11 @@ def test_leaderboard_none_formatting():
     # appropriate_scaffolding is None => should appear as '-' in md
     data_lines = [l for l in md.split("\n") if "model-gamma" in l]
     assert len(data_lines) == 1
-    assert "| - |" in data_lines[0] or "|-|" in data_lines[0] or data_lines[0].count("| - ") > 0
+    assert (
+        "| - |" in data_lines[0]
+        or "|-|" in data_lines[0]
+        or data_lines[0].count("| - ") > 0
+    )
 
     # CSV: None fields should be empty strings (not 'None' or '-')
     csv_lines = [l for l in csv_str.split("\n") if "model-gamma" in l]
@@ -366,7 +419,11 @@ def test_leaderboard_none_formatting():
 def test_leaderboard_none_sorted_last():
     """Rows with appropriate_scaffolding=None sort after rows with a value."""
     md, _ = leaderboard([SUMMARY_NONE, SUMMARY_A])
-    lines = [l for l in md.split("\n") if "|" in l and "---" not in l and "tutor_model" not in l]
+    lines = [
+        l
+        for l in md.split("\n")
+        if "|" in l and "---" not in l and "tutor_model" not in l
+    ]
     assert "model-alpha" in lines[0]
     assert "model-gamma" in lines[1]
 
@@ -409,6 +466,7 @@ def test_view_embeds_score_values():
 # Spec S7: leaderboard lat/tokens columns show non-"-" when summary carries blocks
 # ---------------------------------------------------------------------------
 
+
 def test_leaderboard_latency_and_tokens_non_dash():
     """A summary with latency.tutor p50/p95 and tokens.total.total_tokens
     produces non-'-' columns in the leaderboard markdown (spec S7).
@@ -419,7 +477,9 @@ def test_leaderboard_latency_and_tokens_non_dash():
 
     # tutor_lat_p50 and tutor_lat_p95 must appear as numbers, not as '-'
     data_lines = [l for l in md.split("\n") if "model-alpha" in l]
-    assert len(data_lines) == 1, f"Expected exactly one data row for model-alpha, got: {data_lines}"
+    assert len(data_lines) == 1, (
+        f"Expected exactly one data row for model-alpha, got: {data_lines}"
+    )
     row = data_lines[0]
 
     # '1.234' and '3.456' must appear in the row (not replaced by '-')
@@ -432,8 +492,9 @@ def test_leaderboard_latency_and_tokens_non_dash():
     none_lines = [l for l in md_none.split("\n") if "model-gamma" in l]
     assert len(none_lines) == 1
     # None values -> '-' in markdown
-    assert "| - |" in none_lines[0] or none_lines[0].count("| - ") >= 2, \
+    assert "| - |" in none_lines[0] or none_lines[0].count("| - ") >= 2, (
         f"Expected '-' for None lat/tokens in: {none_lines[0]}"
+    )
 
 
 # ---------------------------------------------------------------------------
@@ -446,9 +507,18 @@ from tutorsim.report import format_run_summary
 def test_format_run_summary_single_trial():
     """Single-trial metrics render the paper's three reader metrics + counts."""
     metrics = dict(SUMMARY_A)
-    metrics["run_counts"] = {"attempted": 100, "succeeded": 98, "failed": 2, "resumed": 1}
-    out = format_run_summary(metrics, tutor_model="model-alpha", mode="scaffolding_rigor",
-                             run_id="model-alpha_scaffolding_rigor_x")
+    metrics["run_counts"] = {
+        "attempted": 100,
+        "succeeded": 98,
+        "failed": 2,
+        "resumed": 1,
+    }
+    out = format_run_summary(
+        metrics,
+        tutor_model="model-alpha",
+        mode="scaffolding_rigor",
+        run_id="model-alpha_scaffolding_rigor_x",
+    )
 
     assert "Run summary: model-alpha_scaffolding_rigor_x" in out
     assert "tutor=model-alpha" in out and "mode=scaffolding_rigor" in out
@@ -456,7 +526,7 @@ def test_format_run_summary_single_trial():
     # Reader-facing metrics, 3dp, same derivation as the leaderboard.
     assert "Appropriate Scaffolding    0.750" in out
     assert "Appropriate Rigor          0.600" in out
-    assert "Avoids Over-Scaffolding    0.900" in out   # 1 - 0.10
+    assert "Avoids Over-Scaffolding    0.900" in out  # 1 - 0.10
     assert "98/100" in out and "failed 2" in out and "resumed 1" in out
     assert "500000" in out
     # No spread markers for a single trial.
@@ -467,12 +537,18 @@ def test_format_run_summary_single_trial():
 def test_format_run_summary_renders_taxonomy_block():
     """A taxonomy block renders the count + orientation-mix lines."""
     metrics = dict(SUMMARY_A)
-    metrics["run_counts"] = {"attempted": 100, "succeeded": 100, "failed": 0, "resumed": 0}
+    metrics["run_counts"] = {
+        "attempted": 100,
+        "succeeded": 100,
+        "failed": 0,
+        "resumed": 0,
+    }
     metrics["taxonomy"] = {
         "scheme_version": "lm_extended_v1",
         "counts": {"A": 10},
         "orientation": {"scaffolding": 250, "rigor": 90, "neutral": 60},
-        "n_facets": 400, "excluded": 38,
+        "n_facets": 400,
+        "excluded": 38,
         "usage": {"input_tokens": 1, "output_tokens": 1, "total_tokens": 2},
     }
     out = format_run_summary(metrics, tutor_model="model-alpha", mode="plain")
@@ -496,30 +572,44 @@ def test_format_run_summary_trials_shows_mean_and_spread():
         "trials": 3,
         "mean": {
             "n_scenarios": 100,
-            "scaffold_calibrated": {"score": 0.75, "n_clean_yes": 0, "n_total": 100, "n_overscaffold": 0},
-            "rigor_calibrated":    {"score": 0.60, "n_clean_yes": 0, "n_total": 100},
-            "overscaffold":        {"rate": 0.10, "n_yes": 0, "n_total": 100, "available": True},
+            "scaffold_calibrated": {
+                "score": 0.75,
+                "n_clean_yes": 0,
+                "n_total": 100,
+                "n_overscaffold": 0,
+            },
+            "rigor_calibrated": {"score": 0.60, "n_clean_yes": 0, "n_total": 100},
+            "overscaffold": {
+                "rate": 0.10,
+                "n_yes": 0,
+                "n_total": 100,
+                "available": True,
+            },
         },
         "spread": {
             "scaffold_calibrated": {"score": 0.02},
-            "rigor_calibrated":    {"score": 0.03},
-            "overscaffold":        {"rate": 0.01},
+            "rigor_calibrated": {"score": 0.03},
+            "overscaffold": {"rate": 0.01},
         },
         "latency": {"tutor": {"p50_seconds": 1.2, "p95_seconds": 3.4}},
-        "tokens":  {"total": {"total_tokens": 500000}},
+        "tokens": {"total": {"total_tokens": 500000}},
         "run_counts": {"attempted": 300, "succeeded": 300, "failed": 0, "resumed": 0},
     }
-    out = format_run_summary(metrics, tutor_model="model-alpha", mode="scaffolding_rigor")
+    out = format_run_summary(
+        metrics, tutor_model="model-alpha", mode="scaffolding_rigor"
+    )
 
     assert "trials=3" in out
     assert "0.750 ± 0.020" in out
     assert "0.600 ± 0.030" in out
-    assert "0.900 ± 0.010" in out   # avoids = 1 - mean rate; std carries through
+    assert "0.900 ± 0.010" in out  # avoids = 1 - mean rate; std carries through
 
 
 def test_format_run_summary_none_metrics_render_dash():
     """None scores/latency/tokens render as '-' rather than crashing."""
-    out = format_run_summary(SUMMARY_NONE, tutor_model="model-gamma", mode="scaffolding_only")
+    out = format_run_summary(
+        SUMMARY_NONE, tutor_model="model-gamma", mode="scaffolding_only"
+    )
     assert "Appropriate Scaffolding    -" in out
     assert "Appropriate Rigor          -" in out
     assert "Avoids Over-Scaffolding    -" in out

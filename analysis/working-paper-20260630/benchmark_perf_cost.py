@@ -96,8 +96,12 @@ def summarize_exchanges(exchanges: list[dict], id_set: set[str] | None = None) -
             out_per_turn.append(usage["output_tokens"] / len(lats))
     return {
         "n_scenarios": len(seen),
-        "tutor_latency_mean_s": statistics.mean(turn_latencies) if turn_latencies else None,
-        "tutor_output_tokens_per_turn": statistics.mean(out_per_turn) if out_per_turn else None,
+        "tutor_latency_mean_s": statistics.mean(turn_latencies)
+        if turn_latencies
+        else None,
+        "tutor_output_tokens_per_turn": statistics.mean(out_per_turn)
+        if out_per_turn
+        else None,
     }
 
 
@@ -105,11 +109,18 @@ def summarize_exchanges(exchanges: list[dict], id_set: set[str] | None = None) -
 # Loaders                                                                     #
 # --------------------------------------------------------------------------- #
 def _perf(model: str, prompt: str) -> dict:
-    d = json.loads((BENCH / "_full_combined" / f"{model}__{prompt}" / "scores.json").read_text("utf-8"))
+    d = json.loads(
+        (BENCH / "_full_combined" / f"{model}__{prompt}" / "scores.json").read_text(
+            "utf-8"
+        )
+    )
     scaf, rig = d["scaffold_calibrated"]["score"], d["rigor_calibrated"]["score"]
     return {
-        "n": d["n_scenarios"], "scaffold_cal": scaf, "rigor_cal": rig,
-        "avoid_over": 1.0 - d["overscaffold"]["rate"], "composite": (scaf + rig) / 2.0,
+        "n": d["n_scenarios"],
+        "scaffold_cal": scaf,
+        "rigor_cal": rig,
+        "avoid_over": 1.0 - d["overscaffold"]["rate"],
+        "composite": (scaf + rig) / 2.0,
     }
 
 
@@ -128,12 +139,21 @@ def _cost(model: str, prompt: str, ids: set[str]) -> dict:
 
 
 def load_table() -> pd.DataFrame:
-    ids = set(json.loads((BENCH / "_balanced_520_scenario_ids.json").read_text("utf-8")))
+    ids = set(
+        json.loads((BENCH / "_balanced_520_scenario_ids.json").read_text("utf-8"))
+    )
     rows = []
     for model, label in MODELS:
         for prompt in PROMPTS:
-            rows.append({"model": model, "label": label, "prompt": prompt,
-                         **_perf(model, prompt), **_cost(model, prompt, ids)})
+            rows.append(
+                {
+                    "model": model,
+                    "label": label,
+                    "prompt": prompt,
+                    **_perf(model, prompt),
+                    **_cost(model, prompt, ids),
+                }
+            )
     return pd.DataFrame(rows)
 
 
@@ -146,7 +166,9 @@ def paper_latex(df: pd.DataFrame) -> str:
         return f"{v:.3f}"
 
     lines = [
-        r"\begin{table}[H]", r"    \centering", r"    \begin{tabular}{lccc ccc}",
+        r"\begin{table}[H]",
+        r"    \centering",
+        r"    \begin{tabular}{lccc ccc}",
         r"        \toprule",
         r"        & \multicolumn{3}{c}{\textbf{Plain prompt}} & \multicolumn{3}{c}{\textbf{Evaluation-aware prompt}} \\",
         r"        \cmidrule(lr){2-4} \cmidrule(lr){5-7}",
@@ -154,8 +176,14 @@ def paper_latex(df: pd.DataFrame) -> str:
         r"        \midrule",
     ]
     for model, label in MODELS:
-        c = [cell(model, "plain", "scaffold_cal"), cell(model, "plain", "rigor_cal"), cell(model, "plain", "avoid_over"),
-             cell(model, "scaffolding_rigor", "scaffold_cal"), cell(model, "scaffolding_rigor", "rigor_cal"), cell(model, "scaffolding_rigor", "avoid_over")]
+        c = [
+            cell(model, "plain", "scaffold_cal"),
+            cell(model, "plain", "rigor_cal"),
+            cell(model, "plain", "avoid_over"),
+            cell(model, "scaffolding_rigor", "scaffold_cal"),
+            cell(model, "scaffolding_rigor", "rigor_cal"),
+            cell(model, "scaffolding_rigor", "avoid_over"),
+        ]
         lines.append(f"        {label:<18} & " + " & ".join(c) + r" \\")
     lines += [r"        \bottomrule", r"    \end{tabular}", r"\end{table}"]
     return "\n".join(lines) + "\n"
@@ -173,9 +201,17 @@ def figures(df: pd.DataFrame) -> None:
         r = sub[sub.model == model]
         if not len(r):
             continue
-        ax.scatter(r["tutor_latency_mean_s"], r["composite"], s=80,
-                   color=MODEL_COLORS[model], marker=MODEL_MARKERS[model],
-                   edgecolor="white", linewidth=0.6, zorder=4, label=label)
+        ax.scatter(
+            r["tutor_latency_mean_s"],
+            r["composite"],
+            s=80,
+            color=MODEL_COLORS[model],
+            marker=MODEL_MARKERS[model],
+            edgecolor="white",
+            linewidth=0.6,
+            zorder=4,
+            label=label,
+        )
     ax.set_xlabel("Mean tutor latency per turn (s)", fontsize=11)
     ax.set_ylabel("Mean of Appropriate Scaffolding & Appropriate Rigor", fontsize=11)
     ax.grid(axis="both", ls=":", alpha=0.4)
@@ -191,9 +227,20 @@ def main() -> None:
     df = load_table()
     tex = paper_latex(df)
     (FIGDIR / "results_table.tex").write_text(tex, encoding="utf-8")
-    cols = ["label", "prompt", "n", "scaffold_cal", "rigor_cal", "avoid_over",
-            "composite", "tutor_latency_mean_s", "tutor_output_tokens_per_turn"]
-    (FIGDIR / "results_table.md").write_text(df[cols].round(3).to_markdown(index=False), encoding="utf-8")
+    cols = [
+        "label",
+        "prompt",
+        "n",
+        "scaffold_cal",
+        "rigor_cal",
+        "avoid_over",
+        "composite",
+        "tutor_latency_mean_s",
+        "tutor_output_tokens_per_turn",
+    ]
+    (FIGDIR / "results_table.md").write_text(
+        df[cols].round(3).to_markdown(index=False), encoding="utf-8"
+    )
     figures(df)
     print(tex)
     print("wrote: results_table.tex, results_table.md, latency_vs_perf.{pdf,png}")

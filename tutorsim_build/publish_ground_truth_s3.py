@@ -15,6 +15,7 @@ Env fallbacks (CLI args take precedence):
     GROUND_TRUTH_S3_BUCKET   -- default bucket when --bucket is omitted
     GROUND_TRUTH_S3_PREFIX   -- default key prefix when --prefix is omitted
 """
+
 import argparse
 import os
 import sys
@@ -52,13 +53,20 @@ def publish(file_path, *, bucket, prefix):
 
 
 def main(argv=None):
-    parser = argparse.ArgumentParser(description=__doc__,
-                                     formatter_class=argparse.RawDescriptionHelpFormatter)
+    parser = argparse.ArgumentParser(
+        description=__doc__, formatter_class=argparse.RawDescriptionHelpFormatter
+    )
     parser.add_argument("file", help="Path to the ground-truth file to upload")
-    parser.add_argument("--bucket", default=None,
-                        help="Target S3 bucket (or set GROUND_TRUTH_S3_BUCKET)")
-    parser.add_argument("--prefix", default=None,
-                        help="Key prefix (or set GROUND_TRUTH_S3_PREFIX; default none)")
+    parser.add_argument(
+        "--bucket",
+        default=None,
+        help="Target S3 bucket (or set GROUND_TRUTH_S3_BUCKET)",
+    )
+    parser.add_argument(
+        "--prefix",
+        default=None,
+        help="Key prefix (or set GROUND_TRUTH_S3_PREFIX; default none)",
+    )
     args = parser.parse_args(argv)
 
     bucket = resolve_bucket(args.bucket)

@@ -61,20 +61,14 @@ class TestExactCounts:
         assert counts["scaffolding"] == 260, (
             f"Expected 260 scaffolding, got {counts['scaffolding']}"
         )
-        assert counts["rigor"] == 260, (
-            f"Expected 260 rigor, got {counts['rigor']}"
-        )
+        assert counts["rigor"] == 260, f"Expected 260 rigor, got {counts['rigor']}"
 
     def test_all_have_non_empty_context(self, raw_moments):
         empty = [s["id"] for s in raw_moments if not s.get("context")]
         assert not empty, f"Moments with empty context: {empty}"
 
     def test_all_have_rubric_gold(self, raw_moments):
-        missing = [
-            s["id"]
-            for s in raw_moments
-            if not s.get("rubric", {}).get("gold")
-        ]
+        missing = [s["id"] for s in raw_moments if not s.get("rubric", {}).get("gold")]
         assert not missing, f"Moments missing rubric.gold: {missing}"
 
     def test_ids_are_unique(self, raw_moments):

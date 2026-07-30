@@ -11,6 +11,7 @@ urllib3, botocore, ...) do not flood the output at INFO/DEBUG.
 
 The file handler appends, so a resumed run accumulates into the same file.
 """
+
 import argparse
 import contextvars
 import logging
@@ -69,7 +70,7 @@ def logging_args_parent() -> argparse.ArgumentParser:
         dest="log_level",
         metavar="LEVEL",
         help="Log level: DEBUG, INFO, WARNING, or ERROR "
-             f"(default: INFO, or ${LOG_LEVEL_ENV})",
+        f"(default: INFO, or ${LOG_LEVEL_ENV})",
     )
     parent.add_argument(
         "--log-file",
@@ -77,7 +78,7 @@ def logging_args_parent() -> argparse.ArgumentParser:
         dest="log_file",
         metavar="FILE",
         help="Also append logs to FILE; recommended for reproducibility "
-             f"(default: ${LOG_FILE_ENV} if set)",
+        f"(default: ${LOG_FILE_ENV} if set)",
     )
     return parent
 

@@ -50,6 +50,7 @@ _CONV_ID_PREFIX_RE = re.compile(r"^\d{4}-t\d+_\d{4}-s\d+_")
 # Read from explicit directories; no S3.
 # ---------------------------------------------------------------------------
 
+
 def _conv_id_to_uuid(conv_id: str) -> str:
     """Extract the transcript-UUID component from a full conv_id.
 
@@ -96,6 +97,7 @@ def _load_transcripts(transcripts_dir: str) -> dict[str, dict]:
 # ---------------------------------------------------------------------------
 # JSONL transcript loader
 # ---------------------------------------------------------------------------
+
 
 def _transform_normalized_record(rec: dict) -> dict:
     """Transform an S3 normalized JSONL record to internal transcript format.
@@ -160,15 +162,17 @@ def _transform_normalized_record(rec: dict) -> dict:
         for e_entry in enrichments_by_turn.get(turn_num, []):
             final_turns.append({**e_entry, "turn_number": turn_num})
         ss = float(t.get("start_seconds", 0) or 0)
-        final_turns.append({
-            "turn_number": turn_num,
-            "role": t["role"].upper(),
-            "text": t["text"],
-            "type": "DIALOGUE",
-            "timestamp": f"{ss}s",
-            "start_seconds": ss,
-            "is_enrichment": False,
-        })
+        final_turns.append(
+            {
+                "turn_number": turn_num,
+                "role": t["role"].upper(),
+                "text": t["text"],
+                "type": "DIALOGUE",
+                "timestamp": f"{ss}s",
+                "start_seconds": ss,
+                "is_enrichment": False,
+            }
+        )
     for e_entry in trailing_enrichments:
         final_turns.append({**e_entry, "turn_number": max_dialogue_turn})
 
@@ -220,13 +224,16 @@ def _load_jsonl_index(path: str) -> dict[str, dict]:
             except Exception:
                 errors += 1
 
-    logger.info("Indexed %d transcripts from %s (%d parse errors)", len(index), path, errors)
+    logger.info(
+        "Indexed %d transcripts from %s (%d parse errors)", len(index), path, errors
+    )
     return index
 
 
 # ---------------------------------------------------------------------------
 # Cut/extraction helpers
 # ---------------------------------------------------------------------------
+
 
 def _pick_modal_cut(votes: list[int]) -> "int | None":
     """Return the most-voted cut. On tie, return the smallest.
@@ -269,7 +276,7 @@ def _pick_representative_member(members: list[dict], chosen_cut: int) -> dict:
     """
     matching = [m for m in members if m.get("cut_turn") == chosen_cut]
     pool = matching if matching else members
-    return min(pool, key=lambda m: (m.get("annotator_id") or ""))
+    return min(pool, key=lambda m: m.get("annotator_id") or "")
 
 
 def _resolve_cluster(
@@ -350,17 +357,20 @@ def _prefix_turns_to_context(conversation: dict, cut_turn: int) -> list[dict]:
     for turn in conversation["turns"]:
         if turn["turn_number"] > cut_turn:
             break
-        result.append({
-            "turn_number": turn["turn_number"],
-            "role": turn["role"].lower(),
-            "text": turn["text"],
-        })
+        result.append(
+            {
+                "turn_number": turn["turn_number"],
+                "role": turn["role"].lower(),
+                "text": turn["text"],
+            }
+        )
     return result
 
 
 # ---------------------------------------------------------------------------
 # Public API: build_moments
 # ---------------------------------------------------------------------------
+
 
 def build_moments(
     *,
@@ -513,6 +523,7 @@ def build_moments(
 # Public API: build_moments_from_reference_run
 # ---------------------------------------------------------------------------
 
+
 def build_moments_from_reference_run(
     *,
     set_name: str,
@@ -585,43 +596,46 @@ def build_moments_from_reference_run(
             )
 
         dimension = det["situation_label_agg"]
-        moments.append(Moment(
-            id=f"{set_name}:{scenario_id}",
-            context=context_turns,
-            dimension=dimension,
-            student={
-                "mode": "oracle",
-                "reference": _build_reference_transcript(conversation, cut_turn),
-                "context": _get_student_context(conversation),
-                "trait": {
-                    "persona": trait["persona"],
-                    "trait_mode": trait.get("trait_mode", "joined-3"),
-                    "generator_model": trait.get("generator_model", ""),
-                    "generated_at": trait.get("generated_at", ""),
+        moments.append(
+            Moment(
+                id=f"{set_name}:{scenario_id}",
+                context=context_turns,
+                dimension=dimension,
+                student={
+                    "mode": "oracle",
+                    "reference": _build_reference_transcript(conversation, cut_turn),
+                    "context": _get_student_context(conversation),
+                    "trait": {
+                        "persona": trait["persona"],
+                        "trait_mode": trait.get("trait_mode", "joined-3"),
+                        "generator_model": trait.get("generator_model", ""),
+                        "generated_at": trait.get("generated_at", ""),
+                    },
                 },
-            },
-            rubric={
-                "gold": dimension,
-                "hint": det.get("situation", ""),
-            },
-            provenance={
-                "conv_id": conv_id,
-                "cut_turn": cut_turn,
-                "turn_start": det["turn_start"],
-                "turn_end": det["turn_end"],
-                "moment_id": det.get("moment_id"),
-                "annotator_id": det.get("annotator_id"),
-                "chosen_cut_turn": det.get("chosen_cut_turn"),
-                "cut_votes": det.get("cut_votes") or {},
-                "cluster_size": det.get("cluster_size"),
-            },
-        ))
+                rubric={
+                    "gold": dimension,
+                    "hint": det.get("situation", ""),
+                },
+                provenance={
+                    "conv_id": conv_id,
+                    "cut_turn": cut_turn,
+                    "turn_start": det["turn_start"],
+                    "turn_end": det["turn_end"],
+                    "moment_id": det.get("moment_id"),
+                    "annotator_id": det.get("annotator_id"),
+                    "chosen_cut_turn": det.get("chosen_cut_turn"),
+                    "cut_votes": det.get("cut_votes") or {},
+                    "cluster_size": det.get("cluster_size"),
+                },
+            )
+        )
     return moments
 
 
 # ---------------------------------------------------------------------------
 # Release serialization
 # ---------------------------------------------------------------------------
+
 
 def _moment_to_release_dict(moment: Moment) -> dict:
     """Convert a Moment to the released (Arrow-friendly) record form.
@@ -648,8 +662,9 @@ def validate_records_against_schema(records: "list[dict]") -> None:
     (e.g. annotator_id's uuid) are annotations, not assertions — standard
     jsonschema semantics.
     """
-    import jsonschema
     from importlib.resources import files
+
+    import jsonschema
 
     schema = json.loads(
         (files("tutorsim_build") / SCHEMA_FILENAME).read_text(encoding="utf-8")
@@ -685,7 +700,9 @@ def write_release(
     from importlib.resources import files
 
     # Release contract: every moment carries the frozen student persona.
-    traitless = [m.id for m in moments if not (m.student.get("trait") or {}).get("persona")]
+    traitless = [
+        m.id for m in moments if not (m.student.get("trait") or {}).get("persona")
+    ]
     if traitless:
         raise ValueError(
             f"{len(traitless)} moment(s) have no student.trait persona "
@@ -725,7 +742,9 @@ def write_release(
         json.dump(manifest, f, indent=2, ensure_ascii=False)
 
     # Ship the record schema alongside the data (authoritative shape doc).
-    schema_text = (files("tutorsim_build") / SCHEMA_FILENAME).read_text(encoding="utf-8")
+    schema_text = (files("tutorsim_build") / SCHEMA_FILENAME).read_text(
+        encoding="utf-8"
+    )
     (out_dir / SCHEMA_FILENAME).write_text(schema_text, encoding="utf-8")
 
     return manifest
@@ -734,6 +753,7 @@ def write_release(
 # ---------------------------------------------------------------------------
 # CLI entry points (dispatched from tutorsim_build.cli)
 # ---------------------------------------------------------------------------
+
 
 def _cli_build(args: argparse.Namespace) -> None:
     """Build a release directory: <out>/{moments.jsonl, moments.manifest.json, moments.schema.json}."""
@@ -778,7 +798,9 @@ def _cli_build(args: argparse.Namespace) -> None:
             "source_tags": ["human_annotated", "hybrid_ground_truth"],
         },
     )
-    print(f"Wrote {manifest['record_count']} moments to {Path(args.out) / MOMENTS_FILENAME}")
+    print(
+        f"Wrote {manifest['record_count']} moments to {Path(args.out) / MOMENTS_FILENAME}"
+    )
     print(f"Wrote manifest to {Path(args.out) / MANIFEST_FILENAME}")
     print(f"  content_hash: {manifest['content_hash']}")
 
@@ -826,7 +848,9 @@ def _cli_build_from_run(args: argparse.Namespace) -> None:
             "source_tags": ["human_annotated", "reference_run"],
         },
     )
-    print(f"Wrote {manifest['record_count']} moments to {Path(args.out) / MOMENTS_FILENAME}")
+    print(
+        f"Wrote {manifest['record_count']} moments to {Path(args.out) / MOMENTS_FILENAME}"
+    )
     print(f"Wrote manifest to {Path(args.out) / MANIFEST_FILENAME}")
     print(f"  content_hash: {manifest['content_hash']}")
 

@@ -1,10 +1,13 @@
 """Tests for tutorsim.tutor module."""
-import pytest
+
 import os
-from unittest.mock import patch, MagicMock
-from tutorsim.tutor import build_tutor_system_prompt, resolve_tutor
+from unittest.mock import patch
+
+import pytest
+
 from tutorsim import register_tutor
-from tutorsim.config import _reset_config_cache, _TUTOR_REGISTRY
+from tutorsim.config import _TUTOR_REGISTRY, _reset_config_cache
+from tutorsim.tutor import build_tutor_system_prompt, resolve_tutor
 
 
 def test_plain_mode_loads_and_substitutes():
@@ -35,9 +38,7 @@ def test_oracle_mode_substitutes_reference_transcript():
     context = "Grade 4, geometry"
     reference = "Tutor: Great job! Now let's try the next one."
     prompt = build_tutor_system_prompt(
-        "oracle",
-        student_context=context,
-        reference_transcript=reference
+        "oracle", student_context=context, reference_transcript=reference
     )
 
     assert context in prompt
@@ -51,10 +52,7 @@ def test_oracle_mode_substitutes_reference_transcript():
 def test_oracle_mode_requires_reference_transcript():
     """Test that oracle mode raises ValueError if reference_transcript is not provided."""
     with pytest.raises(ValueError, match="reference_transcript"):
-        build_tutor_system_prompt(
-            "oracle",
-            student_context="Grade 5"
-        )
+        build_tutor_system_prompt("oracle", student_context="Grade 5")
 
 
 def test_default_mode_with_none():
@@ -95,7 +93,7 @@ def test_student_context_can_be_empty():
 def test_resolve_tutor_hosted():
     """Test resolve_tutor for a hosted model."""
     # Patch the Anthropic SDK at the real import path
-    with patch("anthropic.Anthropic") as mock_anthropic:
+    with patch("anthropic.Anthropic"):
         # Set up the environment
         os.environ["ANTHROPIC_API_KEY"] = "test-key"
         try:

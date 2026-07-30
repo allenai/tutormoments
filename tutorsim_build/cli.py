@@ -41,48 +41,102 @@ def _build_parser() -> argparse.ArgumentParser:
         help="Build a release dir (moments.jsonl + manifest) from ground truth",
         parents=[log_parent],
     )
-    build_p.add_argument("--set", required=True, metavar="NAME",
-                         help="Set name, e.g. balanced_520")
-    build_p.add_argument("--ids", required=True, metavar="FILE",
-                         help="Path to JSON list of moment ids")
-    build_p.add_argument("--ground-truth", required=True, dest="ground_truth",
-                         metavar="DIR", help="Ground truth directory")
-    build_p.add_argument("--transcripts", required=True, metavar="DIR",
-                         help="Transcripts directory")
-    build_p.add_argument("--tutoring-provider-a-jsonl", default=None,
-                         dest="tutoring_provider_a_jsonl", metavar="FILE",
-                         help="Normalized JSONL transcript file (optional)")
-    build_p.add_argument("--out", required=True, metavar="DIR",
-                         help="Release directory to write moments.jsonl + moments.manifest.json")
-    build_p.add_argument("--created", default="", metavar="DATE",
-                         help="ISO date string for manifest (default: empty)")
-    build_p.add_argument("--version", default="0", metavar="VERSION",
-                         help="Dataset version string for manifest (default: 0)")
+    build_p.add_argument(
+        "--set", required=True, metavar="NAME", help="Set name, e.g. balanced_520"
+    )
+    build_p.add_argument(
+        "--ids", required=True, metavar="FILE", help="Path to JSON list of moment ids"
+    )
+    build_p.add_argument(
+        "--ground-truth",
+        required=True,
+        dest="ground_truth",
+        metavar="DIR",
+        help="Ground truth directory",
+    )
+    build_p.add_argument(
+        "--transcripts", required=True, metavar="DIR", help="Transcripts directory"
+    )
+    build_p.add_argument(
+        "--tutoring-provider-a-jsonl",
+        default=None,
+        dest="tutoring_provider_a_jsonl",
+        metavar="FILE",
+        help="Normalized JSONL transcript file (optional)",
+    )
+    build_p.add_argument(
+        "--out",
+        required=True,
+        metavar="DIR",
+        help="Release directory to write moments.jsonl + moments.manifest.json",
+    )
+    build_p.add_argument(
+        "--created",
+        default="",
+        metavar="DATE",
+        help="ISO date string for manifest (default: empty)",
+    )
+    build_p.add_argument(
+        "--version",
+        default="0",
+        metavar="VERSION",
+        help="Dataset version string for manifest (default: 0)",
+    )
 
     # -- dataset build-from-run --------------------------------------------------
     bfr_p = dataset_subs.add_parser(
         "build-from-run",
         help="Rebuild the frozen moments set from a published benchmark run "
-             "(the canonical record of the benchmark-time detections)",
+        "(the canonical record of the benchmark-time detections)",
         parents=[log_parent],
     )
-    bfr_p.add_argument("--set", required=True, metavar="NAME",
-                       help="Set name, e.g. balanced_520")
-    bfr_p.add_argument("--reference-run", required=True, dest="reference_run",
-                       metavar="FILE", help="Published run JSONL (one row per replay)")
-    bfr_p.add_argument("--transcripts", default=None, metavar="DIR",
-                       help="Transcripts directory (optional if JSONL given)")
-    bfr_p.add_argument("--tutoring-provider-a-jsonl", default=None,
-                       dest="tutoring_provider_a_jsonl", metavar="FILE",
-                       help="Normalized JSONL transcript file (optional)")
-    bfr_p.add_argument("--ids", default=None, metavar="FILE",
-                       help="Optional canonical id list to cross-check coverage against")
-    bfr_p.add_argument("--out", required=True, metavar="DIR",
-                       help="Release directory to write moments.jsonl + moments.manifest.json")
-    bfr_p.add_argument("--created", default="", metavar="DATE",
-                       help="ISO date string for manifest (default: empty)")
-    bfr_p.add_argument("--version", default="0", metavar="VERSION",
-                       help="Dataset version string for manifest (default: 0)")
+    bfr_p.add_argument(
+        "--set", required=True, metavar="NAME", help="Set name, e.g. balanced_520"
+    )
+    bfr_p.add_argument(
+        "--reference-run",
+        required=True,
+        dest="reference_run",
+        metavar="FILE",
+        help="Published run JSONL (one row per replay)",
+    )
+    bfr_p.add_argument(
+        "--transcripts",
+        default=None,
+        metavar="DIR",
+        help="Transcripts directory (optional if JSONL given)",
+    )
+    bfr_p.add_argument(
+        "--tutoring-provider-a-jsonl",
+        default=None,
+        dest="tutoring_provider_a_jsonl",
+        metavar="FILE",
+        help="Normalized JSONL transcript file (optional)",
+    )
+    bfr_p.add_argument(
+        "--ids",
+        default=None,
+        metavar="FILE",
+        help="Optional canonical id list to cross-check coverage against",
+    )
+    bfr_p.add_argument(
+        "--out",
+        required=True,
+        metavar="DIR",
+        help="Release directory to write moments.jsonl + moments.manifest.json",
+    )
+    bfr_p.add_argument(
+        "--created",
+        default="",
+        metavar="DATE",
+        help="ISO date string for manifest (default: empty)",
+    )
+    bfr_p.add_argument(
+        "--version",
+        default="0",
+        metavar="VERSION",
+        help="Dataset version string for manifest (default: 0)",
+    )
 
     # -- dataset validate ------------------------------------------------------
     val_p = dataset_subs.add_parser(
@@ -90,8 +144,13 @@ def _build_parser() -> argparse.ArgumentParser:
         help="Validate a release dir's moments.jsonl against its manifest",
         parents=[log_parent],
     )
-    val_p.add_argument("--data_path", required=True, dest="data_path", metavar="DIR",
-                       help="Release directory containing moments.jsonl + moments.manifest.json")
+    val_p.add_argument(
+        "--data_path",
+        required=True,
+        dest="data_path",
+        metavar="DIR",
+        help="Release directory containing moments.jsonl + moments.manifest.json",
+    )
 
     # -- dataset build-ground-truth ---------------------------------------------
     gt_p = dataset_subs.add_parser(
@@ -99,26 +158,66 @@ def _build_parser() -> argparse.ArgumentParser:
         help="Build ground truth from raw human annotations (LLM batch pipeline)",
         parents=[log_parent],
     )
-    gt_p.add_argument("--input", default=None, metavar="FILE",
-                      help="Annotations JSONL (default: packaged release path)")
-    gt_p.add_argument("--out-dir", default=None, dest="out_dir", metavar="DIR",
-                      help="Output directory (default: data/ground_truth_<labeller>)")
-    gt_p.add_argument("--labeller", default="hybrid", metavar="NAME",
-                      help="Labeller template name (default: hybrid)")
-    gt_p.add_argument("--dry-run", action="store_true", dest="dry_run",
-                      help="Plan only; no LLM calls or writes")
-    gt_p.add_argument("--scaffolding-only", action="store_true", dest="scaffolding_only",
-                      help="Restrict to scaffolding records (merge-preserve rapport)")
-    gt_p.add_argument("--refresh-agg", nargs="?", const="both", default=None,
-                      choices=["action", "result", "both"], dest="refresh_agg",
-                      help="Reclassify action/result aggregations")
-    gt_p.add_argument("--refresh-decomp", nargs="?", const="both", default=None,
-                      choices=["action", "result", "both"], dest="refresh_decomp",
-                      help="Re-decompose action/result facets (cache keys on text, not prompt)")
-    gt_p.add_argument("--refresh-overscaffold", action="store_true", dest="refresh_overscaffold",
-                      help="Re-decompose over-scaffolding for all scaffolding moments")
-    gt_p.add_argument("--consolidate", action="store_true",
-                      help="Also write a consolidated <out-dir>.jsonl after building")
+    gt_p.add_argument(
+        "--input",
+        default=None,
+        metavar="FILE",
+        help="Annotations JSONL (default: packaged release path)",
+    )
+    gt_p.add_argument(
+        "--out-dir",
+        default=None,
+        dest="out_dir",
+        metavar="DIR",
+        help="Output directory (default: data/ground_truth_<labeller>)",
+    )
+    gt_p.add_argument(
+        "--labeller",
+        default="hybrid",
+        metavar="NAME",
+        help="Labeller template name (default: hybrid)",
+    )
+    gt_p.add_argument(
+        "--dry-run",
+        action="store_true",
+        dest="dry_run",
+        help="Plan only; no LLM calls or writes",
+    )
+    gt_p.add_argument(
+        "--scaffolding-only",
+        action="store_true",
+        dest="scaffolding_only",
+        help="Restrict to scaffolding records (merge-preserve rapport)",
+    )
+    gt_p.add_argument(
+        "--refresh-agg",
+        nargs="?",
+        const="both",
+        default=None,
+        choices=["action", "result", "both"],
+        dest="refresh_agg",
+        help="Reclassify action/result aggregations",
+    )
+    gt_p.add_argument(
+        "--refresh-decomp",
+        nargs="?",
+        const="both",
+        default=None,
+        choices=["action", "result", "both"],
+        dest="refresh_decomp",
+        help="Re-decompose action/result facets (cache keys on text, not prompt)",
+    )
+    gt_p.add_argument(
+        "--refresh-overscaffold",
+        action="store_true",
+        dest="refresh_overscaffold",
+        help="Re-decompose over-scaffolding for all scaffolding moments",
+    )
+    gt_p.add_argument(
+        "--consolidate",
+        action="store_true",
+        help="Also write a consolidated <out-dir>.jsonl after building",
+    )
 
     return parser
 
@@ -128,13 +227,18 @@ def _cmd_build_ground_truth(args, command_line: str) -> None:
     from contextlib import nullcontext
 
     from tutorsim_build import groundtruth
+
     input_path = args.input or groundtruth.ANNOTATIONS_JSONL
     out_dir = args.out_dir or groundtruth.default_out_dir(args.labeller)
     # --dry-run promises no writes, so it gets no build.log either.
-    log_ctx = nullcontext() if args.dry_run else per_run_log_file(
-        os.path.join(str(out_dir), "build.log"),
-        current_thread_only=False,
-        header=command_line,
+    log_ctx = (
+        nullcontext()
+        if args.dry_run
+        else per_run_log_file(
+            os.path.join(str(out_dir), "build.log"),
+            current_thread_only=False,
+            header=command_line,
+        )
     )
     with log_ctx:
         groundtruth.build_ground_truth(
@@ -165,15 +269,25 @@ def main(argv=None) -> None:
     )
     logger.info("%s", command_line)
 
-    from tutorsim_build.moments_build import _cli_build, _cli_build_from_run, _cli_validate
+    from tutorsim_build.moments_build import (
+        _cli_build,
+        _cli_build_from_run,
+        _cli_validate,
+    )
 
     if args.dataset_command == "build":
-        with per_run_log_file(os.path.join(args.out, "build.log"),
-                              current_thread_only=False, header=command_line):
+        with per_run_log_file(
+            os.path.join(args.out, "build.log"),
+            current_thread_only=False,
+            header=command_line,
+        ):
             _cli_build(args)
     elif args.dataset_command == "build-from-run":
-        with per_run_log_file(os.path.join(args.out, "build.log"),
-                              current_thread_only=False, header=command_line):
+        with per_run_log_file(
+            os.path.join(args.out, "build.log"),
+            current_thread_only=False,
+            header=command_line,
+        ):
             _cli_build_from_run(args)
     elif args.dataset_command == "validate":
         _cli_validate(args)

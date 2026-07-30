@@ -21,26 +21,32 @@ def _record(transcript_id, annotation_type, annotator_id, turn_start, turn_end):
         "transcript_id": transcript_id,
         "annotation_type": annotation_type,
         "annotator_id": annotator_id,
-        "turn_annotations": [{
-            "turn_number_start": turn_start,
-            "turn_number_end": turn_end,
-            "situation": "s",
-            "action": "a",
-            "result": "r",
-            "annotation_timestamp": "2026-01-01",
-        }],
+        "turn_annotations": [
+            {
+                "turn_number_start": turn_start,
+                "turn_number_end": turn_end,
+                "situation": "s",
+                "action": "a",
+                "result": "r",
+                "annotation_timestamp": "2026-01-01",
+            }
+        ],
     }
 
 
 # --- load_from_jsonl annotation-type filter --------------------------------
 
+
 def test_load_from_jsonl_default_keeps_scaffolding_and_rapport(tmp_path):
     path = tmp_path / "ann.jsonl"
-    _write_jsonl(path, [
-        _record("c1", "scaffolding", "t1", 1, 5),
-        _record("c1", "rapport", "t2", 2, 6),
-        _record("c1", "caption", "t3", 0, 0),
-    ])
+    _write_jsonl(
+        path,
+        [
+            _record("c1", "scaffolding", "t1", 1, 5),
+            _record("c1", "rapport", "t2", 2, 6),
+            _record("c1", "caption", "t3", 0, 0),
+        ],
+    )
     convs = dict(load_from_jsonl(str(path)))
     types = {a["annotation_type"] for a in convs["c1"]["annotations"]}
     assert types == {"scaffolding", "rapport"}
@@ -48,10 +54,13 @@ def test_load_from_jsonl_default_keeps_scaffolding_and_rapport(tmp_path):
 
 def test_load_from_jsonl_scaffolding_only_drops_rapport(tmp_path):
     path = tmp_path / "ann.jsonl"
-    _write_jsonl(path, [
-        _record("c1", "scaffolding", "t1", 1, 5),
-        _record("c1", "rapport", "t2", 2, 6),
-    ])
+    _write_jsonl(
+        path,
+        [
+            _record("c1", "scaffolding", "t1", 1, 5),
+            _record("c1", "rapport", "t2", 2, 6),
+        ],
+    )
     convs = dict(load_from_jsonl(str(path), annotation_types=("scaffolding",)))
     types = {a["annotation_type"] for a in convs["c1"]["annotations"]}
     assert types == {"scaffolding"}
@@ -59,10 +68,13 @@ def test_load_from_jsonl_scaffolding_only_drops_rapport(tmp_path):
 
 def test_load_from_jsonl_scaffolding_only_omits_rapport_only_conversation(tmp_path):
     path = tmp_path / "ann.jsonl"
-    _write_jsonl(path, [
-        _record("c_rapport_only", "rapport", "t1", 1, 5),
-        _record("c_scaf", "scaffolding", "t2", 1, 5),
-    ])
+    _write_jsonl(
+        path,
+        [
+            _record("c_rapport_only", "rapport", "t1", 1, 5),
+            _record("c_scaf", "scaffolding", "t2", 1, 5),
+        ],
+    )
     convs = dict(load_from_jsonl(str(path), annotation_types=("scaffolding",)))
     assert "c_rapport_only" not in convs
     assert "c_scaf" in convs
@@ -70,10 +82,16 @@ def test_load_from_jsonl_scaffolding_only_omits_rapport_only_conversation(tmp_pa
 
 # --- _merge_scaffolding_only -----------------------------------------------
 
+
 def test_merge_preserves_existing_rapport_moments():
     new_scaf = [{"annotation_type": "scaffolding", "turn_start": 1, "turn_end": 5}]
     existing = [
-        {"annotation_type": "scaffolding", "turn_start": 1, "turn_end": 5, "stale": True},
+        {
+            "annotation_type": "scaffolding",
+            "turn_start": 1,
+            "turn_end": 5,
+            "stale": True,
+        },
         {"annotation_type": "rapport", "turn_start": 2, "turn_end": 8},
     ]
     merged = _merge_scaffolding_only(new_scaf, existing)

@@ -14,6 +14,7 @@ conv-ddd: cluster (1,3), votes=[2]     -> JSONL-only conv; STUDENT turn -> cut s
 
 import json
 from pathlib import Path
+
 import pytest
 
 FIXTURE_DIR = Path("tests/tutorsim_build/fixtures/build_src")
@@ -31,14 +32,17 @@ def _ids_for(*conv_ts_te_pairs):
 # Import guard — fails loudly if build_scenarios isn't implemented yet
 # ---------------------------------------------------------------------------
 
+
 def _import_build():
     from tutorsim_build.moments_build import build_moments as build_scenarios
+
     return build_scenarios
 
 
 # ---------------------------------------------------------------------------
 # Tests
 # ---------------------------------------------------------------------------
+
 
 class TestBuildScenarios:
     """All tests are fully hermetic -- fixture dirs only, no real data."""
@@ -81,10 +85,26 @@ class TestBuildScenarios:
         s = scenarios[0]
         # conv-aaa cut=4 (STUDENT at 4, stays). Prefix: turns 1-4
         assert len(s.context) == 4
-        assert s.context[0] == {"turn_number": 1, "role": "tutor", "text": "What is half of 6?"}
-        assert s.context[1] == {"turn_number": 2, "role": "student", "text": "I think it might be 3?"}
-        assert s.context[2] == {"turn_number": 3, "role": "tutor", "text": "Can you explain how you got that?"}
-        assert s.context[3] == {"turn_number": 4, "role": "student", "text": "I split it into two groups"}
+        assert s.context[0] == {
+            "turn_number": 1,
+            "role": "tutor",
+            "text": "What is half of 6?",
+        }
+        assert s.context[1] == {
+            "turn_number": 2,
+            "role": "student",
+            "text": "I think it might be 3?",
+        }
+        assert s.context[2] == {
+            "turn_number": 3,
+            "role": "tutor",
+            "text": "Can you explain how you got that?",
+        }
+        assert s.context[3] == {
+            "turn_number": 4,
+            "role": "student",
+            "text": "I split it into two groups",
+        }
         # Roles must be lowercased
         for turn in s.context:
             assert turn["role"] in ("tutor", "student")
@@ -124,12 +144,12 @@ class TestBuildScenarios:
         scenarios = self._build(ids)
         p = scenarios[0].provenance
         assert p["conv_id"] == "conv-aaa"
-        assert p["cut_turn"] == 4           # final adjusted cut
+        assert p["cut_turn"] == 4  # final adjusted cut
         assert p["turn_start"] == 3
         assert p["turn_end"] == 5
         assert p["moment_id"] == "m-001"
         assert "annotator_id" in p
-        assert p["chosen_cut_turn"] == 4    # pre-adjustment modal vote
+        assert p["chosen_cut_turn"] == 4  # pre-adjustment modal vote
         assert "cut_votes" in p
         assert "cluster_size" in p
 
@@ -148,8 +168,8 @@ class TestBuildScenarios:
         scenarios = self._build(ids)
         assert len(scenarios) == 1
         s = scenarios[0]
-        assert s.provenance["chosen_cut_turn"] == 3   # modal before adjustment
-        assert s.provenance["cut_turn"] == 2           # after TUTOR decrement
+        assert s.provenance["chosen_cut_turn"] == 3  # modal before adjustment
+        assert s.provenance["cut_turn"] == 2  # after TUTOR decrement
         # context should be prefix up to cut=2 (turns 1,2)
         assert len(s.context) == 2
 
@@ -186,6 +206,7 @@ class TestBuildScenariosJsonl:
 
     def _build(self, ids, tutoring_provider_a_jsonl=None, set_name="test"):
         from tutorsim_build.moments_build import build_moments as build_scenarios
+
         return build_scenarios(
             set_name=set_name,
             ids=ids,
@@ -250,9 +271,18 @@ _STUB_TRAIT = {
 }
 
 
-def _reference_run_record(cell, scenario_id, conv_id, cut_turn, *, dimension="scaffolding",
-                          ts=3, te=5, situation="Ref-run situation text",
-                          student_trait=_STUB_TRAIT):
+def _reference_run_record(
+    cell,
+    scenario_id,
+    conv_id,
+    cut_turn,
+    *,
+    dimension="scaffolding",
+    ts=3,
+    te=5,
+    situation="Ref-run situation text",
+    student_trait=_STUB_TRAIT,
+):
     rec = {
         "cell": cell,
         "tutor_model": cell.split("__")[0],
@@ -301,15 +331,24 @@ class TestBuildMomentsFromReferenceRun:
         """One Moment per unique scenario_id, sorted by id, across many cells."""
         records = [
             _reference_run_record("m1__plain", "conv-aaa__hum_3_5", "conv-aaa", 4),
-            _reference_run_record("m1__scaffolding_rigor", "conv-aaa__hum_3_5", "conv-aaa", 4),
-            _reference_run_record("m2__plain", "conv-ddd__hum_1_3", "conv-ddd", 2, ts=1, te=3),
+            _reference_run_record(
+                "m1__scaffolding_rigor", "conv-aaa__hum_3_5", "conv-aaa", 4
+            ),
+            _reference_run_record(
+                "m2__plain", "conv-ddd__hum_1_3", "conv-ddd", 2, ts=1, te=3
+            ),
         ]
         moments = self._build(records, tmp_path)
-        assert [m.id for m in moments] == ["test:conv-aaa__hum_3_5", "test:conv-ddd__hum_1_3"]
+        assert [m.id for m in moments] == [
+            "test:conv-aaa__hum_3_5",
+            "test:conv-ddd__hum_1_3",
+        ]
 
     def test_detection_payload_becomes_moment_fields(self, tmp_path):
         """dimension/gold/hint/provenance come from the run's frozen detection."""
-        records = [_reference_run_record("m1__plain", "conv-aaa__hum_3_5", "conv-aaa", 4)]
+        records = [
+            _reference_run_record("m1__plain", "conv-aaa__hum_3_5", "conv-aaa", 4)
+        ]
         (m,) = self._build(records, tmp_path)
         assert m.dimension == "scaffolding"
         assert m.rubric["gold"] == "scaffolding"
@@ -326,10 +365,16 @@ class TestBuildMomentsFromReferenceRun:
 
     def test_context_and_reference_derived_from_transcript(self, tmp_path):
         """context = prefix turns <= cut_turn; reference = post-cut turns."""
-        records = [_reference_run_record("m1__plain", "conv-aaa__hum_3_5", "conv-aaa", 4)]
+        records = [
+            _reference_run_record("m1__plain", "conv-aaa__hum_3_5", "conv-aaa", 4)
+        ]
         (m,) = self._build(records, tmp_path)
         assert [t["turn_number"] for t in m.context] == [1, 2, 3, 4]
-        assert m.context[3] == {"turn_number": 4, "role": "student", "text": "I split it into two groups"}
+        assert m.context[3] == {
+            "turn_number": 4,
+            "role": "student",
+            "text": "I split it into two groups",
+        }
         ref = m.student["reference"]
         assert "Turn 5." in ref and "Turn 7." in ref and "Turn 4." not in ref
         assert m.student["mode"] == "oracle"
@@ -337,7 +382,11 @@ class TestBuildMomentsFromReferenceRun:
 
     def test_jsonl_only_conv_resolves(self, tmp_path):
         """A conv present only in the normalized JSONL transcript pool builds fine."""
-        records = [_reference_run_record("m1__plain", "conv-ddd__hum_1_3", "conv-ddd", 2, ts=1, te=3)]
+        records = [
+            _reference_run_record(
+                "m1__plain", "conv-ddd__hum_1_3", "conv-ddd", 2, ts=1, te=3
+            )
+        ]
         (m,) = self._build(records, tmp_path)
         assert m.id == "test:conv-ddd__hum_1_3"
         assert [t["turn_number"] for t in m.context] == [1, 2]
@@ -346,14 +395,18 @@ class TestBuildMomentsFromReferenceRun:
         """A scenario whose conv has no transcript is skipped, not fatal."""
         records = [
             _reference_run_record("m1__plain", "conv-aaa__hum_3_5", "conv-aaa", 4),
-            _reference_run_record("m1__plain", "conv-zzz__hum_1_2", "conv-zzz", 1, ts=1, te=2),
+            _reference_run_record(
+                "m1__plain", "conv-zzz__hum_1_2", "conv-zzz", 1, ts=1, te=2
+            ),
         ]
         moments = self._build(records, tmp_path)
         assert [m.id for m in moments] == ["test:conv-aaa__hum_3_5"]
 
     def test_student_trait_embedded_from_run(self, tmp_path):
         """The run record's frozen student_trait lands verbatim in student.trait."""
-        records = [_reference_run_record("m1__plain", "conv-aaa__hum_3_5", "conv-aaa", 4)]
+        records = [
+            _reference_run_record("m1__plain", "conv-aaa__hum_3_5", "conv-aaa", 4)
+        ]
         (m,) = self._build(records, tmp_path)
         assert m.student["trait"] == _STUB_TRAIT
 
@@ -361,8 +414,11 @@ class TestBuildMomentsFromReferenceRun:
         """A run record without student_trait must fail the build loudly:
         the release contract is that every moment carries the paper's frozen
         persona, and a silent skip would ship a non-reproducible set."""
-        records = [_reference_run_record("m1__plain", "conv-aaa__hum_3_5", "conv-aaa", 4,
-                                         student_trait=None)]
+        records = [
+            _reference_run_record(
+                "m1__plain", "conv-aaa__hum_3_5", "conv-aaa", 4, student_trait=None
+            )
+        ]
         with pytest.raises(ValueError, match="student_trait"):
             self._build(records, tmp_path)
 
@@ -377,11 +433,24 @@ def test_write_release_emits_flat_manifest_and_schema(tmp_path):
         id="t:c__hum_1_2",
         context=[{"turn_number": 1, "role": "tutor", "text": "Q"}],
         dimension="rigor",
-        student={"mode": "oracle", "reference": "", "context": "", "trait": dict(_STUB_TRAIT)},
+        student={
+            "mode": "oracle",
+            "reference": "",
+            "context": "",
+            "trait": dict(_STUB_TRAIT),
+        },
         rubric={"gold": "rigor", "hint": ""},
-        provenance={"conv_id": "c", "cut_turn": 1, "turn_start": 1, "turn_end": 2,
-                    "moment_id": None, "annotator_id": "a", "chosen_cut_turn": 1,
-                    "cut_votes": {"1": 1}, "cluster_size": 1},
+        provenance={
+            "conv_id": "c",
+            "cut_turn": 1,
+            "turn_start": 1,
+            "turn_end": 2,
+            "moment_id": None,
+            "annotator_id": "a",
+            "chosen_cut_turn": 1,
+            "cut_votes": {"1": 1},
+            "cluster_size": 1,
+        },
     )
     write_release([m], tmp_path, set_name="t", created="2026-07-02")
 
@@ -407,9 +476,17 @@ def test_write_release_refuses_traitless_moment(tmp_path):
         dimension="rigor",
         student={"mode": "oracle", "reference": "", "context": ""},
         rubric={"gold": "rigor", "hint": ""},
-        provenance={"conv_id": "c", "cut_turn": 1, "turn_start": 1, "turn_end": 2,
-                    "moment_id": None, "annotator_id": "a", "chosen_cut_turn": 1,
-                    "cut_votes": {"1": 1}, "cluster_size": 1},
+        provenance={
+            "conv_id": "c",
+            "cut_turn": 1,
+            "turn_start": 1,
+            "turn_end": 2,
+            "moment_id": None,
+            "annotator_id": "a",
+            "chosen_cut_turn": 1,
+            "cut_votes": {"1": 1},
+            "cluster_size": 1,
+        },
     )
     with pytest.raises(ValueError, match="trait"):
         write_release([m], tmp_path, set_name="t", created="2026-07-02")
@@ -425,17 +502,32 @@ def test_validate_dataset_requires_traits(tmp_path):
         id="t:c__hum_1_2",
         context=[{"turn_number": 1, "role": "tutor", "text": "Q"}],
         dimension="rigor",
-        student={"mode": "oracle", "reference": "", "context": "", "trait": dict(_STUB_TRAIT)},
+        student={
+            "mode": "oracle",
+            "reference": "",
+            "context": "",
+            "trait": dict(_STUB_TRAIT),
+        },
         rubric={"gold": "rigor", "hint": ""},
-        provenance={"conv_id": "c", "cut_turn": 1, "turn_start": 1, "turn_end": 2,
-                    "moment_id": None, "annotator_id": "a", "chosen_cut_turn": 1,
-                    "cut_votes": {"1": 1}, "cluster_size": 1},
+        provenance={
+            "conv_id": "c",
+            "cut_turn": 1,
+            "turn_start": 1,
+            "turn_end": 2,
+            "moment_id": None,
+            "annotator_id": "a",
+            "chosen_cut_turn": 1,
+            "cut_votes": {"1": 1},
+            "cluster_size": 1,
+        },
     )
     write_release([m], tmp_path, set_name="t", created="2026-07-02")
 
     # Strip the persona from the written record, rewrite manifest hashes to match.
     import json as _json
-    from tutorsim.moments import file_sha256, records_content_hash, _read_moments_jsonl
+
+    from tutorsim.moments import _read_moments_jsonl, file_sha256, records_content_hash
+
     rec = _json.loads((tmp_path / "moments.jsonl").read_text())
     rec["student"].pop("trait")
     (tmp_path / "moments.jsonl").write_text(_json.dumps(rec) + "\n", encoding="utf-8")
@@ -443,7 +535,9 @@ def test_validate_dataset_requires_traits(tmp_path):
     loaded = _read_moments_jsonl(tmp_path / "moments.jsonl")
     manifest["content_hash"] = records_content_hash([x.to_dict() for x in loaded])
     manifest["file_sha256"] = file_sha256(tmp_path / "moments.jsonl")
-    (tmp_path / "moments.manifest.json").write_text(_json.dumps(manifest), encoding="utf-8")
+    (tmp_path / "moments.manifest.json").write_text(
+        _json.dumps(manifest), encoding="utf-8"
+    )
 
     with pytest.raises(ValueError, match="trait"):
         validate_dataset(tmp_path)

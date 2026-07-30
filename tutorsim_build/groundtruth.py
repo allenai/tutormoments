@@ -30,32 +30,49 @@ decompose/structure helpers are reused from tutorsim.client / tutorsim.scoring; 
 situation/effectiveness helpers from tutorsim_build.classify. Model/params come from the
 `groundtruth` config block (tutorsim.config.get_groundtruth_phase_config).
 """
+
 import hashlib
 import json
 from collections import Counter, defaultdict
 from pathlib import Path
 
-from tutorsim_build.classify import (
-    JUNK_TEXTS,
-    VALID_LABELS,
-    load_labeller_templates,
-    load_labeller_prompt,
-    load_situation_prompt,
-    pick_template,
-    _parse_situation_label,
+from tutorsim.config import get_groundtruth_phase_config, get_labeller_config
+from tutorsim.scoring import (
+    DEFAULT_RESULT_LABEL,
 )
 from tutorsim.scoring import (
     JUNK_TEXTS as DECOMPOSE_JUNK_TEXTS,
-    DEFAULT_RESULT_LABEL,
-    load_decompose_prompt as _load_decompose_prompt,
-    parse_decomposed as _parse_decomposed,
+)
+from tutorsim.scoring import (
     build_overscaffold_prompt as _build_overscaffold_prompt,
-    load_structure_prompt as _load_structure_prompt,
+)
+from tutorsim.scoring import (
     format_facet_list as _format_facet_list,
+)
+from tutorsim.scoring import (
+    load_decompose_prompt as _load_decompose_prompt,
+)
+from tutorsim.scoring import (
+    load_structure_prompt as _load_structure_prompt,
+)
+from tutorsim.scoring import (
     parse_action_label as _parse_action_label,
+)
+from tutorsim.scoring import (
+    parse_decomposed as _parse_decomposed,
+)
+from tutorsim.scoring import (
     parse_result_label as _parse_result_label,
 )
-from tutorsim.config import get_groundtruth_phase_config, get_labeller_config
+from tutorsim_build.classify import (
+    JUNK_TEXTS,
+    VALID_LABELS,
+    _parse_situation_label,
+    load_labeller_prompt,
+    load_labeller_templates,
+    load_situation_prompt,
+    pick_template,
+)
 
 # tutorsim_build/groundtruth.py -> tutorsim_build -> <repo root>
 REPO_ROOT = Path(__file__).resolve().parents[1]
@@ -63,7 +80,9 @@ DATA_DIR = REPO_ROOT / "data"
 
 # Default annotations input: the published HuggingFace release artifact (gitignored;
 # downloaded locally / from the release). Override with build_ground_truth(input_path=...).
-ANNOTATIONS_JSONL = DATA_DIR / "huggingface-release-20260630" / "tutoring_provider_a_annotations.jsonl"
+ANNOTATIONS_JSONL = (
+    DATA_DIR / "huggingface-release-20260630" / "tutoring_provider_a_annotations.jsonl"
+)
 
 # situate and decompose shared the same junk-text set as classify; alias for clarity.
 SIT_JUNK_TEXTS = JUNK_TEXTS
@@ -127,7 +146,10 @@ def load_from_jsonl(path, annotation_types=("scaffolding", "rapport")):
             annotator_id = record.get("annotator_id", "")
             annotation_type = record["annotation_type"]
             for ta in record.get("turn_annotations", []):
-                if ta.get("turn_number_start") is None or ta.get("turn_number_end") is None:
+                if (
+                    ta.get("turn_number_start") is None
+                    or ta.get("turn_number_end") is None
+                ):
                     continue
                 entry = {
                     "annotator_id": annotator_id,
@@ -150,7 +172,9 @@ def load_from_jsonl(path, annotation_types=("scaffolding", "rapport")):
         annotations.sort(key=lambda a: a["_timestamp"])
         for a in annotations:
             del a["_timestamp"]
-        num_turns = max((a["turn_end"] for a in annotations if a["turn_end"] is not None), default=0)
+        num_turns = max(
+            (a["turn_end"] for a in annotations if a["turn_end"] is not None), default=0
+        )
         result.append((conv_id, {"annotations": annotations, "num_turns": num_turns}))
     return result
 
@@ -239,11 +263,13 @@ def overscaffold_decompose_key(m):
     The over-scaffold prompt reads situation + action + result, so the cache key
     hashes all three (joined) -- a change to any of them re-decomposes.
     """
-    blob = "\x1f".join([
-        m.get("situation", "") or "",
-        m.get("action", "") or "",
-        m.get("result", "") or "",
-    ])
+    blob = "\x1f".join(
+        [
+            m.get("situation", "") or "",
+            m.get("action", "") or "",
+            m.get("result", "") or "",
+        ]
+    )
     return (
         m.get("annotator_id", ""),
         m.get("turn_start"),
@@ -270,7 +296,8 @@ def load_existing_overscaffold_decompositions(gt_dir):
         cache = {
             overscaffold_decompose_key(m): m["overscaffold_decomposed"]
             for m in d.get("key_moments", [])
-            if m.get("annotation_type") == "scaffolding" and "overscaffold_decomposed" in m
+            if m.get("annotation_type") == "scaffolding"
+            and "overscaffold_decomposed" in m
         }
         if cache:
             existing[f.stem] = cache
@@ -320,11 +347,25 @@ def load_existing_action_result_agg(gt_dir):
         with open(f, "r", encoding="utf-8") as fp:
             d = json.load(fp)
         cache = {}
-        for cluster_indices, cluster_moments in _scaffolding_clusters(d.get("key_moments", [])):
-            agg_a = next((m["action_direction_agg"] for m in cluster_moments
-                          if "action_direction_agg" in m), None)
-            agg_r = next((m["student_outcome_agg"] for m in cluster_moments
-                          if "student_outcome_agg" in m), None)
+        for cluster_indices, cluster_moments in _scaffolding_clusters(
+            d.get("key_moments", [])
+        ):
+            agg_a = next(
+                (
+                    m["action_direction_agg"]
+                    for m in cluster_moments
+                    if "action_direction_agg" in m
+                ),
+                None,
+            )
+            agg_r = next(
+                (
+                    m["student_outcome_agg"]
+                    for m in cluster_moments
+                    if "student_outcome_agg" in m
+                ),
+                None,
+            )
             if agg_a is None and agg_r is None:
                 continue
             unified_action, unified_result = _unify_facets(cluster_moments)
@@ -381,10 +422,7 @@ def _invalidate_decomp_cache(cache, field):
     if field == "both":
         return {}
     clear = "action" if field == "action" else "result"
-    return {
-        conv_id: {**sub, clear: {}}
-        for conv_id, sub in cache.items()
-    }
+    return {conv_id: {**sub, clear: {}} for conv_id, sub in cache.items()}
 
 
 def decompose_batch(items):
@@ -399,7 +437,7 @@ def decompose_batch(items):
     """
     if not items:
         return {}
-    from tutorsim.client import ModelClient, run_batch, build_batch_entry
+    from tutorsim.client import ModelClient, build_batch_entry, run_batch
 
     cfg = _phase_cfg()
     client = ModelClient(cfg["model"])
@@ -413,12 +451,17 @@ def decompose_batch(items):
     for it in items:
         if it["field"] == "overscaffold":
             prompt = _build_overscaffold_prompt(
-                it.get("situation", ""), it.get("action", ""), it.get("result", ""),
-                overscaffold_template)
+                it.get("situation", ""),
+                it.get("action", ""),
+                it.get("result", ""),
+                overscaffold_template,
+            )
             if prompt is None:  # both action and result are junk -- nothing to analyze
                 results[it["key"]] = []
                 continue
-            entries.append(build_batch_entry(key=it["key"], prompt_text=prompt, json_mode=True))
+            entries.append(
+                build_batch_entry(key=it["key"], prompt_text=prompt, json_mode=True)
+            )
             continue
         text = (it["text"] or "").strip()
         if text.lower() in DECOMPOSE_JUNK_TEXTS:
@@ -427,19 +470,25 @@ def decompose_batch(items):
         if it["field"] == "action":
             prompt = action_template.replace("{action}", text)
         else:
-            prompt = (result_template
-                      .replace("{situation}", it.get("situation", ""))
-                      .replace("{action}", it.get("action", ""))
-                      .replace("{result}", text))
-        entries.append(build_batch_entry(key=it["key"], prompt_text=prompt, json_mode=True))
+            prompt = (
+                result_template.replace("{situation}", it.get("situation", ""))
+                .replace("{action}", it.get("action", ""))
+                .replace("{result}", text)
+            )
+        entries.append(
+            build_batch_entry(key=it["key"], prompt_text=prompt, json_mode=True)
+        )
 
     if not entries:
         return results
 
-    print(f"  Submitting {len(entries)} decomposition requests to batch API "
-          f"(model={cfg['model']})...")
+    print(
+        f"  Submitting {len(entries)} decomposition requests to batch API "
+        f"(model={cfg['model']})..."
+    )
     raw = run_batch(
-        client, entries,
+        client,
+        entries,
         json_mode=True,
         display_name="decomposition",
         poll_interval=cfg.get("poll_interval", 60),
@@ -455,7 +504,9 @@ def decompose_batch(items):
             continue
         facets, had_error = _parse_decomposed(result["text"])
         if had_error:
-            print(f"  WARNING: could not parse decomposition for {key}: {result['text'][:100]!r}")
+            print(
+                f"  WARNING: could not parse decomposition for {key}: {result['text'][:100]!r}"
+            )
         results[key] = facets
 
     return results
@@ -472,23 +523,30 @@ def action_direction_classify_batch(items):
     """
     if not items:
         return {}
-    from tutorsim.client import ModelClient, run_batch, build_batch_entry
+    from tutorsim.client import ModelClient, build_batch_entry, run_batch
 
     cfg = _phase_cfg()
     client = ModelClient(cfg["model"])
     template = _load_structure_prompt("classify_action.md")
 
     entries = [
-        build_batch_entry(key=it["key"],
-                          prompt_text=template.replace("{action_list}", _format_facet_list(it["facets"])),
-                          json_mode=True)
+        build_batch_entry(
+            key=it["key"],
+            prompt_text=template.replace(
+                "{action_list}", _format_facet_list(it["facets"])
+            ),
+            json_mode=True,
+        )
         for it in items
     ]
 
-    print(f"  Submitting {len(entries)} action direction classifications to batch API "
-          f"(model={cfg['model']})...")
+    print(
+        f"  Submitting {len(entries)} action direction classifications to batch API "
+        f"(model={cfg['model']})..."
+    )
     results = run_batch(
-        client, entries,
+        client,
+        entries,
         json_mode=True,
         display_name="action_direction_agg_classification",
         poll_interval=cfg.get("poll_interval", 60),
@@ -505,7 +563,9 @@ def action_direction_classify_batch(items):
             continue
         label, had_error = _parse_action_label(result["text"])
         if had_error:
-            print(f"  WARNING: could not parse action direction label for {key}: {result['text'][:100]!r}")
+            print(
+                f"  WARNING: could not parse action direction label for {key}: {result['text'][:100]!r}"
+            )
         labels[key] = label
 
     return labels
@@ -522,23 +582,30 @@ def student_outcome_classify_batch(items):
     """
     if not items:
         return {}
-    from tutorsim.client import ModelClient, run_batch, build_batch_entry
+    from tutorsim.client import ModelClient, build_batch_entry, run_batch
 
     cfg = _phase_cfg()
     client = ModelClient(cfg["model"])
     template = _load_structure_prompt("classify_student_result.md")
 
     entries = [
-        build_batch_entry(key=it["key"],
-                          prompt_text=template.replace("{student_list}", _format_facet_list(it["facets"])),
-                          json_mode=False)
+        build_batch_entry(
+            key=it["key"],
+            prompt_text=template.replace(
+                "{student_list}", _format_facet_list(it["facets"])
+            ),
+            json_mode=False,
+        )
         for it in items
     ]
 
-    print(f"  Submitting {len(entries)} student outcome classifications to batch API "
-          f"(model={cfg['model']})...")
+    print(
+        f"  Submitting {len(entries)} student outcome classifications to batch API "
+        f"(model={cfg['model']})..."
+    )
     results = run_batch(
-        client, entries,
+        client,
+        entries,
         json_mode=False,
         display_name="student_outcome_agg_classification",
         poll_interval=cfg.get("poll_interval", 60),
@@ -555,7 +622,9 @@ def student_outcome_classify_batch(items):
             continue
         result_label, had_error = _parse_result_label(result["text"])
         if had_error:
-            print(f"  WARNING: could not parse student outcome label for {key}: {result['text'][:100]!r}")
+            print(
+                f"  WARNING: could not parse student outcome label for {key}: {result['text'][:100]!r}"
+            )
         labels[key] = result_label
 
     return labels
@@ -568,7 +637,7 @@ def situation_classify_batch(items):
     """
     if not items:
         return {}
-    from tutorsim.client import ModelClient, run_batch, build_batch_entry
+    from tutorsim.client import ModelClient, build_batch_entry, run_batch
 
     cfg = _phase_cfg()
     client = ModelClient(cfg["model"])
@@ -582,15 +651,20 @@ def situation_classify_batch(items):
             labels[it["key"]] = {"scaffolding": "unclear", "rigor": "unclear"}
             continue
         prompt = prompt_template.replace("{situation}", situation)
-        entries.append(build_batch_entry(key=it["key"], prompt_text=prompt, json_mode=True))
+        entries.append(
+            build_batch_entry(key=it["key"], prompt_text=prompt, json_mode=True)
+        )
 
     if not entries:
         return labels
 
-    print(f"  Submitting {len(entries)} situation classifications to batch API "
-          f"(model={cfg['model']})...")
+    print(
+        f"  Submitting {len(entries)} situation classifications to batch API "
+        f"(model={cfg['model']})..."
+    )
     results = run_batch(
-        client, entries,
+        client,
+        entries,
         json_mode=True,
         display_name="situation_classification",
         poll_interval=cfg.get("poll_interval", 60),
@@ -606,7 +680,9 @@ def situation_classify_batch(items):
             continue
         sit_label, had_error = _parse_situation_label(result["text"])
         if had_error:
-            print(f"  WARNING: could not parse situation label for {key}: {result['text'][:100]!r}")
+            print(
+                f"  WARNING: could not parse situation label for {key}: {result['text'][:100]!r}"
+            )
         labels[key] = sit_label
 
     return labels
@@ -622,7 +698,7 @@ def classify_batch(items, labeller="hybrid"):
     """
     if not items:
         return {}
-    from tutorsim.client import ModelClient, run_batch, build_batch_entry
+    from tutorsim.client import ModelClient, build_batch_entry, run_batch
 
     cfg = _phase_cfg()
     client = ModelClient(cfg["model"])
@@ -642,24 +718,30 @@ def classify_batch(items, labeller="hybrid"):
             continue
         annotation_type = it.get("annotation_type", "unknown")
         template = pick_template(templates, annotation_type)
-        prompt = (template
-                  .replace("{annotation_type}", annotation_type)
-                  .replace("{situation}", it.get("situation", ""))
-                  .replace("{action}", it.get("action", ""))
-                  .replace("{result_text}", text))
-        entries.append(build_batch_entry(
-            key=it["key"],
-            prompt_text=prompt,
-            json_mode=False,
-        ))
+        prompt = (
+            template.replace("{annotation_type}", annotation_type)
+            .replace("{situation}", it.get("situation", ""))
+            .replace("{action}", it.get("action", ""))
+            .replace("{result_text}", text)
+        )
+        entries.append(
+            build_batch_entry(
+                key=it["key"],
+                prompt_text=prompt,
+                json_mode=False,
+            )
+        )
 
     if not entries:
         return labels
 
-    print(f"  Submitting {len(entries)} classifications to Anthropic batch API "
-          f"(model={cfg['model']})...")
+    print(
+        f"  Submitting {len(entries)} classifications to Anthropic batch API "
+        f"(model={cfg['model']})..."
+    )
     results = run_batch(
-        client, entries,
+        client,
+        entries,
         json_mode=False,
         display_name="effectiveness_classification_refresh",
         poll_interval=cfg.get("poll_interval", 60),
@@ -732,7 +814,9 @@ def _scaffolding_clusters(moments, threshold=1.0):
     are indices into `moments` and cluster_moments are the corresponding dicts
     (in the same order).
     """
-    scaf_idxs = [i for i, m in enumerate(moments) if m.get("annotation_type") == "scaffolding"]
+    scaf_idxs = [
+        i for i, m in enumerate(moments) if m.get("annotation_type") == "scaffolding"
+    ]
     if not scaf_idxs:
         return []
     scaf_moments = [moments[i] for i in scaf_idxs]
@@ -777,9 +861,9 @@ def _majority_vote_tuple(tuples):
 
 _TUPLE_TO_AGG = {
     ("yes", "yes"): "both",
-    ("yes", "no"):  "scaffolding",
-    ("no",  "yes"): "rigor",
-    ("no",  "no"):  "neither",
+    ("yes", "no"): "scaffolding",
+    ("no", "yes"): "rigor",
+    ("no", "no"): "neither",
 }
 
 
@@ -818,7 +902,9 @@ def compute_situation_label_agg(moments):
     return result
 
 
-def plan_action_result_agg(conv_id, moments, cached_agg, to_action_direction, to_student_outcome):
+def plan_action_result_agg(
+    conv_id, moments, cached_agg, to_action_direction, to_student_outcome
+):
     """Plan action_direction_agg / student_outcome_agg for one conversation's clusters.
 
     For each cluster of overlapping scaffolding moments (IoU >= 1.0), unifies the
@@ -839,8 +925,11 @@ def plan_action_result_agg(conv_id, moments, cached_agg, to_action_direction, to
         cached_entry = cached_convo.get(sig)
         tag = "_".join(str(i) for i in cluster_indices)
 
-        if (cached_entry and cached_entry["action_direction_agg"] is not None
-                and cached_entry["unified_action"] == unified_action):
+        if (
+            cached_entry
+            and cached_entry["action_direction_agg"] is not None
+            and cached_entry["unified_action"] == unified_action
+        ):
             action_item = ("reuse", cached_entry["action_direction_agg"])
         elif unified_action:
             akey = f"{conv_id}__{tag}__action_agg"
@@ -849,8 +938,11 @@ def plan_action_result_agg(conv_id, moments, cached_agg, to_action_direction, to
         else:
             action_item = ("default", "unknown")
 
-        if (cached_entry and cached_entry["student_outcome_agg"] is not None
-                and cached_entry["unified_result"] == unified_result):
+        if (
+            cached_entry
+            and cached_entry["student_outcome_agg"] is not None
+            and cached_entry["unified_result"] == unified_result
+        ):
             result_item = ("reuse", cached_entry["student_outcome_agg"])
         elif unified_result:
             rkey = f"{conv_id}__{tag}__result_agg"
@@ -873,7 +965,9 @@ def _merge_scaffolding_only(new_moments, existing_moments):
     moment whose annotation_type is not "scaffolding" is carried through unchanged.
     Returns new_moments followed by the preserved moments.
     """
-    preserved = [m for m in existing_moments if m.get("annotation_type") != "scaffolding"]
+    preserved = [
+        m for m in existing_moments if m.get("annotation_type") != "scaffolding"
+    ]
     return list(new_moments) + preserved
 
 
@@ -895,9 +989,9 @@ def build_moment(ann, label):
     return moment
 
 
-def validate_ground_truth(ground_truth: dict, *,
-                          all_moments: tuple = (),
-                          scaffolding_only: tuple = ()) -> None:
+def validate_ground_truth(
+    ground_truth: dict, *, all_moments: tuple = (), scaffolding_only: tuple = ()
+) -> None:
     """Assert required keys exist on ground-truth moments; raise if any are absent.
 
     A missing key here means the ground-truth input is corrupt for this run.
@@ -952,9 +1046,18 @@ def _consolidate_to_jsonl(out_dir: Path, jsonl_path: Path) -> int:
     return n
 
 
-def build_ground_truth(*, input_path, out_dir, labeller="hybrid", dry_run=False,
-                       scaffolding_only=False, refresh_agg=None, refresh_decomp=None,
-                       refresh_overscaffold=False, consolidate=False):
+def build_ground_truth(
+    *,
+    input_path,
+    out_dir,
+    labeller="hybrid",
+    dry_run=False,
+    scaffolding_only=False,
+    refresh_agg=None,
+    refresh_decomp=None,
+    refresh_overscaffold=False,
+    consolidate=False,
+):
     """Build ground-truth JSON from raw human annotations.
 
     Reads annotations from `input_path`, reuses cached enrichment from any existing
@@ -971,11 +1074,15 @@ def build_ground_truth(*, input_path, out_dir, labeller="hybrid", dry_run=False,
     if not input_path.exists():
         raise FileNotFoundError(f"input file not found: {input_path}")
 
-    annotation_types = ("scaffolding",) if scaffolding_only else ("scaffolding", "rapport")
+    annotation_types = (
+        ("scaffolding",) if scaffolding_only else ("scaffolding", "rapport")
+    )
     print(f"Loading annotations from {input_path}...")
     if scaffolding_only:
-        print("--scaffolding-only: skipping rapport records; existing rapport moments "
-              "will be preserved on write")
+        print(
+            "--scaffolding-only: skipping rapport records; existing rapport moments "
+            "will be preserved on write"
+        )
     conversations = load_from_jsonl(input_path, annotation_types=annotation_types)
     print(f"Loaded {len(conversations)} conversations")
 
@@ -983,40 +1090,66 @@ def build_ground_truth(*, input_path, out_dir, labeller="hybrid", dry_run=False,
     print(f"Loaded existing strategy labels for {len(existing_labels)} conversations")
     existing_situation_labels = load_existing_situation_labels(out_dir)
     sit_cache_total = sum(len(v) for v in existing_situation_labels.values())
-    print(f"Loaded existing situation labels for {len(existing_situation_labels)} conversations ({sit_cache_total} moments)")
+    print(
+        f"Loaded existing situation labels for {len(existing_situation_labels)} conversations ({sit_cache_total} moments)"
+    )
     existing_decompositions = load_existing_decompositions(out_dir)
-    decomp_action_total = sum(len(v.get("action", {})) for v in existing_decompositions.values())
-    decomp_result_total = sum(len(v.get("result", {})) for v in existing_decompositions.values())
-    print(f"Loaded existing decompositions: {decomp_action_total} action, {decomp_result_total} result")
+    decomp_action_total = sum(
+        len(v.get("action", {})) for v in existing_decompositions.values()
+    )
+    decomp_result_total = sum(
+        len(v.get("result", {})) for v in existing_decompositions.values()
+    )
+    print(
+        f"Loaded existing decompositions: {decomp_action_total} action, {decomp_result_total} result"
+    )
     if refresh_decomp:
-        existing_decompositions = _invalidate_decomp_cache(existing_decompositions, refresh_decomp)
-        decomp_field_desc = {"both": "action and result", "action": "action only",
-                             "result": "result only"}[refresh_decomp]
+        existing_decompositions = _invalidate_decomp_cache(
+            existing_decompositions, refresh_decomp
+        )
+        decomp_field_desc = {
+            "both": "action and result",
+            "action": "action only",
+            "result": "result only",
+        }[refresh_decomp]
         print(f"--refresh-decomp={refresh_decomp}: re-decomposing {decomp_field_desc}")
     existing_overscaffold = load_existing_overscaffold_decompositions(out_dir)
     overscaffold_cache_total = sum(len(v) for v in existing_overscaffold.values())
-    print(f"Loaded existing over-scaffold decompositions for {len(existing_overscaffold)} conversations ({overscaffold_cache_total} moments)")
+    print(
+        f"Loaded existing over-scaffold decompositions for {len(existing_overscaffold)} conversations ({overscaffold_cache_total} moments)"
+    )
     if refresh_overscaffold:
         existing_overscaffold = {}
-        print("--refresh-overscaffold: re-decomposing over-scaffolding for all scaffolding moments")
+        print(
+            "--refresh-overscaffold: re-decomposing over-scaffolding for all scaffolding moments"
+        )
     existing_action_result_agg = load_existing_action_result_agg(out_dir)
     if refresh_agg:
-        existing_action_result_agg = _invalidate_agg_cache(existing_action_result_agg, refresh_agg)
-        field_desc = {"both": "action and result", "action": "action only",
-                      "result": "result only"}[refresh_agg]
-        print(f"--refresh-agg={refresh_agg}: reclassifying {field_desc} "
-              f"aggregation(s) for scaffolding clusters")
+        existing_action_result_agg = _invalidate_agg_cache(
+            existing_action_result_agg, refresh_agg
+        )
+        field_desc = {
+            "both": "action and result",
+            "action": "action only",
+            "result": "result only",
+        }[refresh_agg]
+        print(
+            f"--refresh-agg={refresh_agg}: reclassifying {field_desc} "
+            f"aggregation(s) for scaffolding clusters"
+        )
     else:
         agg_cache_total = sum(len(v) for v in existing_action_result_agg.values())
-        print(f"Loaded existing action/result aggregations for {len(existing_action_result_agg)} conversations ({agg_cache_total} clusters)")
+        print(
+            f"Loaded existing action/result aggregations for {len(existing_action_result_agg)} conversations ({agg_cache_total} clusters)"
+        )
 
     # First pass: build per-conv plan (reuse vs classify) for both strategy and situation labels
     conv_plans = []
-    to_classify = []           # [{key, annotation_type, situation, action, result_text}]
+    to_classify = []  # [{key, annotation_type, situation, action, result_text}]
     to_situation_classify = []  # [{key, situation}] -- scaffolding moments only
-    to_decompose = []          # [{key, field, text}]
-    situation_plans = {}       # {conv_id: [s_item, ...]} parallel to plan
-    decompose_plans = {}       # {conv_id: [(action_item, result_item, overscaffold_item), ...]}
+    to_decompose = []  # [{key, field, text}]
+    situation_plans = {}  # {conv_id: [s_item, ...]} parallel to plan
+    decompose_plans = {}  # {conv_id: [(action_item, result_item, overscaffold_item), ...]}
     skipped_dup_count = 0
 
     for conv_id, conv_data in conversations:
@@ -1047,13 +1180,15 @@ def build_ground_truth(*, input_path, out_dir, labeller="hybrid", dry_run=False,
                 plan.append(("reuse", ann, known[k]))
             else:
                 ckey = f"{conv_id}__{idx}"
-                to_classify.append({
-                    "key": ckey,
-                    "annotation_type": ann.get("annotation_type", "unknown"),
-                    "situation": ann.get("situation", ""),
-                    "action": ann.get("action", ""),
-                    "result_text": ann.get("result", ""),
-                })
+                to_classify.append(
+                    {
+                        "key": ckey,
+                        "annotation_type": ann.get("annotation_type", "unknown"),
+                        "situation": ann.get("situation", ""),
+                        "action": ann.get("action", ""),
+                        "result_text": ann.get("result", ""),
+                    }
+                )
                 plan.append(("classify", ann, ckey))
 
             if ann.get("annotation_type") == "scaffolding":
@@ -1062,7 +1197,9 @@ def build_ground_truth(*, input_path, out_dir, labeller="hybrid", dry_run=False,
                     s_plan.append(("reuse", known_s[sk]))
                 else:
                     skey = f"{conv_id}__{idx}__sit"
-                    to_situation_classify.append({"key": skey, "situation": ann.get("situation", "")})
+                    to_situation_classify.append(
+                        {"key": skey, "situation": ann.get("situation", "")}
+                    )
                     s_plan.append(("classify", skey))
             else:
                 s_plan.append(None)
@@ -1072,7 +1209,9 @@ def build_ground_truth(*, input_path, out_dir, labeller="hybrid", dry_run=False,
                 action_item = ("reuse", known_action_decomp[ak])
             else:
                 dkey = f"{conv_id}__{idx}__action"
-                to_decompose.append({"key": dkey, "field": "action", "text": ann.get("action", "")})
+                to_decompose.append(
+                    {"key": dkey, "field": "action", "text": ann.get("action", "")}
+                )
                 action_item = ("classify", dkey)
 
             rk = result_decompose_key(ann)
@@ -1080,8 +1219,15 @@ def build_ground_truth(*, input_path, out_dir, labeller="hybrid", dry_run=False,
                 result_item = ("reuse", known_result_decomp[rk])
             else:
                 dkey = f"{conv_id}__{idx}__result"
-                to_decompose.append({"key": dkey, "field": "result", "text": ann.get("result", ""),
-                                     "situation": ann.get("situation", ""), "action": ann.get("action", "")})
+                to_decompose.append(
+                    {
+                        "key": dkey,
+                        "field": "result",
+                        "text": ann.get("result", ""),
+                        "situation": ann.get("situation", ""),
+                        "action": ann.get("action", ""),
+                    }
+                )
                 result_item = ("classify", dkey)
 
             # Over-scaffolding decomposition: scaffolding moments only.
@@ -1091,10 +1237,15 @@ def build_ground_truth(*, input_path, out_dir, labeller="hybrid", dry_run=False,
                     overscaffold_item = ("reuse", known_overscaffold_decomp[ok])
                 else:
                     okey = f"{conv_id}__{idx}__overscaffold"
-                    to_decompose.append({"key": okey, "field": "overscaffold",
-                                         "situation": ann.get("situation", ""),
-                                         "action": ann.get("action", ""),
-                                         "result": ann.get("result", "")})
+                    to_decompose.append(
+                        {
+                            "key": okey,
+                            "field": "overscaffold",
+                            "situation": ann.get("situation", ""),
+                            "action": ann.get("action", ""),
+                            "result": ann.get("result", ""),
+                        }
+                    )
                     overscaffold_item = ("classify", okey)
             else:
                 overscaffold_item = None
@@ -1109,11 +1260,24 @@ def build_ground_truth(*, input_path, out_dir, labeller="hybrid", dry_run=False,
     reused = sum(1 for _, _, p in conv_plans for kind, *_ in p if kind == "reuse")
     to_class = total_moments - reused
     new_convs = sum(1 for cid, _, _ in conv_plans if cid not in existing_labels)
-    sit_reused = sum(1 for sp in situation_plans.values() for item in sp if item and item[0] == "reuse")
-    decomp_action_reused = sum(1 for dp in decompose_plans.values() for a, _, _ in dp if a[0] == "reuse")
-    decomp_result_reused = sum(1 for dp in decompose_plans.values() for _, r, _ in dp if r[0] == "reuse")
+    sit_reused = sum(
+        1
+        for sp in situation_plans.values()
+        for item in sp
+        if item and item[0] == "reuse"
+    )
+    decomp_action_reused = sum(
+        1 for dp in decompose_plans.values() for a, _, _ in dp if a[0] == "reuse"
+    )
+    decomp_result_reused = sum(
+        1 for dp in decompose_plans.values() for _, r, _ in dp if r[0] == "reuse"
+    )
     decomp_overscaffold_reused = sum(
-        1 for dp in decompose_plans.values() for _, _, o in dp if o is not None and o[0] == "reuse")
+        1
+        for dp in decompose_plans.values()
+        for _, _, o in dp
+        if o is not None and o[0] == "reuse"
+    )
     new_overscaffold = sum(1 for it in to_decompose if it["field"] == "overscaffold")
 
     print(f"Plan: {len(conv_plans)} conversations, {total_moments} moments")
@@ -1125,8 +1289,10 @@ def build_ground_truth(*, input_path, out_dir, labeller="hybrid", dry_run=False,
     print(f"  Reuse existing action decomps:    {decomp_action_reused}")
     print(f"  Reuse existing result decomps:    {decomp_result_reused}")
     print(f"  Reuse existing overscaffold decomps: {decomp_overscaffold_reused}")
-    print(f"  New decompositions (action+result+overscaffold): {len(to_decompose)} "
-          f"({new_overscaffold} overscaffold)")
+    print(
+        f"  New decompositions (action+result+overscaffold): {len(to_decompose)} "
+        f"({new_overscaffold} overscaffold)"
+    )
     print(f"  Brand new conversations:          {new_convs}")
 
     summary = {
@@ -1161,7 +1327,9 @@ def build_ground_truth(*, input_path, out_dir, labeller="hybrid", dry_run=False,
             return None
         if s_item[0] == "reuse":
             return s_item[1]
-        return new_situation_labels.get(s_item[1], {"scaffolding": "unclear", "rigor": "unclear"})
+        return new_situation_labels.get(
+            s_item[1], {"scaffolding": "unclear", "rigor": "unclear"}
+        )
 
     # Third pass: build moments (everything except action_direction_agg / student_outcome_agg)
     conv_moments = {}  # {conv_id: (conv_data, moments)}
@@ -1169,23 +1337,30 @@ def build_ground_truth(*, input_path, out_dir, labeller="hybrid", dry_run=False,
         s_plan = situation_plans[conv_id]
         d_plan = decompose_plans[conv_id]
         moments = []
-        for (kind, ann, val), s_item, (action_item, result_item, overscaffold_item) in zip(plan, s_plan, d_plan):
+        for (kind, ann, val), s_item, (
+            action_item,
+            result_item,
+            overscaffold_item,
+        ) in zip(plan, s_plan, d_plan):
             label = val if kind == "reuse" else new_labels.get(val, "unclear")
             moment = build_moment(ann, label)
             sit = _resolve_situation(s_item)
             if sit is not None:
                 moment["situation_label"] = sit
             moment["action_decomposed"] = (
-                action_item[1] if action_item[0] == "reuse"
+                action_item[1]
+                if action_item[0] == "reuse"
                 else new_decompositions.get(action_item[1], [])
             )
             moment["result_decomposed"] = (
-                result_item[1] if result_item[0] == "reuse"
+                result_item[1]
+                if result_item[0] == "reuse"
                 else new_decompositions.get(result_item[1], [])
             )
             if overscaffold_item is not None:  # scaffolding moments only
                 moment["overscaffold_decomposed"] = (
-                    overscaffold_item[1] if overscaffold_item[0] == "reuse"
+                    overscaffold_item[1]
+                    if overscaffold_item[0] == "reuse"
                     else new_decompositions.get(overscaffold_item[1], [])
                 )
             moments.append(moment)
@@ -1196,10 +1371,15 @@ def build_ground_truth(*, input_path, out_dir, labeller="hybrid", dry_run=False,
 
     # Fourth pass: plan action_direction_agg / student_outcome_agg per scaffolding cluster
     to_action_direction = []  # [{key, facets}]
-    to_student_outcome = []   # [{key, facets}]
+    to_student_outcome = []  # [{key, facets}]
     agg_plans = {
-        conv_id: plan_action_result_agg(conv_id, moments, existing_action_result_agg,
-                                         to_action_direction, to_student_outcome)
+        conv_id: plan_action_result_agg(
+            conv_id,
+            moments,
+            existing_action_result_agg,
+            to_action_direction,
+            to_student_outcome,
+        )
         for conv_id, (_, moments) in conv_moments.items()
     }
     n_clusters = sum(len(ap) for ap in agg_plans.values())
@@ -1212,20 +1392,24 @@ def build_ground_truth(*, input_path, out_dir, labeller="hybrid", dry_run=False,
     print(f"  Reuse cached student outcome labels:    {result_kinds['reuse']}")
     print(f"  Default student outcome (no facets):    {result_kinds['default']}")
     print(f"  Classify new student outcome labels:    {result_kinds['classify']}")
-    summary.update({
-        "scaffolding_clusters": n_clusters,
-        "reuse_action_agg": action_kinds["reuse"],
-        "default_action_agg": action_kinds["default"],
-        "classify_action_agg": action_kinds["classify"],
-        "reuse_result_agg": result_kinds["reuse"],
-        "default_result_agg": result_kinds["default"],
-        "classify_result_agg": result_kinds["classify"],
-    })
+    summary.update(
+        {
+            "scaffolding_clusters": n_clusters,
+            "reuse_action_agg": action_kinds["reuse"],
+            "default_action_agg": action_kinds["default"],
+            "classify_action_agg": action_kinds["classify"],
+            "reuse_result_agg": result_kinds["reuse"],
+            "default_result_agg": result_kinds["default"],
+            "classify_result_agg": result_kinds["classify"],
+        }
+    )
     pending_ar = sum(1 for it in to_decompose if it["field"] in ("action", "result"))
     if dry_run and pending_ar:
-        print(f"  NOTE: {pending_ar} action/result decompositions are pending -- "
-              f"clusters touching them used placeholder (empty) facets above, so their "
-              f"reuse/classify counts are estimates and may change once decomposition runs")
+        print(
+            f"  NOTE: {pending_ar} action/result decompositions are pending -- "
+            f"clusters touching them used placeholder (empty) facets above, so their "
+            f"reuse/classify counts are estimates and may change once decomposition runs"
+        )
 
     if dry_run:
         print("\nDry run -- exiting without classifying or writing.")
@@ -1239,10 +1423,18 @@ def build_ground_truth(*, input_path, out_dir, labeller="hybrid", dry_run=False,
     gt_written = 0
     for conv_id, (conv_data, moments) in conv_moments.items():
         for cluster_indices, action_item, result_item in agg_plans[conv_id]:
-            action_label = (action_item[1] if action_item[0] != "classify"
-                            else new_action_direction_labels.get(action_item[1], "neither"))
-            result_label = (result_item[1] if result_item[0] != "classify"
-                            else new_student_outcome_labels.get(result_item[1], DEFAULT_RESULT_LABEL))
+            action_label = (
+                action_item[1]
+                if action_item[0] != "classify"
+                else new_action_direction_labels.get(action_item[1], "neither")
+            )
+            result_label = (
+                result_item[1]
+                if result_item[0] != "classify"
+                else new_student_outcome_labels.get(
+                    result_item[1], DEFAULT_RESULT_LABEL
+                )
+            )
             for idx in cluster_indices:
                 moments[idx]["action_direction_agg"] = action_label
                 moments[idx]["student_outcome_agg"] = result_label

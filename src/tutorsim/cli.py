@@ -24,6 +24,7 @@ No module-level SDK imports.
 ASCII console output only (no Unicode / em-dash / box-drawing).
 All file I/O is UTF-8.
 """
+
 import argparse
 import datetime
 import hashlib
@@ -46,6 +47,7 @@ logger = logging.getLogger("tutorsim.cli")
 # ---------------------------------------------------------------------------
 # Cell expansion + lane scheduling
 # ---------------------------------------------------------------------------
+
 
 def expand_cells(tutors: list[str], modes: list[str]) -> list[dict]:
     """Expand (tutors x modes) into one cell dict per combination.
@@ -116,7 +118,9 @@ def run_sweep(
         lane_run_ids = []
         for idx, cell in enumerate(lane_cells, 1):
             with log_context(f"{cell['tutor']}/{cell['mode']}"):
-                logger.info("Starting cell %d/%d on lane %s", idx, len(lane_cells), lane)
+                logger.info(
+                    "Starting cell %d/%d on lane %s", idx, len(lane_cells), lane
+                )
                 rid = _run_cell_fn(
                     cell["tutor"],
                     cell["mode"],
@@ -144,11 +148,13 @@ def run_sweep(
 # Lazy module imports (no module-level SDK imports)
 # ---------------------------------------------------------------------------
 
+
 def _import_modules():
     """Import heavy modules lazily to avoid SDK import at module level."""
-    from tutorsim import conversation, scoring, results, report
+    from tutorsim import conversation, report, results, scoring
     from tutorsim.config import build_run_config
     from tutorsim.moments import load_moments
+
     return conversation, scoring, results, report, build_run_config, load_moments
 
 
@@ -156,9 +162,9 @@ def _import_modules():
 # These are imported at function call time, not at module load time,
 # but we re-export references so patch targets resolve correctly.
 import tutorsim.conversation as conversation
-import tutorsim.scoring as scoring
-import tutorsim.results as results
 import tutorsim.report as report
+import tutorsim.results as results
+import tutorsim.scoring as scoring
 from tutorsim.config import build_run_config
 from tutorsim.logging_setup import (
     bind_worker_logging,
@@ -231,6 +237,7 @@ def _resource_hashes(root: str) -> dict[str, str]:
 # Trials aggregation helpers
 # ---------------------------------------------------------------------------
 
+
 def _mean_spread(values: list) -> tuple[float | None, float | None]:
     """Return (mean, std) for a list of numeric values; None for empty/all-None."""
     nums = [v for v in values if v is not None]
@@ -258,6 +265,7 @@ def _aggregate_trials(trial_metrics: list[dict], n_trials: int) -> dict:
       scaffold_calibrated.{n_clean_yes, n_overscaffold, n_total, score},
       rigor_calibrated.{n_clean_yes, n_total, score}.
     """
+
     def _field(dicts, *keys):
         """Extract a nested field from each dict in dicts."""
         vals = []
@@ -283,20 +291,26 @@ def _aggregate_trials(trial_metrics: list[dict], n_trials: int) -> dict:
     m_nscen, s_nscen = _mean_spread(_field(trial_metrics, "n_scenarios"))
 
     # sub-dicts
-    m_over, s_over = _sub_mean_spread(trial_metrics, "overscaffold", ["n_yes", "n_total", "rate"])
+    m_over, s_over = _sub_mean_spread(
+        trial_metrics, "overscaffold", ["n_yes", "n_total", "rate"]
+    )
 
     # scaffold_calibrated has an extra field
     m_sc, s_sc = _sub_mean_spread(
-        trial_metrics, "scaffold_calibrated",
+        trial_metrics,
+        "scaffold_calibrated",
         ["n_clean_yes", "n_overscaffold", "n_total", "score"],
     )
     m_rc, s_rc = _sub_mean_spread(
-        trial_metrics, "rigor_calibrated",
+        trial_metrics,
+        "rigor_calibrated",
         ["n_clean_yes", "n_total", "score"],
     )
 
     # "available" is boolean -- take first trial's value (invariant across trials)
-    over_available = (trial_metrics[0].get("overscaffold") or {}).get("available", False)
+    over_available = (trial_metrics[0].get("overscaffold") or {}).get(
+        "available", False
+    )
 
     mean_dict = {
         "n_scenarios": m_nscen,
@@ -322,6 +336,7 @@ def _aggregate_trials(trial_metrics: list[dict], n_trials: int) -> dict:
 # Public API: run_cell
 # ---------------------------------------------------------------------------
 
+
 def _classify_run_taxonomy(run_dir, annotations, scenarios, *, tutor, mode):
     """Run the always-on action-taxonomy classification for a completed cell.
 
@@ -331,15 +346,18 @@ def _classify_run_taxonomy(run_dir, annotations, scenarios, *, tutor, mode):
     classifier model comes from the `taxonomy` config block.
     """
     from tutorsim import taxonomy
+
     out_dir = os.path.join(run_dir, "taxonomy")
     try:
         return taxonomy.classify_run(
-            annotations, scenarios, out_dir, model=tutor, mode=mode,
+            annotations,
+            scenarios,
+            out_dir,
+            model=tutor,
+            mode=mode,
         )
     except Exception as e:  # best-effort: never fail the run on taxonomy
-        logger.warning(
-            "Taxonomy classification failed (run metrics unaffected): %s", e
-        )
+        logger.warning("Taxonomy classification failed (run metrics unaffected): %s", e)
         return {"error": str(e)}
 
 
@@ -433,16 +451,18 @@ def run_cell(
             "reproducibility": {
                 "tutorsim_version": _package_version(),
                 "git_commit": _git_commit(),
-                "config_hash": _json_sha256({
-                    "student": cfg.student,
-                    "scorer": cfg.scorer,
-                    "resolved_tutors": cfg.resolved_tutors,
-                    "defaults": {
-                        "sample": cfg.sample,
-                        "max_turns": cfg.max_turns,
-                        "trials": cfg.trials,
-                    },
-                }),
+                "config_hash": _json_sha256(
+                    {
+                        "student": cfg.student,
+                        "scorer": cfg.scorer,
+                        "resolved_tutors": cfg.resolved_tutors,
+                        "defaults": {
+                            "sample": cfg.sample,
+                            "max_turns": cfg.max_turns,
+                            "trials": cfg.trials,
+                        },
+                    }
+                ),
                 "prompt_hashes": _resource_hashes("prompts"),
                 "dataset_manifest": dataset_manifest,
             },
@@ -460,8 +480,18 @@ def run_cell(
 
         _EMPTY_METRICS = {
             "n_scenarios": 0,
-            "overscaffold": {"n_yes": 0, "n_total": 0, "rate": None, "available": False},
-            "scaffold_calibrated": {"n_clean_yes": 0, "n_overscaffold": 0, "n_total": 0, "score": None},
+            "overscaffold": {
+                "n_yes": 0,
+                "n_total": 0,
+                "rate": None,
+                "available": False,
+            },
+            "scaffold_calibrated": {
+                "n_clean_yes": 0,
+                "n_overscaffold": 0,
+                "n_total": 0,
+                "score": None,
+            },
             "rigor_calibrated": {"n_clean_yes": 0, "n_total": 0, "score": None},
         }
 
@@ -530,10 +560,13 @@ def run_cell(
             #      to_score is byte-identical regardless of completion order.
             logger.info(
                 "Starting Replay (trial %d/%d): %d moments, student=%s (%s), max_turns=%s, concurrency=%d",
-                trial_idx, n_trials, n_total,
+                trial_idx,
+                n_trials,
+                n_total,
                 (cfg.student or {}).get("model"),
                 (cfg.student or {}).get("mode", "oracle"),
-                cfg.max_turns, replay_concurrency,
+                cfg.max_turns,
+                replay_concurrency,
             )
 
             # ---- Stage 1: sequential planning pass (resume decisions) ----
@@ -549,10 +582,19 @@ def run_cell(
 
                 # Resume: skip if both transcript and score already exist
                 if results.is_done(run_id, resume_sid, results_root=results_root):
-                    logger.info("[trial %d][%d/%d] SKIP (already done): %s", trial_idx, i, n_total, sid)
-                    score_dict = results.read_score(run_id, resume_sid, results_root=results_root)
+                    logger.info(
+                        "[trial %d][%d/%d] SKIP (already done): %s",
+                        trial_idx,
+                        i,
+                        n_total,
+                        sid,
+                    )
+                    score_dict = results.read_score(
+                        run_id, resume_sid, results_root=results_root
+                    )
                     if score_dict is not None:
                         from tutorsim.scoring import Annotation
+
                         try:
                             ann = Annotation(**score_dict)
                             completed_scenarios.append(scenario)
@@ -562,22 +604,39 @@ def run_cell(
                             # No transcript object on resume -- latencies not available
                         except Exception as e:
                             counts["failed"] += 1
-                            failed_scenarios.append({"id": sid, "error": str(e), "phase": "resume"})
+                            failed_scenarios.append(
+                                {"id": sid, "error": str(e), "phase": "resume"}
+                            )
                             logger.warning(
                                 "[trial %d][%d/%d] Could not reload score for %s: %s",
-                                trial_idx, i, n_total, sid, e,
+                                trial_idx,
+                                i,
+                                n_total,
+                                sid,
+                                e,
                             )
                     continue
 
                 # Interrupted-run resume: transcript on disk but no score yet --
                 # skip the conversation and pool the moment for scoring.
-                transcript_dict = results.read_transcript(run_id, resume_sid, results_root=results_root)
+                transcript_dict = results.read_transcript(
+                    run_id, resume_sid, results_root=results_root
+                )
                 if transcript_dict is not None:
                     logger.info(
                         "[trial %d][%d/%d] RESUME replay (classification pending): %s",
-                        trial_idx, i, n_total, sid,
+                        trial_idx,
+                        i,
+                        n_total,
+                        sid,
                     )
-                    to_score.append((scenario, conversation.Transcript.from_dict(transcript_dict), resume_sid))
+                    to_score.append(
+                        (
+                            scenario,
+                            conversation.Transcript.from_dict(transcript_dict),
+                            resume_sid,
+                        )
+                    )
                     continue
 
                 pending.append((i, scenario, resume_sid))
@@ -625,11 +684,24 @@ def run_cell(
                         # conversation that already finished (resume durability).
                         # Written before scoring so a score failure doesn't lose it.
                         transcript_dict = (
-                            transcript.to_dict() if hasattr(transcript, "to_dict") else dict(transcript)
+                            transcript.to_dict()
+                            if hasattr(transcript, "to_dict")
+                            else dict(transcript)
                         )
-                        results.write_transcript(run_id, resume_sid, transcript_dict, results_root=results_root)
+                        results.write_transcript(
+                            run_id,
+                            resume_sid,
+                            transcript_dict,
+                            results_root=results_root,
+                        )
                         outcome[idx] = ("ok", transcript)
-                        logger.info("[trial %d][%d/%d] replay OK: %s", trial_idx, idx, n_total, sid)
+                        logger.info(
+                            "[trial %d][%d/%d] replay OK: %s",
+                            trial_idx,
+                            idx,
+                            n_total,
+                            sid,
+                        )
 
             # ---- Stage 3: deterministic, single-threaded collection ----
             for i, scenario, resume_sid in pending:
@@ -637,8 +709,17 @@ def run_cell(
                 status, payload = outcome[i]
                 if status == "err":
                     counts["failed"] += 1
-                    failed_scenarios.append({"id": sid, "error": str(payload), "phase": "run"})
-                    logger.error("[trial %d][%d/%d] SKIP %s: %s", trial_idx, i, n_total, sid, payload)
+                    failed_scenarios.append(
+                        {"id": sid, "error": str(payload), "phase": "run"}
+                    )
+                    logger.error(
+                        "[trial %d][%d/%d] SKIP %s: %s",
+                        trial_idx,
+                        i,
+                        n_total,
+                        sid,
+                        payload,
+                    )
                     continue
 
                 to_score.append((scenario, payload, resume_sid))
@@ -647,7 +728,9 @@ def run_cell(
             if to_score:
                 logger.info(
                     "Starting Classification (trial %d/%d): %d replays, 3 pooled batch passes",
-                    trial_idx, n_trials, len(to_score),
+                    trial_idx,
+                    n_trials,
+                    len(to_score),
                 )
                 try:
                     annotations_by_sid = scoring.score_batch(
@@ -658,8 +741,14 @@ def run_cell(
                     annotations_by_sid = {}
                     for s, _, _ in to_score:
                         counts["failed"] += 1
-                        failed_scenarios.append({"id": s.id, "error": str(e), "phase": "score"})
-                    logger.error("[trial %d] Classification failed for all pooled replays: %s", trial_idx, e)
+                        failed_scenarios.append(
+                            {"id": s.id, "error": str(e), "phase": "score"}
+                        )
+                    logger.error(
+                        "[trial %d] Classification failed for all pooled replays: %s",
+                        trial_idx,
+                        e,
+                    )
 
                 for scenario, transcript, resume_sid in to_score:
                     annotation = annotations_by_sid.get(scenario.id)
@@ -667,17 +756,23 @@ def run_cell(
                         if not annotations_by_sid:
                             continue  # whole-batch failure already recorded above
                         counts["failed"] += 1
-                        failed_scenarios.append({
-                            "id": scenario.id,
-                            "error": "no annotation returned by score_batch",
-                            "phase": "score",
-                        })
+                        failed_scenarios.append(
+                            {
+                                "id": scenario.id,
+                                "error": "no annotation returned by score_batch",
+                                "phase": "score",
+                            }
+                        )
                         continue
 
                     annotation_dict = (
-                        annotation.to_dict() if hasattr(annotation, "to_dict") else dict(annotation)
+                        annotation.to_dict()
+                        if hasattr(annotation, "to_dict")
+                        else dict(annotation)
                     )
-                    results.write_score(run_id, resume_sid, annotation_dict, results_root=results_root)
+                    results.write_score(
+                        run_id, resume_sid, annotation_dict, results_root=results_root
+                    )
 
                     completed_scenarios.append(scenario)
                     completed_annotations.append(annotation)
@@ -695,8 +790,13 @@ def run_cell(
             metrics["run_counts"] = counts
             if failed_scenarios:
                 metrics["failed_scenarios"] = failed_scenarios
-            return (metrics, completed_transcripts, counts,
-                    completed_scenarios, completed_annotations)
+            return (
+                metrics,
+                completed_transcripts,
+                counts,
+                completed_scenarios,
+                completed_annotations,
+            )
 
         # Run all trials
         trial_results = [_run_trial(t) for t in range(1, n_trials + 1)]
@@ -773,7 +873,11 @@ def run_cell(
         # key, classifier error) must never discard the run's primary metrics.
         run_dir = os.path.join(results_root, run_id)
         tax = _classify_run_taxonomy(
-            run_dir, all_trial_annotations, all_trial_scenarios, tutor=tutor, mode=mode,
+            run_dir,
+            all_trial_annotations,
+            all_trial_scenarios,
+            tutor=tutor,
+            mode=mode,
         )
         metrics["taxonomy"] = tax
         tax_usage = (tax or {}).get("usage") or {}
@@ -788,8 +892,11 @@ def run_cell(
         logger.info(
             "Run complete: %d/%d moments succeeded (%d failed, %d resumed, "
             "%d trial(s)) -> %s",
-            run_counts["succeeded"], run_counts["attempted"],
-            run_counts["failed"], run_counts["resumed"], n_trials,
+            run_counts["succeeded"],
+            run_counts["attempted"],
+            run_counts["failed"],
+            run_counts["resumed"],
+            n_trials,
             os.path.join(results_root, run_id),
         )
 
@@ -797,7 +904,11 @@ def run_cell(
         # summary.json; this surfaces them without a separate `report` step
         # (which stays the cross-run leaderboard). Printed, not logged, so it
         # shows regardless of --log-level.
-        print(report.format_run_summary(metrics, tutor_model=tutor, mode=mode, run_id=run_id))
+        print(
+            report.format_run_summary(
+                metrics, tutor_model=tutor, mode=mode, run_id=run_id
+            )
+        )
 
         return run_id
 
@@ -805,6 +916,7 @@ def run_cell(
 # ---------------------------------------------------------------------------
 # CLI: argparse
 # ---------------------------------------------------------------------------
+
 
 def _build_parser() -> argparse.ArgumentParser:
     """Build the top-level argument parser."""
@@ -846,7 +958,7 @@ def _build_parser() -> argparse.ArgumentParser:
         default=None,
         metavar="HF_ID",
         help="Hugging Face dataset id for the released benchmark "
-             "(default: dataset.id from config)",
+        "(default: dataset.id from config)",
     )
     run_p.add_argument(
         "--data_path",
@@ -854,7 +966,7 @@ def _build_parser() -> argparse.ArgumentParser:
         dest="data_path",
         metavar="DIR",
         help="Local release directory containing moments.jsonl "
-             "(developer override; wins over --dataset)",
+        "(developer override; wins over --dataset)",
     )
     run_p.add_argument(
         "--dataset-revision",
@@ -892,8 +1004,8 @@ def _build_parser() -> argparse.ArgumentParser:
         dest="replay_concurrency",
         metavar="N",
         help="Concurrent per-moment replays within a cell (default: from config, "
-             "typically 4). Result-preserving; lower it on smaller API tiers that "
-             "hit rate limits.",
+        "typically 4). Result-preserving; lower it on smaller API tiers that "
+        "hit rate limits.",
     )
     # -- report subcommand ----------------------------------------------------
     report_p = subs.add_parser(
@@ -951,7 +1063,6 @@ def _build_parser() -> argparse.ArgumentParser:
 
 def _cmd_report(args) -> None:
     """Implement the 'report' subcommand: read all run summaries -> leaderboard md+csv."""
-    import os
     from pathlib import Path
 
     run_ids = results.list_runs(args.results_root)
@@ -1005,7 +1116,9 @@ def _cmd_view(args) -> None:
             continue
         summary = dict(summary)
         summary.setdefault("tutor_model", run_id.split("_")[0] if run_id else "")
-        summary.setdefault("mode", run_id.split("_")[1] if len(run_id.split("_")) > 1 else "")
+        summary.setdefault(
+            "mode", run_id.split("_")[1] if len(run_id.split("_")) > 1 else ""
+        )
         summaries.append(summary)
 
     html = report.view(summaries)
@@ -1030,10 +1143,13 @@ def main(argv=None) -> None:
     # no shared --log-level/--log-file args, so handle it before setup_logging.
     if args.command == "taxonomy":
         from tutorsim import taxonomy
+
         sys.exit(taxonomy.cli_dispatch(args.args))
 
     setup_logging(level=args.log_level, log_file=args.log_file)
-    logger.info("Command: tutorsim %s", " ".join(argv if argv is not None else sys.argv[1:]))
+    logger.info(
+        "Command: tutorsim %s", " ".join(argv if argv is not None else sys.argv[1:])
+    )
 
     if args.command == "run":
         if args.config:

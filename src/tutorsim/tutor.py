@@ -14,6 +14,7 @@ Placeholders:
 - {student_context}        <- student_context (always available)
 - {reference_transcript}   <- reference_transcript (oracle only)
 """
+
 from tutorsim.resources import resource_text
 
 SUPPORTED_MODES = {"plain", "scaffolding_rigor", "oracle"}
@@ -59,9 +60,7 @@ def build_tutor_system_prompt(
     # Oracle-specific: substitute reference_transcript
     if mode == "oracle":
         if not reference_transcript:
-            raise ValueError(
-                "mode='oracle' requires a non-empty reference_transcript"
-            )
+            raise ValueError("mode='oracle' requires a non-empty reference_transcript")
         out = out.replace("{reference_transcript}", reference_transcript)
 
     return out
@@ -81,8 +80,8 @@ def resolve_tutor(tutor_id: str) -> dict:
     Raises:
         ValueError: If tutor_id is not registered and not in model roster.
     """
-    from tutorsim.config import get_registered_tutor, resolve_model
     from tutorsim.client import ModelClient
+    from tutorsim.config import get_registered_tutor, resolve_model
 
     # FIRST: check registry
     registered_fn = get_registered_tutor(tutor_id)

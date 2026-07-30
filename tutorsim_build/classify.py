@@ -28,7 +28,9 @@ JUNK_TEXTS = {"", "n/a", "test", "sdf", "this is a test annotation"}
 # Situation classification
 # ===========================================================================
 
-_SITUATION_PROMPT_RESOURCE = "prompts/classify/situation_labeller/classify_scaffolding.md"
+_SITUATION_PROMPT_RESOURCE = (
+    "prompts/classify/situation_labeller/classify_scaffolding.md"
+)
 
 VALID_SITUATION_LABELS = {"yes", "no", "unclear", "no_mention"}
 
@@ -40,6 +42,7 @@ def _parse_situation_label(text: str) -> tuple[dict, bool]:
     Tries json.loads first; falls back to regex extraction field-by-field.
     A list-wrapped response (e.g. [{...}]) is unwrapped automatically.
     """
+
     def _coerce(val: str) -> str:
         v = val.strip().lower()
         return v if v in VALID_SITUATION_LABELS else "unclear"
@@ -98,7 +101,10 @@ def load_labeller_templates(labeller_cfg: "str | dict") -> "dict[str | None, str
     {"scaffolding": "classify_scaffolding", ...}), returns one entry per type.
     """
     if isinstance(labeller_cfg, dict):
-        return {ann_type: load_labeller_prompt(name) for ann_type, name in labeller_cfg.items()}
+        return {
+            ann_type: load_labeller_prompt(name)
+            for ann_type, name in labeller_cfg.items()
+        }
     return {None: load_labeller_prompt(labeller_cfg)}
 
 

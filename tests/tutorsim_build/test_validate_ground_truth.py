@@ -12,9 +12,12 @@ import pytest
 from tutorsim_build.groundtruth import validate_ground_truth
 
 SCAFFOLDING = {
-    "annotation_type": "scaffolding", "strategy_label": "scaffold",
-    "situation_label_agg": "scaffolding", "action_direction_agg": "toward",
-    "student_outcome_agg": "pos", "turn_start": 1,
+    "annotation_type": "scaffolding",
+    "strategy_label": "scaffold",
+    "situation_label_agg": "scaffolding",
+    "action_direction_agg": "toward",
+    "student_outcome_agg": "pos",
+    "turn_start": 1,
 }
 RAPPORT = {"annotation_type": "rapport", "strategy_label": "warm", "turn_start": 4}
 
@@ -25,7 +28,11 @@ def _gt(*moments):
 
 EVAL_KW = dict(
     all_moments=("strategy_label",),
-    scaffolding_only=("situation_label_agg", "action_direction_agg", "student_outcome_agg"),
+    scaffolding_only=(
+        "situation_label_agg",
+        "action_direction_agg",
+        "student_outcome_agg",
+    ),
 )
 
 

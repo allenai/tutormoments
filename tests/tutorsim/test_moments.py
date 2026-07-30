@@ -1,4 +1,5 @@
 import pytest
+
 from tutorsim.moments import (
     DatasetNotFoundError,
     Moment,
@@ -18,7 +19,11 @@ def test_moment_roundtrip():
             {"turn_number": 7, "role": "student", "text": "ok"},
         ],
         dimension="scaffolding",
-        student={"mode": "oracle", "reference": "Turn 8. STUDENT: ...", "context": "Grade 5, fractions"},
+        student={
+            "mode": "oracle",
+            "reference": "Turn 8. STUDENT: ...",
+            "context": "Grade 5, fractions",
+        },
         rubric={"gold": "scaffolding", "hint": "The student gave a guess."},
         provenance={"conv_id": "conv", "cut_turn": 7, "turn_start": 5, "turn_end": 7},
     )
@@ -39,25 +44,39 @@ def test_from_dict_normalizes_cut_votes_forms():
         "student": {"mode": "oracle", "reference": "", "context": ""},
         "rubric": {"gold": "rigor", "hint": ""},
     }
-    released = dict(base, provenance={
-        "conv_id": "c", "cut_turn": 27,
-        "cut_votes": [{"cut_turn": 27, "votes": 7}, {"cut_turn": 32, "votes": 1}],
-    })
-    internal = dict(base, provenance={
-        "conv_id": "c", "cut_turn": 27,
-        "cut_votes": {"27": 7, "32": 1},
-    })
-    int_keyed = dict(base, provenance={
-        "conv_id": "c", "cut_turn": 27,
-        "cut_votes": {27: 7, 32: 1},
-    })
+    released = dict(
+        base,
+        provenance={
+            "conv_id": "c",
+            "cut_turn": 27,
+            "cut_votes": [{"cut_turn": 27, "votes": 7}, {"cut_turn": 32, "votes": 1}],
+        },
+    )
+    internal = dict(
+        base,
+        provenance={
+            "conv_id": "c",
+            "cut_turn": 27,
+            "cut_votes": {"27": 7, "32": 1},
+        },
+    )
+    int_keyed = dict(
+        base,
+        provenance={
+            "conv_id": "c",
+            "cut_turn": 27,
+            "cut_votes": {27: 7, 32: 1},
+        },
+    )
     expected = {"27": 7, "32": 1}
     assert Moment.from_dict(released).provenance["cut_votes"] == expected
     assert Moment.from_dict(internal).provenance["cut_votes"] == expected
     assert Moment.from_dict(int_keyed).provenance["cut_votes"] == expected
     # And the hash over normalized records is form-independent
     h = records_content_hash
-    assert h([Moment.from_dict(released).to_dict()]) == h([Moment.from_dict(internal).to_dict()])
+    assert h([Moment.from_dict(released).to_dict()]) == h(
+        [Moment.from_dict(internal).to_dict()]
+    )
 
 
 def test_load_moments_data_path_reads_in_file_order():

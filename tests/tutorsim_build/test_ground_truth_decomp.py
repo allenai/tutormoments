@@ -22,13 +22,17 @@ def _full_cache():
 def test_invalidate_decomp_cache_action_clears_action_keeps_result():
     invalidated = _invalidate_decomp_cache(_full_cache(), "action")
     assert invalidated["conv1"]["action"] == {}
-    assert invalidated["conv1"]["result"] == {("t1", 1, 10, "scaffolding", "def"): ["r1"]}
+    assert invalidated["conv1"]["result"] == {
+        ("t1", 1, 10, "scaffolding", "def"): ["r1"]
+    }
 
 
 def test_invalidate_decomp_cache_result_clears_result_keeps_action():
     invalidated = _invalidate_decomp_cache(_full_cache(), "result")
     assert invalidated["conv1"]["result"] == {}
-    assert invalidated["conv1"]["action"] == {("t1", 1, 10, "scaffolding", "abc"): ["a1"]}
+    assert invalidated["conv1"]["action"] == {
+        ("t1", 1, 10, "scaffolding", "abc"): ["a1"]
+    }
 
 
 def test_invalidate_decomp_cache_both_wipes_entire_cache():

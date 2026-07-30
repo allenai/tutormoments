@@ -9,6 +9,7 @@ Public API:
     build_student_system_prompt(student_context, reference_transcript, persona) -> str
     resolve_student(student_id) -> dict
 """
+
 import logging
 
 from tutorsim.resources import resource_text
@@ -87,6 +88,7 @@ def build_student_system_prompt(
 # resolve_student (Task 4)
 # ---------------------------------------------------------------------------
 
+
 def resolve_student(student_id: str | None = None) -> dict:
     """Decide what the student is: registered callable or hosted model.
 
@@ -102,8 +104,8 @@ def resolve_student(student_id: str | None = None) -> dict:
         - kind == "registered": {"kind": "registered", "fn": <callable>}
         - kind == "hosted": {"kind": "hosted", "client": ModelClient, "kwargs": dict}
     """
-    from tutorsim.config import get_registered_student, student_spec
     from tutorsim.client import ModelClient
+    from tutorsim.config import get_registered_student, student_spec
 
     spec = student_spec()
     model = student_id or spec["model"]

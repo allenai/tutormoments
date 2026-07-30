@@ -21,16 +21,24 @@ def test_tutorsim_build_dispatches(tmp_path):
     out_dir = tmp_path / "release"
 
     with patch("tutorsim_build.moments_build._cli_build") as mock_build:
-        main([
-            "dataset",
-            "build",
-            "--set", "balanced_520",
-            "--ids", str(ids_file),
-            "--ground-truth", str(gt_dir),
-            "--transcripts", str(tx_dir),
-            "--out", str(out_dir),
-            "--created", "2026-06-26",
-        ])
+        main(
+            [
+                "dataset",
+                "build",
+                "--set",
+                "balanced_520",
+                "--ids",
+                str(ids_file),
+                "--ground-truth",
+                str(gt_dir),
+                "--transcripts",
+                str(tx_dir),
+                "--out",
+                str(out_dir),
+                "--created",
+                "2026-06-26",
+            ]
+        )
 
     mock_build.assert_called_once()
     call_args = mock_build.call_args[0][0]
@@ -46,11 +54,14 @@ def test_dataset_validate_cli(capsys):
     """main(['dataset', 'validate', ...]) validates the mini fixture release dir."""
     from tutorsim_build.cli import main
 
-    main([
-        "dataset",
-        "validate",
-        "--data_path", "tests/tutorsim/fixtures/mini_release",
-    ])
+    main(
+        [
+            "dataset",
+            "validate",
+            "--data_path",
+            "tests/tutorsim/fixtures/mini_release",
+        ]
+    )
 
     captured = capsys.readouterr()
     assert "Dataset valid: mini_set" in captured.out
@@ -65,15 +76,22 @@ def test_dataset_build_writes_build_log(tmp_path):
     out_dir = tmp_path / "release"
 
     with patch("tutorsim_build.moments_build._cli_build"):
-        main([
-            "dataset",
-            "build",
-            "--set", "balanced_520",
-            "--ids", str(ids_file),
-            "--ground-truth", str(tmp_path),
-            "--transcripts", str(tmp_path),
-            "--out", str(out_dir),
-        ])
+        main(
+            [
+                "dataset",
+                "build",
+                "--set",
+                "balanced_520",
+                "--ids",
+                str(ids_file),
+                "--ground-truth",
+                str(tmp_path),
+                "--transcripts",
+                str(tmp_path),
+                "--out",
+                str(out_dir),
+            ]
+        )
 
     content = (out_dir / "build.log").read_text(encoding="utf-8")
     assert "Command: tutorsim-build dataset build" in content
@@ -88,12 +106,17 @@ def test_build_ground_truth_dry_run_writes_nothing(tmp_path):
     out_dir = tmp_path / "gt"
 
     with patch("tutorsim_build.groundtruth.build_ground_truth"):
-        main([
-            "dataset", "build-ground-truth",
-            "--input", str(ann),
-            "--out-dir", str(out_dir),
-            "--dry-run",
-        ])
+        main(
+            [
+                "dataset",
+                "build-ground-truth",
+                "--input",
+                str(ann),
+                "--out-dir",
+                str(out_dir),
+                "--dry-run",
+            ]
+        )
 
     assert not out_dir.exists()
 
@@ -108,12 +131,16 @@ def test_build_cli_accepts_log_flags(tmp_path):
     root = logging.getLogger()
     old_handlers = root.handlers[:]
     try:
-        main([
-            "dataset",
-            "validate",
-            "--data_path", "tests/tutorsim/fixtures/mini_release",
-            "--log-file", str(log_file),
-        ])
+        main(
+            [
+                "dataset",
+                "validate",
+                "--data_path",
+                "tests/tutorsim/fixtures/mini_release",
+                "--log-file",
+                str(log_file),
+            ]
+        )
         for handler in root.handlers:
             handler.flush()
     finally:
@@ -128,6 +155,7 @@ def test_build_cli_accepts_log_flags(tmp_path):
 
 def test_tutorsim_build_ground_truth_help_parses():
     import pytest
+
     from tutorsim_build import cli as cli_mod
 
     parser = cli_mod._build_parser()
@@ -149,13 +177,20 @@ def test_tutorsim_build_ground_truth_dispatches_with_defaults(tmp_path):
         captured.update(kwargs)
         return {"dry_run": kwargs.get("dry_run")}
 
-    with patch("tutorsim_build.groundtruth.build_ground_truth", side_effect=_fake_build) as m:
-        cli_mod.main([
-            "dataset", "build-ground-truth",
-            "--input", str(ann),
-            "--out-dir", str(out),
-            "--dry-run",
-        ])
+    with patch(
+        "tutorsim_build.groundtruth.build_ground_truth", side_effect=_fake_build
+    ) as m:
+        cli_mod.main(
+            [
+                "dataset",
+                "build-ground-truth",
+                "--input",
+                str(ann),
+                "--out-dir",
+                str(out),
+                "--dry-run",
+            ]
+        )
     assert m.called
     assert captured["dry_run"] is True
     assert str(captured["input_path"]) == str(ann)
@@ -169,12 +204,19 @@ def test_tutorsim_build_ground_truth_default_out_dir_follows_labeller(tmp_path):
     ann = tmp_path / "ann.jsonl"
     ann.write_text("", encoding="utf-8")
     captured = {}
-    with patch("tutorsim_build.groundtruth.build_ground_truth",
-               side_effect=lambda **kw: captured.update(kw)):
-        cli_mod.main([
-            "dataset", "build-ground-truth",
-            "--input", str(ann),
-            "--labeller", "hybrid",
-            "--dry-run",
-        ])
+    with patch(
+        "tutorsim_build.groundtruth.build_ground_truth",
+        side_effect=lambda **kw: captured.update(kw),
+    ):
+        cli_mod.main(
+            [
+                "dataset",
+                "build-ground-truth",
+                "--input",
+                str(ann),
+                "--labeller",
+                "hybrid",
+                "--dry-run",
+            ]
+        )
     assert str(captured["out_dir"]).endswith("ground_truth_hybrid")
