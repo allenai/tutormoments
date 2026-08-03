@@ -2,14 +2,18 @@ import pytest
 
 from tutorsim.resources import resource_text
 
-@pytest.mark.parametrize("rel", [
-    "annotate/scaffolding.md",
-    "decompose/decompose_action.md",
-    "decompose/decompose_result.md",
-    "decompose/decompose_overscaffold.md",
-    "structure/classify_action.md",
-    "structure/classify_student_result.md",
-])
+
+@pytest.mark.parametrize(
+    "rel",
+    [
+        "annotate/scaffolding.md",
+        "decompose/decompose_action.md",
+        "decompose/decompose_result.md",
+        "decompose/decompose_overscaffold.md",
+        "structure/classify_action.md",
+        "structure/classify_student_result.md",
+    ],
+)
 def test_scorer_prompt_exists_and_nonempty(rel):
     text = resource_text(f"prompts/scorer/{rel}")
     assert text.strip(), f"empty prompts/scorer/{rel}"
@@ -19,9 +23,9 @@ def test_scorer_prompt_exists_and_nonempty(rel):
 # Task 2: Annotation dataclass + _build_synthetic_conversation
 # ---------------------------------------------------------------------------
 
-from tutorsim.scoring import Annotation, _build_synthetic_conversation
-from tutorsim.moments import Moment as Scenario
 from tutorsim.conversation import Transcript
+from tutorsim.moments import Moment as Scenario
+from tutorsim.scoring import Annotation, _build_synthetic_conversation
 
 
 @pytest.fixture
@@ -70,6 +74,7 @@ def fixture_transcript(fixture_scenario):
 
 # --- Annotation round-trip ---
 
+
 def test_annotation_to_dict_has_all_fields():
     ann = Annotation(
         scenario_id="testset:conv-abc__hum_5_12",
@@ -85,9 +90,15 @@ def test_annotation_to_dict_has_all_fields():
     )
     d = ann.to_dict()
     expected_fields = {
-        "scenario_id", "annotation_type", "turn_start", "turn_end",
-        "situation", "action", "result",
-        "action_decomposed", "overscaffold_decomposed",
+        "scenario_id",
+        "annotation_type",
+        "turn_start",
+        "turn_end",
+        "situation",
+        "action",
+        "result",
+        "action_decomposed",
+        "overscaffold_decomposed",
         "action_label",
     }
     assert expected_fields.issubset(set(d.keys()))
@@ -121,8 +132,13 @@ def test_annotation_to_dict_round_trips_values():
 
 # --- _build_synthetic_conversation ---
 
-def test_build_synthetic_conversation_keyed_by_scenario_id(fixture_scenario, fixture_transcript):
-    conv_dict, detections = _build_synthetic_conversation(fixture_scenario, fixture_transcript)
+
+def test_build_synthetic_conversation_keyed_by_scenario_id(
+    fixture_scenario, fixture_transcript
+):
+    conv_dict, detections = _build_synthetic_conversation(
+        fixture_scenario, fixture_transcript
+    )
     # Both must be keyed by scenario.id
     assert fixture_scenario.id in conv_dict
     assert fixture_scenario.id in detections
@@ -144,7 +160,9 @@ def test_build_synthetic_conversation_turns_order(fixture_scenario, fixture_tran
     assert turns[5]["turn_number"] == 8
 
 
-def test_build_synthetic_conversation_roles_uppercased(fixture_scenario, fixture_transcript):
+def test_build_synthetic_conversation_roles_uppercased(
+    fixture_scenario, fixture_transcript
+):
     conv_dict, _ = _build_synthetic_conversation(fixture_scenario, fixture_transcript)
     turns = conv_dict[fixture_scenario.id]["turns"]
     # Context turns should have roles uppercased
@@ -168,20 +186,26 @@ def test_build_synthetic_conversation_turn_shape(fixture_scenario, fixture_trans
         assert "timestamp" in turn
 
 
-def test_build_synthetic_conversation_conversation_id(fixture_scenario, fixture_transcript):
+def test_build_synthetic_conversation_conversation_id(
+    fixture_scenario, fixture_transcript
+):
     conv_dict, _ = _build_synthetic_conversation(fixture_scenario, fixture_transcript)
     conv = conv_dict[fixture_scenario.id]
     assert conv["conversation_id"] == fixture_scenario.id
 
 
-def test_build_synthetic_conversation_single_detection(fixture_scenario, fixture_transcript):
+def test_build_synthetic_conversation_single_detection(
+    fixture_scenario, fixture_transcript
+):
     _, detections = _build_synthetic_conversation(fixture_scenario, fixture_transcript)
     det_entry = detections[fixture_scenario.id]
     detection_list = det_entry["detections"]
     assert len(detection_list) == 1
 
 
-def test_build_synthetic_conversation_detection_turn_range(fixture_scenario, fixture_transcript):
+def test_build_synthetic_conversation_detection_turn_range(
+    fixture_scenario, fixture_transcript
+):
     _, detections = _build_synthetic_conversation(fixture_scenario, fixture_transcript)
     det = detections[fixture_scenario.id]["detections"][0]
     # turn_start = first generated turn number (6), turn_end = last (8)
@@ -189,13 +213,17 @@ def test_build_synthetic_conversation_detection_turn_range(fixture_scenario, fix
     assert det["turn_end"] == 8
 
 
-def test_build_synthetic_conversation_detection_annotation_type(fixture_scenario, fixture_transcript):
+def test_build_synthetic_conversation_detection_annotation_type(
+    fixture_scenario, fixture_transcript
+):
     _, detections = _build_synthetic_conversation(fixture_scenario, fixture_transcript)
     det = detections[fixture_scenario.id]["detections"][0]
     assert det["annotation_type"] == "scaffolding"
 
 
-def test_build_synthetic_conversation_detection_situation_label_agg(fixture_scenario, fixture_transcript):
+def test_build_synthetic_conversation_detection_situation_label_agg(
+    fixture_scenario, fixture_transcript
+):
     _, detections = _build_synthetic_conversation(fixture_scenario, fixture_transcript)
     det = detections[fixture_scenario.id]["detections"][0]
     # situation_label_agg = scenario.dimension (= rubric["gold"])
@@ -203,7 +231,9 @@ def test_build_synthetic_conversation_detection_situation_label_agg(fixture_scen
     assert det["situation_label_agg"] == "scaffolding"
 
 
-def test_build_synthetic_conversation_detection_situation_hint(fixture_scenario, fixture_transcript):
+def test_build_synthetic_conversation_detection_situation_hint(
+    fixture_scenario, fixture_transcript
+):
     _, detections = _build_synthetic_conversation(fixture_scenario, fixture_transcript)
     det = detections[fixture_scenario.id]["detections"][0]
     # situation description includes the rubric hint
@@ -215,18 +245,20 @@ def test_build_synthetic_conversation_detection_situation_hint(fixture_scenario,
 # ---------------------------------------------------------------------------
 
 from tutorsim.scoring import (
-    _format_excerpt,
-    _suggestion_text,
     _build_annotate_entries,
+    _format_excerpt,
     _parse_and_merge,
+    _suggestion_text,
 )
-
 
 # --- _format_excerpt (context_window=0) ---
 
+
 def test_format_excerpt_markers_present(fixture_scenario, fixture_transcript):
     """The excerpt must contain START and END markers."""
-    conv_dict, detections = _build_synthetic_conversation(fixture_scenario, fixture_transcript)
+    conv_dict, detections = _build_synthetic_conversation(
+        fixture_scenario, fixture_transcript
+    )
     conv = conv_dict[fixture_scenario.id]
     det = detections[fixture_scenario.id]["detections"][0]
     excerpt = _format_excerpt(conv, det["turn_start"], det["turn_end"], 0, 0)
@@ -236,7 +268,9 @@ def test_format_excerpt_markers_present(fixture_scenario, fixture_transcript):
 
 def test_format_excerpt_omit_header_emitted(fixture_scenario, fixture_transcript):
     """When context_window=0 and generated turns don't start at 1, omit header is emitted."""
-    conv_dict, detections = _build_synthetic_conversation(fixture_scenario, fixture_transcript)
+    conv_dict, detections = _build_synthetic_conversation(
+        fixture_scenario, fixture_transcript
+    )
     conv = conv_dict[fixture_scenario.id]
     det = detections[fixture_scenario.id]["detections"][0]
     # turn_start=6, min_turn=3: excerpt_start=6 > min_turn=3 => header expected
@@ -246,7 +280,9 @@ def test_format_excerpt_omit_header_emitted(fixture_scenario, fixture_transcript
 
 def test_format_excerpt_only_detected_range(fixture_scenario, fixture_transcript):
     """With context_window=0, only turns [turn_start, turn_end] appear (plus markers)."""
-    conv_dict, detections = _build_synthetic_conversation(fixture_scenario, fixture_transcript)
+    conv_dict, detections = _build_synthetic_conversation(
+        fixture_scenario, fixture_transcript
+    )
     conv = conv_dict[fixture_scenario.id]
     det = detections[fixture_scenario.id]["detections"][0]
     excerpt = _format_excerpt(conv, det["turn_start"], det["turn_end"], 0, 0)
@@ -262,7 +298,9 @@ def test_format_excerpt_only_detected_range(fixture_scenario, fixture_transcript
 
 def test_format_excerpt_in_range_marker(fixture_scenario, fixture_transcript):
     """Each turn in [turn_start, turn_end] gets a ' <<<' suffix."""
-    conv_dict, detections = _build_synthetic_conversation(fixture_scenario, fixture_transcript)
+    conv_dict, detections = _build_synthetic_conversation(
+        fixture_scenario, fixture_transcript
+    )
     conv = conv_dict[fixture_scenario.id]
     det = detections[fixture_scenario.id]["detections"][0]
     excerpt = _format_excerpt(conv, det["turn_start"], det["turn_end"], 0, 0)
@@ -273,7 +311,9 @@ def test_format_excerpt_in_range_marker(fixture_scenario, fixture_transcript):
 
 def test_format_excerpt_golden_string(fixture_scenario, fixture_transcript):
     """Golden: exact excerpt string for the fixture (context_window=0)."""
-    conv_dict, detections = _build_synthetic_conversation(fixture_scenario, fixture_transcript)
+    conv_dict, detections = _build_synthetic_conversation(
+        fixture_scenario, fixture_transcript
+    )
     conv = conv_dict[fixture_scenario.id]
     det = detections[fixture_scenario.id]["detections"][0]
     excerpt = _format_excerpt(conv, det["turn_start"], det["turn_end"], 0, 0)
@@ -290,6 +330,7 @@ def test_format_excerpt_golden_string(fixture_scenario, fixture_transcript):
 
 
 # --- _suggestion_text ---
+
 
 def test_suggestion_text_scaffolding():
     assert _suggestion_text("scaffolding") == (
@@ -335,17 +376,24 @@ def test_suggestion_text_unrecognized():
 
 # --- _build_annotate_entries: golden-prompt test ---
 
+
 def test_build_annotate_entries_key_scheme(fixture_scenario, fixture_transcript):
     """Key must be '{scenario_id}__scaffolding__0' for the first detection."""
-    conv_dict, detections = _build_synthetic_conversation(fixture_scenario, fixture_transcript)
+    conv_dict, detections = _build_synthetic_conversation(
+        fixture_scenario, fixture_transcript
+    )
     entries = _build_annotate_entries(conv_dict, detections)
     assert len(entries) == 1
     assert entries[0]["key"] == f"{fixture_scenario.id}__scaffolding__0"
 
 
-def test_build_annotate_entries_prompt_contains_excerpt(fixture_scenario, fixture_transcript):
+def test_build_annotate_entries_prompt_contains_excerpt(
+    fixture_scenario, fixture_transcript
+):
     """The prompt must contain the exact markered excerpt."""
-    conv_dict, detections = _build_synthetic_conversation(fixture_scenario, fixture_transcript)
+    conv_dict, detections = _build_synthetic_conversation(
+        fixture_scenario, fixture_transcript
+    )
     entries = _build_annotate_entries(conv_dict, detections)
     prompt = entries[0]["request"]["contents"][0]["parts"][0]["text"]
     assert ">>> DETECTED MOMENT START (Turn 6) <<<" in prompt
@@ -353,17 +401,28 @@ def test_build_annotate_entries_prompt_contains_excerpt(fixture_scenario, fixtur
     assert "Turn 6. TUTOR: Can you try the first step? <<<" in prompt
 
 
-def test_build_annotate_entries_prompt_contains_suggestion(fixture_scenario, fixture_transcript):
+def test_build_annotate_entries_prompt_contains_suggestion(
+    fixture_scenario, fixture_transcript
+):
     """The prompt must contain the suggestion sentence for 'scaffolding'."""
-    conv_dict, detections = _build_synthetic_conversation(fixture_scenario, fixture_transcript)
+    conv_dict, detections = _build_synthetic_conversation(
+        fixture_scenario, fixture_transcript
+    )
     entries = _build_annotate_entries(conv_dict, detections)
     prompt = entries[0]["request"]["contents"][0]["parts"][0]["text"]
-    assert "A team of teachers believe that this moment is appropriate for scaffolding." in prompt
+    assert (
+        "A team of teachers believe that this moment is appropriate for scaffolding."
+        in prompt
+    )
 
 
-def test_build_annotate_entries_annotator_style_absent(fixture_scenario, fixture_transcript):
+def test_build_annotate_entries_annotator_style_absent(
+    fixture_scenario, fixture_transcript
+):
     """{annotator_style} must be replaced with '' (empty string, not present as literal)."""
-    conv_dict, detections = _build_synthetic_conversation(fixture_scenario, fixture_transcript)
+    conv_dict, detections = _build_synthetic_conversation(
+        fixture_scenario, fixture_transcript
+    )
     entries = _build_annotate_entries(conv_dict, detections)
     prompt = entries[0]["request"]["contents"][0]["parts"][0]["text"]
     assert "{annotator_style}" not in prompt
@@ -371,7 +430,9 @@ def test_build_annotate_entries_annotator_style_absent(fixture_scenario, fixture
 
 def test_build_annotate_entries_json_mode_enabled(fixture_scenario, fixture_transcript):
     """The batch entry must have json_mode enabled (response_mime_type = application/json)."""
-    conv_dict, detections = _build_synthetic_conversation(fixture_scenario, fixture_transcript)
+    conv_dict, detections = _build_synthetic_conversation(
+        fixture_scenario, fixture_transcript
+    )
     entries = _build_annotate_entries(conv_dict, detections)
     gen_config = entries[0]["request"]["generation_config"]
     assert gen_config.get("response_mime_type") == "application/json"
@@ -379,7 +440,9 @@ def test_build_annotate_entries_json_mode_enabled(fixture_scenario, fixture_tran
 
 def test_build_annotate_entries_golden_prompt(fixture_scenario, fixture_transcript):
     """Golden: the substituted prompt is BYTE-EXACT equal to the expected prompt."""
-    conv_dict, detections = _build_synthetic_conversation(fixture_scenario, fixture_transcript)
+    conv_dict, detections = _build_synthetic_conversation(
+        fixture_scenario, fixture_transcript
+    )
     entries = _build_annotate_entries(conv_dict, detections)
     assert entries[0]["key"] == f"{fixture_scenario.id}__scaffolding__0"
 
@@ -389,7 +452,9 @@ def test_build_annotate_entries_golden_prompt(fixture_scenario, fixture_transcri
     # the code applies, with the fixture's values.
     template = resource_text("prompts/scorer/annotate/scaffolding.md")
 
-    suggestion = "A team of teachers believe that this moment is appropriate for scaffolding."
+    suggestion = (
+        "A team of teachers believe that this moment is appropriate for scaffolding."
+    )
     expected_excerpt = (
         "[... turns 1-5 omitted ...]\n"
         "\n"
@@ -414,11 +479,14 @@ def test_build_annotate_entries_golden_prompt(fixture_scenario, fixture_transcri
 
 # --- _parse_and_merge ---
 
+
 def test_parse_and_merge_extracts_fields():
     """Parse extracts situation/action/result from JSON response."""
     detections_by_conv = {
         "conv1": {
-            "detections": [{"annotation_type": "scaffolding", "turn_start": 6, "turn_end": 8}],
+            "detections": [
+                {"annotation_type": "scaffolding", "turn_start": 6, "turn_end": 8}
+            ],
             "usage": {"input_tokens": 100, "output_tokens": 0, "total_tokens": 100},
         }
     }
@@ -440,7 +508,9 @@ def test_parse_and_merge_accumulates_usage():
     """Usage from p1 (detections) and p2 (parsed) are summed."""
     detections_by_conv = {
         "conv1": {
-            "detections": [{"annotation_type": "scaffolding", "turn_start": 6, "turn_end": 8}],
+            "detections": [
+                {"annotation_type": "scaffolding", "turn_start": 6, "turn_end": 8}
+            ],
             "usage": {"input_tokens": 100, "output_tokens": 0, "total_tokens": 100},
         }
     }
@@ -461,7 +531,9 @@ def test_parse_and_merge_fallback_action_text():
     """When no parsed result for a key, fallback action text is used."""
     detections_by_conv = {
         "conv1": {
-            "detections": [{"annotation_type": "scaffolding", "turn_start": 6, "turn_end": 8}],
+            "detections": [
+                {"annotation_type": "scaffolding", "turn_start": 6, "turn_end": 8}
+            ],
             "usage": {"input_tokens": 0, "output_tokens": 0, "total_tokens": 0},
         }
     }
@@ -477,7 +549,9 @@ def test_parse_and_merge_list_response_takes_first():
     """If the JSON response is a list, [0] is used."""
     detections_by_conv = {
         "conv1": {
-            "detections": [{"annotation_type": "scaffolding", "turn_start": 1, "turn_end": 2}],
+            "detections": [
+                {"annotation_type": "scaffolding", "turn_start": 1, "turn_end": 2}
+            ],
             "usage": {"input_tokens": 0, "output_tokens": 0, "total_tokens": 0},
         }
     }
@@ -497,7 +571,9 @@ def test_parse_and_merge_missing_json_keys_default_empty():
     """Missing situation/action/result keys default to ''."""
     detections_by_conv = {
         "conv1": {
-            "detections": [{"annotation_type": "scaffolding", "turn_start": 1, "turn_end": 2}],
+            "detections": [
+                {"annotation_type": "scaffolding", "turn_start": 1, "turn_end": 2}
+            ],
             "usage": {"input_tokens": 0, "output_tokens": 0, "total_tokens": 0},
         }
     }
@@ -541,12 +617,13 @@ def test_parse_and_merge_pass1_pass2_counts():
 # Task 4: Decompose pass — _coerce_facets, _build_decompose_entries, junk skip
 # ---------------------------------------------------------------------------
 
-from tutorsim.scoring import _coerce_facets, _build_decompose_entries
+from tutorsim.scoring import _build_decompose_entries, _coerce_facets
 
 JUNK_TEXTS = {"", "n/a", "test", "sdf", "this is a test annotation"}
 
 
 # --- _coerce_facets ---
+
 
 def test_coerce_facets_bare_array():
     """A bare JSON array should return the list of strings."""
@@ -592,6 +669,7 @@ def test_coerce_facets_returns_none_for_invalid():
 
 
 # --- _build_decompose_entries: action prompt ---
+
 
 def test_build_decompose_entries_action_substitutes_action():
     """Action entry prompt must contain the action text via {action} substitution."""
@@ -748,13 +826,13 @@ def test_build_decompose_entries_overscaffold_both_junk_skipped():
 # ---------------------------------------------------------------------------
 
 from tutorsim.scoring import (
+    _build_structure_entries,
     _parse_action_label,
     _parse_result_label,
-    _build_structure_entries,
 )
 
-
 # --- _parse_action_label ---
+
 
 def test_parse_action_label_scaffolding_only():
     label, err = _parse_action_label('{"scaffolding":"yes","rigor":"no"}')
@@ -831,6 +909,7 @@ def test_parse_action_label_invalid_value_unclear():
 
 # --- _parse_result_label ---
 
+
 def test_parse_result_label_A_returns_pos():
     label, err = _parse_result_label("A")
     assert label == "pos"
@@ -904,6 +983,7 @@ def test_parse_result_label_letter_after_text_not_matched():
 
 
 # --- _build_structure_entries: action classification only ---
+
 
 def _make_decomposed_results(action_facets, ann_type="scaffolding"):
     """Helper: build results dict with one annotation having given facets."""
@@ -998,11 +1078,13 @@ def test_build_structure_entries_target_filter_rapport():
 
 # --- Default labels (no facets) ---
 
+
 def test_no_action_facets_default_label_neither():
     """No action facets -> default action_label 'neither'."""
     # This tests the convention the caller must apply after _build_structure_entries.
     # The default is encoded in DEFAULT_ACTION_LABEL.
     from tutorsim.scoring import DEFAULT_ACTION_LABEL
+
     assert DEFAULT_ACTION_LABEL == "neither"
 
 
@@ -1010,6 +1092,7 @@ def test_default_result_label_kept_for_tutorsim_build():
     """DEFAULT_RESULT_LABEL is no longer used by the runtime scorer but is
     imported by tutorsim_build.groundtruth -- pin its value."""
     from tutorsim.scoring import DEFAULT_RESULT_LABEL
+
     assert DEFAULT_RESULT_LABEL == "no_evidence"
 
 
@@ -1018,14 +1101,16 @@ def test_default_result_label_kept_for_tutorsim_build():
 # ---------------------------------------------------------------------------
 
 import json as _json
-from unittest.mock import patch, MagicMock
+from unittest.mock import MagicMock, patch
 
 
 def _make_raw_entries(mapping):
     """Build a run_batch-style {key: {text, usage}} dict from a plain dict."""
     return {
-        k: {"text": v if isinstance(v, str) else _json.dumps(v),
-            "usage": {"input_tokens": 10, "output_tokens": 5, "total_tokens": 15}}
+        k: {
+            "text": v if isinstance(v, str) else _json.dumps(v),
+            "usage": {"input_tokens": 10, "output_tokens": 5, "total_tokens": 15},
+        }
         for k, v in mapping.items()
     }
 
@@ -1049,6 +1134,7 @@ def _patch_score(fake_run_batch, fake_client=None):
     if fake_client is None:
         fake_client = _make_fake_score_client()
     from contextlib import ExitStack
+
     stack = ExitStack()
     stack.enter_context(patch("tutorsim.client.run_batch", side_effect=fake_run_batch))
     stack.enter_context(patch("tutorsim.client.ModelClient", return_value=fake_client))
@@ -1062,7 +1148,11 @@ def test_score_returns_annotation(fixture_scenario, fixture_transcript):
     sid = fixture_scenario.id  # "testset:conv-abc__hum_5_12"
 
     annotate_key = f"{sid}__scaffolding__0"
-    annotate_resp = {"situation": "Student stuck on division.", "action": "Tutor guided step-by-step.", "result": "Student made progress."}
+    annotate_resp = {
+        "situation": "Student stuck on division.",
+        "action": "Tutor guided step-by-step.",
+        "result": "Student made progress.",
+    }
     decompose_action_key = f"action__{sid}__0"
     decompose_overscaffold_key = f"overscaffold__{sid}__0"
     structure_action_key = f"action__{sid}__0"
@@ -1075,15 +1165,19 @@ def test_score_returns_annotation(fixture_scenario, fixture_transcript):
             return _make_raw_entries({annotate_key: annotate_resp})
         elif decompose_overscaffold_key in keys:
             # Decompose pass: action + overscaffold entries
-            return _make_raw_entries({
-                decompose_action_key: ["guided student", "broke down problem"],
-                decompose_overscaffold_key: [],
-            })
+            return _make_raw_entries(
+                {
+                    decompose_action_key: ["guided student", "broke down problem"],
+                    decompose_overscaffold_key: [],
+                }
+            )
         else:
             # Structure pass: action (JSON)
-            return _make_raw_entries({
-                structure_action_key: {"scaffolding": "yes", "rigor": "no"},
-            })
+            return _make_raw_entries(
+                {
+                    structure_action_key: {"scaffolding": "yes", "rigor": "no"},
+                }
+            )
 
     with _patch_score(fake_run_batch)[0]:
         result = score(fixture_scenario, fixture_transcript)
@@ -1121,18 +1215,30 @@ def test_score_three_passes_in_order(fixture_scenario, fixture_transcript):
         keys = {e["key"] for e in entries}
         if annotate_key in keys:
             call_order.append("annotate")
-            return _make_raw_entries({annotate_key: {"situation": "s", "action": "Tutor helped.", "result": "r"}})
+            return _make_raw_entries(
+                {
+                    annotate_key: {
+                        "situation": "s",
+                        "action": "Tutor helped.",
+                        "result": "r",
+                    }
+                }
+            )
         elif overscaffold_key in keys:
             call_order.append("decompose")
-            return _make_raw_entries({
-                f"action__{sid}__0": ["facet1"],
-                overscaffold_key: [],
-            })
+            return _make_raw_entries(
+                {
+                    f"action__{sid}__0": ["facet1"],
+                    overscaffold_key: [],
+                }
+            )
         else:
             call_order.append("structure")
-            return _make_raw_entries({
-                f"action__{sid}__0": {"scaffolding": "yes", "rigor": "no"},
-            })
+            return _make_raw_entries(
+                {
+                    f"action__{sid}__0": {"scaffolding": "yes", "rigor": "no"},
+                }
+            )
 
     with _patch_score(fake_run_batch)[0]:
         score(fixture_scenario, fixture_transcript)
@@ -1148,24 +1254,37 @@ def test_score_scorer_model_is_claude_opus_4_6(fixture_scenario, fixture_transcr
 
     sid = fixture_scenario.id
     annotate_key = f"{sid}__scaffolding__0"
-    decompose_action_key = f"action__{sid}__0"
 
     def fake_run_batch(client, entries, **kwargs):
         keys = {e["key"] for e in entries}
         if annotate_key in keys:
-            return _make_raw_entries({annotate_key: {"situation": "s", "action": "Tutor guided.", "result": "r"}})
+            return _make_raw_entries(
+                {
+                    annotate_key: {
+                        "situation": "s",
+                        "action": "Tutor guided.",
+                        "result": "r",
+                    }
+                }
+            )
         elif f"overscaffold__{sid}__0" in keys:
-            return _make_raw_entries({
-                f"action__{sid}__0": ["facet1"],
-                f"overscaffold__{sid}__0": [],
-            })
+            return _make_raw_entries(
+                {
+                    f"action__{sid}__0": ["facet1"],
+                    f"overscaffold__{sid}__0": [],
+                }
+            )
         else:
-            return _make_raw_entries({
-                f"action__{sid}__0": {"scaffolding": "yes", "rigor": "no"},
-            })
+            return _make_raw_entries(
+                {
+                    f"action__{sid}__0": {"scaffolding": "yes", "rigor": "no"},
+                }
+            )
 
-    with patch("tutorsim.client.run_batch", side_effect=fake_run_batch), \
-         patch("tutorsim.client.ModelClient") as mock_mc:
+    with (
+        patch("tutorsim.client.run_batch", side_effect=fake_run_batch),
+        patch("tutorsim.client.ModelClient") as mock_mc,
+    ):
         # Make the mock instance have the right model attribute
         fake_client = MagicMock()
         fake_client.model = "claude-opus-4-6"
@@ -1177,7 +1296,9 @@ def test_score_scorer_model_is_claude_opus_4_6(fixture_scenario, fixture_transcr
         # Check that ModelClient was instantiated with claude-opus-4-6
         assert mock_mc.called, "ModelClient was not instantiated"
         init_args = mock_mc.call_args
-        model_arg = init_args.args[0] if init_args.args else init_args.kwargs.get("model")
+        model_arg = (
+            init_args.args[0] if init_args.args else init_args.kwargs.get("model")
+        )
         assert model_arg == "claude-opus-4-6", (
             f"Expected scorer model 'claude-opus-4-6', got {model_arg!r}"
         )
@@ -1189,13 +1310,16 @@ def test_score_accumulates_usage_across_passes(fixture_scenario, fixture_transcr
 
     sid = fixture_scenario.id
     annotate_key = f"{sid}__scaffolding__0"
-    decompose_action_key = f"action__{sid}__0"
 
     def make_resp(keys_vals, tokens_per_key):
         return {
             k: {
                 "text": v if isinstance(v, str) else _json.dumps(v),
-                "usage": {"input_tokens": tokens_per_key, "output_tokens": tokens_per_key, "total_tokens": tokens_per_key * 2}
+                "usage": {
+                    "input_tokens": tokens_per_key,
+                    "output_tokens": tokens_per_key,
+                    "total_tokens": tokens_per_key * 2,
+                },
             }
             for k, v in keys_vals.items()
         }
@@ -1203,16 +1327,31 @@ def test_score_accumulates_usage_across_passes(fixture_scenario, fixture_transcr
     def fake_run_batch(client, entries, **kwargs):
         keys = {e["key"] for e in entries}
         if annotate_key in keys:
-            return make_resp({annotate_key: {"situation": "s", "action": "Tutor helped.", "result": "r"}}, 100)
+            return make_resp(
+                {
+                    annotate_key: {
+                        "situation": "s",
+                        "action": "Tutor helped.",
+                        "result": "r",
+                    }
+                },
+                100,
+            )
         elif f"overscaffold__{sid}__0" in keys:
-            return make_resp({
-                f"action__{sid}__0": ["f1"],
-                f"overscaffold__{sid}__0": [],
-            }, 200)
+            return make_resp(
+                {
+                    f"action__{sid}__0": ["f1"],
+                    f"overscaffold__{sid}__0": [],
+                },
+                200,
+            )
         else:
-            return make_resp({
-                f"action__{sid}__0": {"scaffolding": "yes", "rigor": "no"},
-            }, 300)
+            return make_resp(
+                {
+                    f"action__{sid}__0": {"scaffolding": "yes", "rigor": "no"},
+                },
+                300,
+            )
 
     with _patch_score(fake_run_batch)[0]:
         result = score(fixture_scenario, fixture_transcript)
@@ -1227,7 +1366,7 @@ def test_score_accumulates_usage_across_passes(fixture_scenario, fixture_transcr
 # Ground-truth build shims: _parse_decomposed + _build_overscaffold_prompt
 # ---------------------------------------------------------------------------
 
-from tutorsim.scoring import _parse_decomposed, _build_overscaffold_prompt
+from tutorsim.scoring import _build_overscaffold_prompt, _parse_decomposed
 
 
 def test_parse_decomposed_bare_array():
@@ -1269,6 +1408,7 @@ def test_build_overscaffold_prompt_substitutes_all_three():
 # score_batch: pooled 3-pass scoring across many scenarios
 # ---------------------------------------------------------------------------
 
+
 def _second_scenario():
     """A second, distinct scenario for pooling tests."""
     return Scenario(
@@ -1280,14 +1420,23 @@ def _second_scenario():
         dimension="rigor",
         student={"mode": "oracle", "reference": "", "context": "Grade 4, Math"},
         rubric={"gold": "rigor", "hint": "Student guessed."},
-        provenance={"conv_id": "conv-xyz", "cut_turn": 2, "turn_start": 2, "turn_end": 4},
+        provenance={
+            "conv_id": "conv-xyz",
+            "cut_turn": 2,
+            "turn_start": 2,
+            "turn_end": 4,
+        },
     )
 
 
 def _second_transcript(scenario):
     t = Transcript(scenario_id=scenario.id, tutor_model="test-model")
     t.generated_turns = [
-        {"turn_number": 3, "role": "TUTOR", "text": "Are you sure? Walk me through it."},
+        {
+            "turn_number": 3,
+            "role": "TUTOR",
+            "text": "Are you sure? Walk me through it.",
+        },
         {"turn_number": 4, "role": "STUDENT", "text": "Oh, it's 4."},
     ]
     return t
@@ -1301,31 +1450,45 @@ def _fake_pooled_run_batch(sids):
     calls = []
 
     def fake_run_batch(client, entries, **kwargs):
-        calls.append({
-            "display_name": kwargs.get("display_name"),
-            "keys": [e["key"] for e in entries],
-        })
+        calls.append(
+            {
+                "display_name": kwargs.get("display_name"),
+                "keys": [e["key"] for e in entries],
+            }
+        )
         keys = {e["key"] for e in entries}
         out = {}
         for sid in sids:
             if f"{sid}__scaffolding__0" in keys:
-                out.update(_make_raw_entries({
-                    f"{sid}__scaffolding__0": {
-                        "situation": f"situation for {sid}",
-                        "action": f"action for {sid}",
-                        "result": f"result for {sid}",
-                    },
-                }))
+                out.update(
+                    _make_raw_entries(
+                        {
+                            f"{sid}__scaffolding__0": {
+                                "situation": f"situation for {sid}",
+                                "action": f"action for {sid}",
+                                "result": f"result for {sid}",
+                            },
+                        }
+                    )
+                )
             if f"overscaffold__{sid}__0" in keys:
-                out.update(_make_raw_entries({
-                    f"action__{sid}__0": [f"facet-a {sid}"],
-                    f"overscaffold__{sid}__0": [],
-                }))
+                out.update(
+                    _make_raw_entries(
+                        {
+                            f"action__{sid}__0": [f"facet-a {sid}"],
+                            f"overscaffold__{sid}__0": [],
+                        }
+                    )
+                )
             elif f"action__{sid}__0" in keys:
                 # Structure pass (action JSON)
-                out.update(_make_raw_entries({
-                    f"action__{sid}__0": {"scaffolding": "yes", "rigor": "no"},
-                }))
+                out.update(
+                    _make_raw_entries(
+                        {
+                            f"action__{sid}__0": {"scaffolding": "yes", "rigor": "no"},
+                        }
+                    )
+                )
         return out
 
     return fake_run_batch, calls
@@ -1345,7 +1508,9 @@ def test_score_batch_pools_three_run_batch_calls(fixture_scenario, fixture_trans
 
     assert len(calls) == 3, f"Expected 3 pooled run_batch calls, got {len(calls)}"
     assert [c["display_name"] for c in calls] == [
-        "scorer_annotate", "scorer_decompose", "scorer_structure",
+        "scorer_annotate",
+        "scorer_decompose",
+        "scorer_structure",
     ]
     # Every pass's entry set must cover BOTH scenarios (pooled, not per-moment)
     for call in calls:
@@ -1366,7 +1531,9 @@ def test_score_batch_pools_three_run_batch_calls(fixture_scenario, fixture_trans
     assert a2.action_decomposed == [f"facet-a {s2.id}"]
 
 
-def test_score_batch_attributes_usage_per_scenario(fixture_scenario, fixture_transcript):
+def test_score_batch_attributes_usage_per_scenario(
+    fixture_scenario, fixture_transcript
+):
     """Each Annotation.usage counts only its own scenario's entries."""
     from tutorsim.scoring import score_batch
 
@@ -1385,7 +1552,9 @@ def test_score_batch_attributes_usage_per_scenario(fixture_scenario, fixture_tra
         )
 
 
-def test_score_batch_empty_transcript_gets_minimal_annotation(fixture_scenario, fixture_transcript):
+def test_score_batch_empty_transcript_gets_minimal_annotation(
+    fixture_scenario, fixture_transcript
+):
     """A pair with no generated turns yields the minimal Annotation, no batch entries."""
     from tutorsim.scoring import score_batch
 
@@ -1402,7 +1571,10 @@ def test_score_batch_empty_transcript_gets_minimal_annotation(fixture_scenario, 
     for call in calls:
         assert not any(s2.id in k for k in call["keys"])
     # The non-empty pair still scores normally
-    assert annotations[fixture_scenario.id].situation == f"situation for {fixture_scenario.id}"
+    assert (
+        annotations[fixture_scenario.id].situation
+        == f"situation for {fixture_scenario.id}"
+    )
 
 
 def test_score_batch_empty_input():
@@ -1424,6 +1596,8 @@ def test_score_delegates_to_pooled_path(fixture_scenario, fixture_transcript):
         single = score(fixture_scenario, fixture_transcript)
     fake_run_batch2, _ = _fake_pooled_run_batch([fixture_scenario.id])
     with _patch_score(fake_run_batch2)[0]:
-        pooled = score_batch([(fixture_scenario, fixture_transcript)])[fixture_scenario.id]
+        pooled = score_batch([(fixture_scenario, fixture_transcript)])[
+            fixture_scenario.id
+        ]
 
     assert single.to_dict() == pooled.to_dict()

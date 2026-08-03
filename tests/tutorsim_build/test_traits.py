@@ -5,7 +5,6 @@ in the release (schema v2): the runtime only consumes student.trait; new
 moments sets get their personas at build time via generate_traits_for_moments.
 """
 
-import pytest
 from unittest.mock import MagicMock
 
 from tutorsim.moments import Moment
@@ -41,8 +40,9 @@ def _fake_client():
 
 def test_generate_traits_attaches_full_trait_object():
     m = _moment()
-    n = generate_traits_for_moments([m], model_client=_fake_client(),
-                                    model_name="claude-opus-4-6")
+    n = generate_traits_for_moments(
+        [m], model_client=_fake_client(), model_name="claude-opus-4-6"
+    )
     assert n == 1
     trait = m.student["trait"]
     assert trait["persona"]  # non-empty, parsed from DESCRIPTION:
@@ -64,23 +64,30 @@ def test_generate_traits_prefix_is_turn_formatted_context():
 
 
 def test_generate_traits_skips_moments_with_existing_trait():
-    frozen = {"persona": "frozen", "trait_mode": "joined-3",
-              "generator_model": "claude-opus-4-6", "generated_at": "2026-06-18T00:00:00"}
+    frozen = {
+        "persona": "frozen",
+        "trait_mode": "joined-3",
+        "generator_model": "claude-opus-4-6",
+        "generated_at": "2026-06-18T00:00:00",
+    }
     client = _fake_client()
     m = _moment(trait=frozen)
     n = generate_traits_for_moments([m], model_client=client, model_name="x")
     assert n == 0
-    assert m.student["trait"] == frozen        # untouched
-    assert client.generate.call_count == 0     # no LLM calls
+    assert m.student["trait"] == frozen  # untouched
+    assert client.generate.call_count == 0  # no LLM calls
 
 
 def test_trait_generator_prompts_ship_in_build_package():
     """system/user templates + dimension descriptions live in tutorsim_build,
     not the runtime package."""
     from tutorsim_build.resources import resource_text
+
     assert resource_text("prompts/trait_generator/system.txt").strip()
     assert resource_text("prompts/trait_generator/user.txt").strip()
-    assert resource_text("prompts/trait_generator/dimensions/misconceptions.txt").strip()
+    assert resource_text(
+        "prompts/trait_generator/dimensions/misconceptions.txt"
+    ).strip()
 
 
 # ---------------------------------------------------------------------------
@@ -108,7 +115,7 @@ class TestGenerateTrait:
 
         client = _make_client("Some thinking\nDESCRIPTION: A diligent student.")
         # We don't need the description content; just confirm the call goes through.
-        result = generate_trait("Turn 1. TUTOR: Hi", mode="joined-3", model_client=client)
+        generate_trait("Turn 1. TUTOR: Hi", mode="joined-3", model_client=client)
 
         # All 5 generate calls happened (one per dimension).
         assert client.generate.call_count == 5
@@ -125,7 +132,9 @@ class TestGenerateTrait:
         client = MagicMock()
         client.generate = MagicMock(side_effect=responses)
 
-        result = generate_trait("Turn 1. TUTOR: Hi", mode="joined-3", model_client=client)
+        result = generate_trait(
+            "Turn 1. TUTOR: Hi", mode="joined-3", model_client=client
+        )
 
         # Result is the sorted+joined descriptions.
         assert isinstance(result, str)
@@ -158,7 +167,6 @@ class TestGenerateTrait:
         # Check every generate call uses the right defaults.
         for call in client.generate.call_args_list:
             kwargs = call.kwargs if call.kwargs else {}
-            args = call.args if call.args else ()
             # max_tokens must be 1024 (adapter default when None passed by TraitGenerator)
             assert kwargs.get("max_tokens", 1024) == 1024, f"max_tokens wrong: {kwargs}"
             # json_mode must be False
@@ -178,7 +186,9 @@ class TestGenerateTrait:
         """Text before 'DESCRIPTION:' (thinking) is stripped; only post-marker text is kept."""
         from tutorsim_build.traits import generate_trait
 
-        client = _make_client("  lots of thinking\n\nDESCRIPTION:   Parsed description.  ")
+        client = _make_client(
+            "  lots of thinking\n\nDESCRIPTION:   Parsed description.  "
+        )
         result = generate_trait("prefix", mode="joined-3", model_client=client)
 
         # All 5 dimension results will be "Parsed description." (same stub for each)
@@ -196,7 +206,9 @@ class TestGenerateTrait:
         for call in client.generate.call_args_list:
             kwargs = call.kwargs if call.kwargs else {}
             # cacheable_prefix must be set (the system prompt) and non-empty
-            assert "cacheable_prefix" in kwargs, "cacheable_prefix missing from generate call"
+            assert "cacheable_prefix" in kwargs, (
+                "cacheable_prefix missing from generate call"
+            )
             assert kwargs["cacheable_prefix"], "cacheable_prefix is empty/None"
 
     def test_user_prompt_contains_conversation_text(self):
@@ -209,4 +221,6 @@ class TestGenerateTrait:
 
         for call in client.generate.call_args_list:
             user_text = call.args[0] if call.args else call.kwargs.get("prompt", "")
-            assert prefix in user_text, f"Prefix missing from user text: {user_text[:200]}"
+            assert prefix in user_text, (
+                f"Prefix missing from user text: {user_text[:200]}"
+            )

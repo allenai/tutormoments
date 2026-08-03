@@ -3,24 +3,23 @@
 All tests mock run_conversation and score so there are no network calls.
 Uses tmp_path as results_root so nothing writes to the real results/ directory.
 """
+
 import json
 import logging
 import os
 import time
-from dataclasses import dataclass, field
 from pathlib import Path
-from unittest.mock import MagicMock, patch, call
+from unittest.mock import MagicMock, patch
 
 import pytest
 
-from tutorsim import results as results_mod
 from tutorsim.moments import Moment
 from tutorsim.scoring import Annotation
-
 
 # ---------------------------------------------------------------------------
 # Fixtures
 # ---------------------------------------------------------------------------
+
 
 def _make_scenario(sid: str, dimension: str = "scaffolding") -> Moment:
     """Build a minimal Moment for testing."""
@@ -31,8 +30,12 @@ def _make_scenario(sid: str, dimension: str = "scaffolding") -> Moment:
         student={
             "context": "Student context",
             "reference": "",
-            "trait": {"persona": "fixture persona", "trait_mode": "joined-3",
-                      "generator_model": "claude-opus-4-6", "generated_at": "2026-06-18T00:00:00"},
+            "trait": {
+                "persona": "fixture persona",
+                "trait_mode": "joined-3",
+                "generator_model": "claude-opus-4-6",
+                "generated_at": "2026-06-18T00:00:00",
+            },
         },
         rubric={"gold": dimension, "hint": "test hint"},
         provenance={"conv_id": f"conv_{sid}", "cut_turn": 1},
@@ -56,22 +59,35 @@ def _make_annotation(sid: str) -> Annotation:
     )
 
 
-def _make_transcript(sid: str, tutor_latencies=None, student_latencies=None,
-                     tutor_usage=None, student_usage=None) -> MagicMock:
+def _make_transcript(
+    sid: str,
+    tutor_latencies=None,
+    student_latencies=None,
+    tutor_usage=None,
+    student_usage=None,
+) -> MagicMock:
     """Build a mock Transcript-like object with optional latency/usage data."""
     t = MagicMock()
     t.scenario_id = sid
     t.tutor_model = "claude-opus-4-8"
     t.generated_turns = [{"turn_number": 2, "role": "TUTOR", "text": "Hi"}]
-    t.to_dict.return_value = {"scenario_id": sid, "completed": True, "generated_turns": []}
+    t.to_dict.return_value = {
+        "scenario_id": sid,
+        "completed": True,
+        "generated_turns": [],
+    }
     t.tutor_latencies = tutor_latencies if tutor_latencies is not None else []
     t.student_latencies = student_latencies if student_latencies is not None else []
-    t.tutor_usage = tutor_usage if tutor_usage is not None else {
-        "input_tokens": 0, "output_tokens": 0, "total_tokens": 0
-    }
-    t.student_usage = student_usage if student_usage is not None else {
-        "input_tokens": 0, "output_tokens": 0, "total_tokens": 0
-    }
+    t.tutor_usage = (
+        tutor_usage
+        if tutor_usage is not None
+        else {"input_tokens": 0, "output_tokens": 0, "total_tokens": 0}
+    )
+    t.student_usage = (
+        student_usage
+        if student_usage is not None
+        else {"input_tokens": 0, "output_tokens": 0, "total_tokens": 0}
+    )
     return t
 
 
@@ -103,22 +119,35 @@ def _score_batch_from(annotations):
         return {s.id: by_sid[s.id].pop(0) for s, _t in pairs}
 
     return _fake
+
+
 _LOAD_PATCH = "tutorsim.cli.load_moments"
+
 
 def _load_result(moments):
     """load_moments returns (moments, source_meta)."""
-    return (list(moments), {
-        "dataset_id": None, "revision": None, "data_path": None,
-        "config": "moments", "record_count": len(moments),
-        "content_hash": "0" * 64,
-    })
+    return (
+        list(moments),
+        {
+            "dataset_id": None,
+            "revision": None,
+            "data_path": None,
+            "config": "moments",
+            "record_count": len(moments),
+            "content_hash": "0" * 64,
+        },
+    )
+
+
 _CFG_PATCH = "tutorsim.cli.build_run_config"
 # The always-on taxonomy classification hook makes LLM calls; patch it out in
 # run_cell tests so the suite never hits the network. Zero usage keeps the
 # token-total assertions unaffected.
 _TAX_PATCH = "tutorsim.cli._classify_run_taxonomy"
 _TAX_RESULT = {
-    "scheme_version": "lm_extended_v1", "counts": {}, "n_facets": 0,
+    "scheme_version": "lm_extended_v1",
+    "counts": {},
+    "n_facets": 0,
     "excluded": 0,
     "usage": {"input_tokens": 0, "output_tokens": 0, "total_tokens": 0},
 }
@@ -148,11 +177,12 @@ def _make_run_config(sample=2, dataset="test_ds", max_turns=4, replay_concurrenc
 # Test 1: run_cell writes all expected files and correct summary
 # ---------------------------------------------------------------------------
 
+
 def test_run_cell_writes_all_files(tmp_path):
     """run_cell over a 2-scenario fixture writes 2 transcripts + 2 scores +
     config.json + summary.json; summary metrics == aggregate of the 2 scores."""
-    from tutorsim.cli import run_cell
     import tutorsim.report as report_mod
+    from tutorsim.cli import run_cell
 
     scenarios = list(FIXTURE_SCENARIOS)
     transcripts = [_make_transcript(s.id) for s in scenarios]
@@ -162,10 +192,10 @@ def test_run_cell_writes_all_files(tmp_path):
     cfg_mock = _make_run_config(sample=2)
 
     with (
-        patch(_CFG_PATCH, return_value=cfg_mock) as mock_build_cfg,
-        patch(_LOAD_PATCH, return_value=_load_result(scenarios)) as mock_load,
-        patch(_CONV_PATCH, side_effect=transcripts) as mock_conv,
-        patch(_SCORE_PATCH, side_effect=_score_batch_from(annotations)) as mock_score,
+        patch(_CFG_PATCH, return_value=cfg_mock),
+        patch(_LOAD_PATCH, return_value=_load_result(scenarios)),
+        patch(_CONV_PATCH, side_effect=transcripts),
+        patch(_SCORE_PATCH, side_effect=_score_batch_from(annotations)),
         patch(_TAX_PATCH, return_value=_TAX_RESULT),
     ):
         run_id = run_cell(
@@ -190,13 +220,15 @@ def test_run_cell_writes_all_files(tmp_path):
 
     # 2 transcripts
     for s in scenarios:
-        assert (run_dir / "transcripts" / f"{s.id}.json").exists(), \
+        assert (run_dir / "transcripts" / f"{s.id}.json").exists(), (
             f"Missing transcript for {s.id}"
+        )
 
     # 2 scores
     for s in scenarios:
-        assert (run_dir / "scores" / f"{s.id}.json").exists(), \
+        assert (run_dir / "scores" / f"{s.id}.json").exists(), (
             f"Missing score for {s.id}"
+        )
 
     # summary.json
     assert (run_dir / "summary.json").exists()
@@ -205,7 +237,7 @@ def test_run_cell_writes_all_files(tmp_path):
     # summary metrics == aggregate of the 2 annotations
     assert summary["n_scenarios"] == expected_summary["n_scenarios"]
     assert "outcome_pos_rate" not in summary  # dropped from the paper
-    assert "scaffolding_did" not in summary   # did-rates dropped from the paper
+    assert "scaffolding_did" not in summary  # did-rates dropped from the paper
     assert "rigor_did" not in summary
     scaf = summary["scaffold_calibrated"]
     exp_scaf = expected_summary["scaffold_calibrated"]
@@ -227,6 +259,7 @@ def test_run_cell_writes_all_files(tmp_path):
 # Test 1b: run_cell writes latency + tokens blocks into summary.json (spec S7)
 # ---------------------------------------------------------------------------
 
+
 def test_run_cell_writes_latency_and_tokens(tmp_path):
     """run_cell aggregates tutor_latencies/usage from transcripts into
     summary.json latency.tutor and tokens.total blocks (spec S7).
@@ -245,14 +278,26 @@ def test_run_cell_writes_latency_and_tokens(tmp_path):
             tutor_latencies=[1.0, 3.0],
             student_latencies=[0.5],
             tutor_usage={"input_tokens": 100, "output_tokens": 50, "total_tokens": 150},
-            student_usage={"input_tokens": 80, "output_tokens": 20, "total_tokens": 100},
+            student_usage={
+                "input_tokens": 80,
+                "output_tokens": 20,
+                "total_tokens": 100,
+            },
         ),
         _make_transcript(
             "scenario_002",
             tutor_latencies=[2.0],
             student_latencies=[0.8],
-            tutor_usage={"input_tokens": 200, "output_tokens": 100, "total_tokens": 300},
-            student_usage={"input_tokens": 150, "output_tokens": 50, "total_tokens": 200},
+            tutor_usage={
+                "input_tokens": 200,
+                "output_tokens": 100,
+                "total_tokens": 300,
+            },
+            student_usage={
+                "input_tokens": 150,
+                "output_tokens": 50,
+                "total_tokens": 200,
+            },
         ),
     ]
     annotations = [_make_annotation(s.id) for s in scenarios]
@@ -286,8 +331,12 @@ def test_run_cell_writes_latency_and_tokens(tmp_path):
     assert "p95_seconds" in lat, "latency.tutor must have p95_seconds"
     # tutor_latencies = [1.0, 3.0, 2.0] -> sorted = [1.0, 2.0, 3.0]
     # n=3, p50 = s[1] = 2.0, p95_idx = max(0, min(2, round(2.85)-1)) = max(0,min(2,2)) = 2 -> 3.0
-    assert lat["p50_seconds"] == pytest.approx(2.0), f"p50 expected 2.0, got {lat['p50_seconds']}"
-    assert lat["p95_seconds"] == pytest.approx(3.0), f"p95 expected 3.0, got {lat['p95_seconds']}"
+    assert lat["p50_seconds"] == pytest.approx(2.0), (
+        f"p50 expected 2.0, got {lat['p50_seconds']}"
+    )
+    assert lat["p95_seconds"] == pytest.approx(3.0), (
+        f"p95 expected 3.0, got {lat['p95_seconds']}"
+    )
 
     # tokens.total block must be present
     assert "tokens" in summary, "summary must have 'tokens' key"
@@ -295,12 +344,15 @@ def test_run_cell_writes_latency_and_tokens(tmp_path):
     tok = summary["tokens"]["total"]
     assert "total_tokens" in tok, "tokens.total must have total_tokens"
     # tutor: 150+300=450, student: 100+200=300, total: 750
-    assert tok["total_tokens"] == 750, f"total_tokens expected 750, got {tok['total_tokens']}"
+    assert tok["total_tokens"] == 750, (
+        f"total_tokens expected 750, got {tok['total_tokens']}"
+    )
 
 
 # ---------------------------------------------------------------------------
 # Test 2: run_cell resumes (second call skips already-done scenarios)
 # ---------------------------------------------------------------------------
+
 
 def test_run_cell_resumes(tmp_path):
     """Second run_cell call finds both scenarios already done; 0 new conversation
@@ -358,11 +410,11 @@ def test_run_cell_resumes(tmp_path):
 # Test 3: score error -> logged + skipped; run completes with partial summary
 # ---------------------------------------------------------------------------
 
+
 def test_run_cell_skips_on_score_error(tmp_path):
     """A scenario whose score() raises is logged + skipped; run still completes
     and writes summary.json over the successful scenarios only."""
     from tutorsim.cli import run_cell
-    import tutorsim.report as report_mod
 
     scenarios = list(FIXTURE_SCENARIOS)
     good_scenario = scenarios[0]
@@ -446,6 +498,7 @@ def test_run_cell_raises_when_all_scenarios_fail(tmp_path):
 # Test 4: cell expansion -- tutors x modes = cells with correct lane assignment
 # ---------------------------------------------------------------------------
 
+
 def test_cell_expansion_and_lane_assignment():
     """3 tutors x 2 modes = 6 cells; each cell gets the correct provider lane."""
     from tutorsim.cli import expand_cells
@@ -473,6 +526,7 @@ def test_cell_expansion_and_lane_assignment():
 # ---------------------------------------------------------------------------
 # Test 5: scheduler -- within-lane sequential, lanes can run independently
 # ---------------------------------------------------------------------------
+
 
 def test_scheduler_within_lane_sequential(tmp_path):
     """Cells within a lane are called in order; all 6 run_cell calls complete."""
@@ -535,8 +589,10 @@ def test_scheduler_multiple_lanes_all_cells_run(tmp_path):
 # Test 6: --trials N -- conversation+score called N times; summary has mean+spread
 # ---------------------------------------------------------------------------
 
-def _make_run_config_trials(n_trials: int, sample=2, dataset="test_ds", max_turns=4,
-                            replay_concurrency=1):
+
+def _make_run_config_trials(
+    n_trials: int, sample=2, dataset="test_ds", max_turns=4, replay_concurrency=1
+):
     cfg = MagicMock()
     cfg.dataset = dataset
     cfg.data_path = None
@@ -579,7 +635,7 @@ def test_trials_3_calls_conversation_n_times(tmp_path):
         patch(_SCORE_PATCH, new=score_mock),
         patch(_TAX_PATCH, return_value=_TAX_RESULT),
     ):
-        run_id = run_cell(
+        run_cell(
             tutor="claude-opus-4-8",
             mode="plain",
             run_cfg=None,
@@ -637,8 +693,8 @@ def test_trials_summary_has_mean_and_spread(tmp_path):
 def test_trials_1_summary_matches_single_run(tmp_path):
     """trials=1: summary.json must be byte-compatible with the Task-4 single-run format
     (no 'mean'/'spread' keys -- it is the plain aggregate dict)."""
-    from tutorsim.cli import run_cell
     import tutorsim.report as report_mod
+    from tutorsim.cli import run_cell
 
     scenarios = list(FIXTURE_SCENARIOS)
     transcripts = [_make_transcript(s.id) for s in scenarios]
@@ -677,6 +733,7 @@ def test_trials_1_summary_matches_single_run(tmp_path):
 # Helper: build a fake run directory with a summary.json
 # ---------------------------------------------------------------------------
 
+
 def _make_fake_run(
     root: Path,
     run_id: str,
@@ -692,11 +749,29 @@ def _make_fake_run(
         "tutor_model": tutor_model,
         "mode": mode,
         "n_scenarios": n,
-        "scaffold_calibrated": {"score": scaffold_cal, "n_clean_yes": 6, "n_total": n, "n_overscaffold": 1},
+        "scaffold_calibrated": {
+            "score": scaffold_cal,
+            "n_clean_yes": 6,
+            "n_total": n,
+            "n_overscaffold": 1,
+        },
         "rigor_calibrated": {"score": 0.5, "n_clean_yes": 5, "n_total": n},
         "overscaffold": {"rate": 0.1, "n_yes": 1, "n_total": n, "available": True},
-        "latency": {"tutor": {"p50_seconds": 1.0, "p95_seconds": 2.5, "mean_seconds": 1.2, "n": n}},
-        "tokens": {"total": {"total_tokens": 100000, "input_tokens": 80000, "output_tokens": 20000}},
+        "latency": {
+            "tutor": {
+                "p50_seconds": 1.0,
+                "p95_seconds": 2.5,
+                "mean_seconds": 1.2,
+                "n": n,
+            }
+        },
+        "tokens": {
+            "total": {
+                "total_tokens": 100000,
+                "input_tokens": 80000,
+                "output_tokens": 20000,
+            }
+        },
     }
     (run_dir / "summary.json").write_text(
         json.dumps(summary, indent=2), encoding="utf-8"
@@ -708,14 +783,27 @@ def _make_fake_run(
 # Test 7: report subcommand writes leaderboard.md + .csv with both rows
 # ---------------------------------------------------------------------------
 
+
 def test_report_writes_leaderboard_md_and_csv(tmp_path):
     """main(['report', '--results-root', ..., '--out', ...]) writes leaderboard.md + .csv
     containing both run rows."""
     from tutorsim.cli import main
 
     results_root = tmp_path / "results"
-    _make_fake_run(results_root, "model_alpha_plain_ds_20260626", "model-alpha", "plain", scaffold_cal=0.75)
-    _make_fake_run(results_root, "model_beta_plain_ds_20260626", "model-beta", "plain", scaffold_cal=0.50)
+    _make_fake_run(
+        results_root,
+        "model_alpha_plain_ds_20260626",
+        "model-alpha",
+        "plain",
+        scaffold_cal=0.75,
+    )
+    _make_fake_run(
+        results_root,
+        "model_beta_plain_ds_20260626",
+        "model-beta",
+        "plain",
+        scaffold_cal=0.50,
+    )
 
     out_stem = str(tmp_path / "leaderboard")
 
@@ -745,12 +833,15 @@ def test_report_writes_leaderboard_md_and_csv(tmp_path):
 # Test 8: view subcommand writes non-empty HTML
 # ---------------------------------------------------------------------------
 
+
 def test_view_writes_html(tmp_path):
     """main(['view', '--results-root', ..., '--out', ...]) writes a non-empty HTML file."""
     from tutorsim.cli import main
 
     results_root = tmp_path / "results"
-    _make_fake_run(results_root, "model_alpha_plain_ds_20260626", "model-alpha", "plain")
+    _make_fake_run(
+        results_root, "model_alpha_plain_ds_20260626", "model-alpha", "plain"
+    )
 
     out_html = str(tmp_path / "viewer.html")
 
@@ -764,15 +855,15 @@ def test_view_writes_html(tmp_path):
     assert "<!DOCTYPE html>" in html_text or "<html" in html_text
 
 
-
-
 # ---------------------------------------------------------------------------
 # Test 10: --help and run --help exit 0 and list subcommands
 # ---------------------------------------------------------------------------
 
+
 def test_main_help_exits_0():
     """main(['--help']) raises SystemExit(0)."""
     from tutorsim.cli import main
+
     with pytest.raises(SystemExit) as exc_info:
         main(["--help"])
     assert exc_info.value.code == 0
@@ -781,6 +872,7 @@ def test_main_help_exits_0():
 def test_run_help_exits_0():
     """main(['run', '--help']) raises SystemExit(0)."""
     from tutorsim.cli import main
+
     with pytest.raises(SystemExit) as exc_info:
         main(["run", "--help"])
     assert exc_info.value.code == 0
@@ -789,6 +881,7 @@ def test_run_help_exits_0():
 # ---------------------------------------------------------------------------
 # Test 11: end-to-end smoke -- main(['run', ...]) with mocks
 # ---------------------------------------------------------------------------
+
 
 def test_main_run_smoke(tmp_path):
     """main(['run', '--tutors', 'claude-opus-4-8', '--sample', '1', ...]) with mocked
@@ -811,12 +904,17 @@ def test_main_run_smoke(tmp_path):
     ):
         # run_sweep returns a list of run_ids; stub it so we test main() wiring
         mock_sweep.return_value = ["claude-opus-4-8_plain_test_ds_20260626"]
-        main([
-            "run",
-            "--tutors", "claude-opus-4-8",
-            "--sample", "1",
-            "--dataset", "test_ds",
-        ])
+        main(
+            [
+                "run",
+                "--tutors",
+                "claude-opus-4-8",
+                "--sample",
+                "1",
+                "--dataset",
+                "test_ds",
+            ]
+        )
 
     # Verify run_sweep was called (proving main() wired through correctly)
     mock_sweep.assert_called_once()
@@ -831,15 +929,23 @@ def test_main_run_missing_dataset_exits_cleanly(capsys):
 
     with (
         patch(_CFG_PATCH, return_value=cfg_mock),
-        patch("tutorsim.cli.run_sweep", side_effect=DatasetNotFoundError("missing dataset")),
+        patch(
+            "tutorsim.cli.run_sweep",
+            side_effect=DatasetNotFoundError("missing dataset"),
+        ),
     ):
         with pytest.raises(SystemExit) as exc_info:
-            main([
-                "run",
-                "--tutors", "claude-opus-4-8",
-                "--sample", "1",
-                "--dataset", "missing_ds",
-            ])
+            main(
+                [
+                    "run",
+                    "--tutors",
+                    "claude-opus-4-8",
+                    "--sample",
+                    "1",
+                    "--dataset",
+                    "missing_ds",
+                ]
+            )
 
     assert exc_info.value.code == 2
     captured = capsys.readouterr()
@@ -847,7 +953,9 @@ def test_main_run_missing_dataset_exits_cleanly(capsys):
     assert "Traceback" not in captured.err
 
 
-def test_run_config_argument_becomes_active_config_for_late_resolution(tmp_path, monkeypatch):
+def test_run_config_argument_becomes_active_config_for_late_resolution(
+    tmp_path, monkeypatch
+):
     """`tutorsim run --config FILE` also affects later no-arg config lookups."""
     from tutorsim.cli import main
     from tutorsim.config import _reset_config_cache
@@ -874,7 +982,7 @@ batch: { timeout: 60 }
     observed = {}
 
     def fake_run_sweep(cells, run_cfg, *, date, results_root):
-        from tutorsim.config import resolve_model, student_spec, scorer_spec
+        from tutorsim.config import resolve_model, scorer_spec, student_spec
 
         observed["provider"] = resolve_model("gpt-4o-mini")["provider"]
         observed["student"] = student_spec()["model"]
@@ -887,12 +995,17 @@ batch: { timeout: 60 }
     _reset_config_cache()
 
     try:
-        main([
-            "run",
-            "--config", str(config_path),
-            "--tutors", "gpt-4o-mini",
-            "--dataset", "readme_mock",
-        ])
+        main(
+            [
+                "run",
+                "--config",
+                str(config_path),
+                "--tutors",
+                "gpt-4o-mini",
+                "--dataset",
+                "readme_mock",
+            ]
+        )
 
         assert observed == {
             "provider": "openai",
@@ -959,8 +1072,8 @@ def test_run_cell_pools_scoring_into_one_call(tmp_path):
 def test_run_cell_transcript_without_score_resumes_into_pool(tmp_path):
     """A moment with a transcript on disk but no score skips its conversation
     and is scored via the pool (the interrupted-run resume case)."""
-    from tutorsim.cli import run_cell
     from tutorsim import results as res
+    from tutorsim.cli import run_cell
 
     scenarios = list(FIXTURE_SCENARIOS)
     done_conv, needs_score = scenarios[0], scenarios[1]
@@ -971,9 +1084,13 @@ def test_run_cell_transcript_without_score_resumes_into_pool(tmp_path):
 
     # Pre-write ONLY the transcript for needs_score (simulates an interrupt
     # between transcript write and score write).
-    pre_tx = {"scenario_id": needs_score.id, "tutor_model": "claude-opus-4-8",
-              "generated_turns": [{"turn_number": 2, "role": "TUTOR", "text": "Hi"}],
-              "completed": True, "ended_via": "MAX_TURNS"}
+    pre_tx = {
+        "scenario_id": needs_score.id,
+        "tutor_model": "claude-opus-4-8",
+        "generated_turns": [{"turn_number": 2, "role": "TUTOR", "text": "Hi"}],
+        "completed": True,
+        "ended_via": "MAX_TURNS",
+    }
     res.write_transcript(run_id, needs_score.id, pre_tx, results_root=str(tmp_path))
 
     conv_calls = []
@@ -1021,6 +1138,7 @@ def test_run_cell_transcript_without_score_resumes_into_pool(tmp_path):
 # Taxonomy integration: the always-on hook folds into summary.json
 # ---------------------------------------------------------------------------
 
+
 def test_run_cell_folds_taxonomy_block_into_summary(tmp_path):
     """The always-on taxonomy hook's result lands in summary.json, and its
     token usage is added into tokens.total."""
@@ -1034,7 +1152,8 @@ def test_run_cell_folds_taxonomy_block_into_summary(tmp_path):
     tax_result = {
         "scheme_version": "lm_extended_v1",
         "counts": {"A": 3, "E": 1},
-        "n_facets": 4, "excluded": 1,
+        "n_facets": 4,
+        "excluded": 1,
         "usage": {"input_tokens": 700, "output_tokens": 300, "total_tokens": 1000},
     }
     with (
@@ -1044,11 +1163,18 @@ def test_run_cell_folds_taxonomy_block_into_summary(tmp_path):
         patch(_SCORE_PATCH, side_effect=_score_batch_from(annotations)),
         patch(_TAX_PATCH, return_value=tax_result) as mock_tax,
     ):
-        run_id = run_cell(tutor="claude-opus-4-8", mode="plain", run_cfg=None,
-                          date="20260626", results_root=str(tmp_path))
+        run_id = run_cell(
+            tutor="claude-opus-4-8",
+            mode="plain",
+            run_cfg=None,
+            date="20260626",
+            results_root=str(tmp_path),
+        )
 
     assert mock_tax.called
-    summary = json.loads((tmp_path / run_id / "summary.json").read_text(encoding="utf-8"))
+    summary = json.loads(
+        (tmp_path / run_id / "summary.json").read_text(encoding="utf-8")
+    )
     assert summary["taxonomy"] == tax_result
     # taxonomy usage folded into the token bookkeeping
     assert summary["tokens"]["taxonomy"] == tax_result["usage"]
@@ -1058,6 +1184,7 @@ def test_run_cell_folds_taxonomy_block_into_summary(tmp_path):
 # ---------------------------------------------------------------------------
 # Replay concurrency (result-preserving parallel replay of moments)
 # ---------------------------------------------------------------------------
+
 
 def _conv_by_sid(scenarios, delays=None, fail_ids=()):
     """run_conversation fake that returns the right transcript for its scenario.
@@ -1085,7 +1212,9 @@ def test_replay_concurrency_matches_serial(tmp_path):
     even when completion order is shuffled (reverse per-sid delays)."""
     from tutorsim.cli import run_cell
 
-    scenarios = [_make_scenario(f"scenario_{i:03d}", "scaffolding") for i in range(1, 6)]
+    scenarios = [
+        _make_scenario(f"scenario_{i:03d}", "scaffolding") for i in range(1, 6)
+    ]
     # Reverse delays: last-submitted finishes first under concurrency, so
     # completion order != submission order -- exercises index-order reassembly.
     delays = {s.id: 0.02 * (len(scenarios) - i) for i, s in enumerate(scenarios)}
@@ -1100,8 +1229,13 @@ def test_replay_concurrency_matches_serial(tmp_path):
             patch(_SCORE_PATCH, side_effect=_score_batch_from(anns)),
             patch(_TAX_PATCH, return_value=_TAX_RESULT),
         ):
-            return run_cell(tutor="claude-opus-4-8", mode="plain", run_cfg=None,
-                            date="20260626", results_root=str(root))
+            return run_cell(
+                tutor="claude-opus-4-8",
+                mode="plain",
+                run_cfg=None,
+                date="20260626",
+                results_root=str(root),
+            )
 
     root_serial = tmp_path / "serial"
     root_conc = tmp_path / "concurrent"
@@ -1131,7 +1265,9 @@ def test_replay_concurrency_error_isolation(tmp_path):
     moment still succeeds."""
     from tutorsim.cli import run_cell
 
-    scenarios = [_make_scenario(f"scenario_{i:03d}", "scaffolding") for i in range(1, 5)]
+    scenarios = [
+        _make_scenario(f"scenario_{i:03d}", "scaffolding") for i in range(1, 5)
+    ]
     bad = scenarios[1]
     good = [s for s in scenarios if s.id != bad.id]
 
@@ -1145,8 +1281,13 @@ def test_replay_concurrency_error_isolation(tmp_path):
         patch(_SCORE_PATCH, side_effect=_score_batch_from(anns)),
         patch(_TAX_PATCH, return_value=_TAX_RESULT),
     ):
-        run_id = run_cell(tutor="claude-opus-4-8", mode="plain", run_cfg=None,
-                          date="20260626", results_root=str(tmp_path))
+        run_id = run_cell(
+            tutor="claude-opus-4-8",
+            mode="plain",
+            run_cfg=None,
+            date="20260626",
+            results_root=str(tmp_path),
+        )
 
     run_dir = tmp_path / run_id
     summary = json.loads((run_dir / "summary.json").read_text(encoding="utf-8"))
@@ -1174,7 +1315,9 @@ def test_replay_concurrency_resume(tmp_path):
     the already-done ones as resumed."""
     from tutorsim.cli import run_cell
 
-    scenarios = [_make_scenario(f"scenario_{i:03d}", "scaffolding") for i in range(1, 4)]
+    scenarios = [
+        _make_scenario(f"scenario_{i:03d}", "scaffolding") for i in range(1, 4)
+    ]
 
     # First run: complete only the first moment (sample=1).
     cfg1 = _make_run_config(sample=1, replay_concurrency=4)
@@ -1182,11 +1325,19 @@ def test_replay_concurrency_resume(tmp_path):
         patch(_CFG_PATCH, return_value=cfg1),
         patch(_LOAD_PATCH, return_value=_load_result(scenarios[:1])),
         patch(_CONV_PATCH, side_effect=_conv_by_sid(scenarios[:1])),
-        patch(_SCORE_PATCH, side_effect=_score_batch_from([_make_annotation(scenarios[0].id)])),
+        patch(
+            _SCORE_PATCH,
+            side_effect=_score_batch_from([_make_annotation(scenarios[0].id)]),
+        ),
         patch(_TAX_PATCH, return_value=_TAX_RESULT),
     ):
-        run_id = run_cell(tutor="claude-opus-4-8", mode="plain", run_cfg=None,
-                          date="20260626", results_root=str(tmp_path))
+        run_id = run_cell(
+            tutor="claude-opus-4-8",
+            mode="plain",
+            run_cfg=None,
+            date="20260626",
+            results_root=str(tmp_path),
+        )
 
     # Second run: all 3 moments; only the 2 new ones should be replayed.
     called_ids = []
@@ -1200,16 +1351,28 @@ def test_replay_concurrency_resume(tmp_path):
         patch(_CFG_PATCH, return_value=cfg2),
         patch(_LOAD_PATCH, return_value=_load_result(scenarios)),
         patch(_CONV_PATCH, side_effect=_tracking_conv),
-        patch(_SCORE_PATCH, side_effect=_score_batch_from([_make_annotation(s.id) for s in scenarios[1:]])),
+        patch(
+            _SCORE_PATCH,
+            side_effect=_score_batch_from(
+                [_make_annotation(s.id) for s in scenarios[1:]]
+            ),
+        ),
         patch(_TAX_PATCH, return_value=_TAX_RESULT),
     ):
-        run_id2 = run_cell(tutor="claude-opus-4-8", mode="plain", run_cfg=None,
-                           date="20260626", results_root=str(tmp_path))
+        run_id2 = run_cell(
+            tutor="claude-opus-4-8",
+            mode="plain",
+            run_cfg=None,
+            date="20260626",
+            results_root=str(tmp_path),
+        )
 
     assert run_id2 == run_id
     assert sorted(called_ids) == [scenarios[1].id, scenarios[2].id]
 
-    summary = json.loads((tmp_path / run_id2 / "summary.json").read_text(encoding="utf-8"))
+    summary = json.loads(
+        (tmp_path / run_id2 / "summary.json").read_text(encoding="utf-8")
+    )
     assert summary["run_counts"]["resumed"] == 1
     assert summary["run_counts"]["succeeded"] == 3
     assert summary["run_counts"]["failed"] == 0
@@ -1221,7 +1384,9 @@ def test_replay_concurrency_transcripts_survive_interrupt(tmp_path):
     conversation is on disk for resume instead of being lost."""
     from tutorsim.cli import run_cell
 
-    scenarios = [_make_scenario(f"scenario_{i:03d}", "scaffolding") for i in range(1, 3)]
+    scenarios = [
+        _make_scenario(f"scenario_{i:03d}", "scaffolding") for i in range(1, 3)
+    ]
     fast, doomed = scenarios
 
     def _conv(scenario, **kwargs):
@@ -1239,8 +1404,13 @@ def test_replay_concurrency_transcripts_survive_interrupt(tmp_path):
         patch(_TAX_PATCH, return_value=_TAX_RESULT),
         pytest.raises(KeyboardInterrupt),
     ):
-        run_cell(tutor="claude-opus-4-8", mode="plain", run_cfg=None,
-                 date="20260626", results_root=str(tmp_path))
+        run_cell(
+            tutor="claude-opus-4-8",
+            mode="plain",
+            run_cfg=None,
+            date="20260626",
+            results_root=str(tmp_path),
+        )
 
     # The completed moment was persisted before the interrupt; the doomed one
     # never produced a transcript.
@@ -1253,11 +1423,14 @@ def test_replay_concurrency_worker_logs_reach_run_log(tmp_path):
     client retry warnings) are captured in results/<run_id>/run.log."""
     from tutorsim.cli import run_cell
 
-    scenarios = [_make_scenario(f"scenario_{i:03d}", "scaffolding") for i in range(1, 4)]
+    scenarios = [
+        _make_scenario(f"scenario_{i:03d}", "scaffolding") for i in range(1, 4)
+    ]
 
     def _conv(scenario, **kwargs):
         logging.getLogger("tutorsim.client").warning(
-            "simulated retry for %s", scenario.id)
+            "simulated retry for %s", scenario.id
+        )
         return _make_transcript(scenario.id)
 
     cfg = _make_run_config(sample=len(scenarios), replay_concurrency=3)
@@ -1269,8 +1442,13 @@ def test_replay_concurrency_worker_logs_reach_run_log(tmp_path):
         patch(_SCORE_PATCH, side_effect=_score_batch_from(anns)),
         patch(_TAX_PATCH, return_value=_TAX_RESULT),
     ):
-        run_id = run_cell(tutor="claude-opus-4-8", mode="plain", run_cfg=None,
-                          date="20260626", results_root=str(tmp_path))
+        run_id = run_cell(
+            tutor="claude-opus-4-8",
+            mode="plain",
+            run_cfg=None,
+            date="20260626",
+            results_root=str(tmp_path),
+        )
 
     content = (tmp_path / run_id / "run.log").read_text(encoding="utf-8")
     for s in scenarios:

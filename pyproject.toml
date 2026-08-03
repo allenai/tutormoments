@@ -36,7 +36,7 @@ build = ["boto3", "jsonschema"]
 # for the notebooks + benchmark_perf_cost.py (was misnamed "taxonomy")
 analysis = ["pandas", "matplotlib", "seaborn"]
 # dev alone runs the runtime tests; add build-dev (+analysis) for the full suite
-dev = ["pytest"]
+dev = ["pytest", "ruff"]
 build-dev = ["tutorsim[build]", "moto[s3]"]
 
 [project.scripts]
@@ -68,3 +68,20 @@ tutorsim_build = [
 [tool.pytest.ini_options]
 pythonpath = ["src", "."]
 testpaths = ["tests"]
+
+[tool.ruff]
+target-version = "py311"
+line-length = 88
+# Research notebooks are exploratory artifacts; don't lint/format them. Markdown
+# is docs prose (ruff would otherwise reformat Python code fences in README.md).
+extend-exclude = ["*.ipynb", "*.md"]
+
+[tool.ruff.lint]
+# Ruff's default E subset (E4 imports, E7 statements, E9 syntax) + pyflakes (F)
+# + import sorting (I). Whitespace/line-length rules (E1/E2/E3, E501) are left to
+# `ruff format`, so long lines don't fail `ruff check`.
+select = ["E4", "E7", "E9", "F", "I"]
+# E402: cli.py intentionally re-exports imports after a function definition so
+# tests can monkeypatch them. E741: `l` is used as a throwaway in a few tests.
+# Both are stylistic here, so we don't gate on them.
+ignore = ["E402", "E741"]

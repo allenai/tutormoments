@@ -8,8 +8,8 @@ action). These tests pin that down.
 """
 
 from tutorsim_build.groundtruth import (
-    overscaffold_decompose_key,
     action_decompose_key,
+    overscaffold_decompose_key,
 )
 
 
@@ -28,7 +28,9 @@ def _moment(**extra):
 
 
 def test_identical_moments_share_a_key():
-    assert overscaffold_decompose_key(_moment()) == overscaffold_decompose_key(_moment())
+    assert overscaffold_decompose_key(_moment()) == overscaffold_decompose_key(
+        _moment()
+    )
 
 
 def test_changing_result_changes_the_key():

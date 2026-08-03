@@ -6,16 +6,32 @@ def test_packaged_default_config_parses_and_has_expected_roster():
     cfg = cfgmod.load_config()
     assert set(cfg["providers"]) == {"anthropic", "openai", "gemini", "together"}
     assert set(cfg["models"]) == {
-        "claude-opus-4-8", "claude-sonnet-4-6", "claude-sonnet-5",
-        "gemini-2.5-pro", "gemini-3.5-flash",
-        "gpt-5.4-mini-2026-03-17", "gpt-5.5-2026-04-23", "deepseek-ai/DeepSeek-V4-Pro",
+        "claude-opus-4-8",
+        "claude-sonnet-4-6",
+        "claude-sonnet-5",
+        "gemini-2.5-pro",
+        "gemini-3.5-flash",
+        "gpt-5.4-mini-2026-03-17",
+        "gpt-5.5-2026-04-23",
+        "deepseek-ai/DeepSeek-V4-Pro",
     }
     assert cfg["models"]["claude-opus-4-8"] == {"thinking": True, "effort": "xhigh"}
-    assert cfg["models"]["claude-sonnet-5"] == {"thinking": "adaptive", "effort": "xhigh"}
+    assert cfg["models"]["claude-sonnet-5"] == {
+        "thinking": "adaptive",
+        "effort": "xhigh",
+    }
     assert cfg["models"]["deepseek-ai/DeepSeek-V4-Pro"] == {}
-    assert cfg["student"] == {"model": "claude-opus-4-6", "mode": "oracle", "thinking": False}
+    assert cfg["student"] == {
+        "model": "claude-opus-4-6",
+        "mode": "oracle",
+        "thinking": False,
+    }
     assert cfg["scorer"] == {"model": "claude-opus-4-6", "thinking": "adaptive"}
-    assert cfg["taxonomy"] == {"model": "claude-opus-4-8", "thinking": False, "batch_size": 50}
+    assert cfg["taxonomy"] == {
+        "model": "claude-opus-4-8",
+        "thinking": False,
+        "batch_size": 50,
+    }
     assert cfg["defaults"] == {"trials": 1, "max_turns": 5}
     assert cfg["retry"] == {"max_retries": 5, "base_delay": 5}
     assert cfg["batch"] == {"timeout": 86400}
@@ -92,6 +108,7 @@ def test_resolve_model_gemini():
 
 def test_resolve_model_unknown_raises():
     import pytest
+
     with pytest.raises(ValueError):
         cfgmod.resolve_model("gpt-9-imaginary")
 
@@ -114,13 +131,21 @@ def test_build_run_config_defaults():
     # row-sampling implementation) and only misled about reproducibility.
     assert not hasattr(rc, "seed")
     assert rc.sample is None
-    assert rc.resolved_tutors["claude-opus-4-8"] == {"thinking": True, "effort": "xhigh"}
+    assert rc.resolved_tutors["claude-opus-4-8"] == {
+        "thinking": True,
+        "effort": "xhigh",
+    }
 
 
 def test_build_run_config_overrides():
-    rc = cfgmod.build_run_config(tutors=["gpt-5.5-2026-04-23"], modes=["plain"], sample=10, trials=3)
+    rc = cfgmod.build_run_config(
+        tutors=["gpt-5.5-2026-04-23"], modes=["plain"], sample=10, trials=3
+    )
     assert rc.modes == ["plain"] and rc.sample == 10 and rc.trials == 3
-    assert rc.resolved_tutors["gpt-5.5-2026-04-23"] == {"thinking": True, "reasoning_effort": "high"}
+    assert rc.resolved_tutors["gpt-5.5-2026-04-23"] == {
+        "thinking": True,
+        "reasoning_effort": "high",
+    }
 
 
 def test_register_and_lookup_tutor():
@@ -166,4 +191,7 @@ def test_groundtruth_phase_config_shape():
 def test_get_labeller_config_routes_by_type():
     cfgmod._reset_config_cache()
     labeller = cfgmod.get_labeller_config()
-    assert labeller == {"scaffolding": "classify_scaffolding", "rapport": "classify_rapport"}
+    assert labeller == {
+        "scaffolding": "classify_scaffolding",
+        "rapport": "classify_rapport",
+    }

@@ -42,7 +42,7 @@ import importlib
 import json
 import logging
 import re
-from dataclasses import asdict, dataclass, field, fields
+from dataclasses import asdict, dataclass, fields
 from pathlib import Path
 from string import Template
 from typing import Any, Iterable, Iterator, Optional
@@ -288,9 +288,13 @@ CATEGORIES: list[dict[str, Any]] = [
 ]
 
 CATEGORY_LETTERS: list[str] = [c["letter"] for c in CATEGORIES]
-ORIENTATION_BY_LETTER: dict[str, str] = {c["letter"]: c["orientation"] for c in CATEGORIES}
+ORIENTATION_BY_LETTER: dict[str, str] = {
+    c["letter"]: c["orientation"] for c in CATEGORIES
+}
 NAME_BY_LETTER: dict[str, str] = {c["letter"]: c["name"] for c in CATEGORIES}
-DEFINITION_BY_LETTER: dict[str, str] = {c["letter"]: c["definition"] for c in CATEGORIES}
+DEFINITION_BY_LETTER: dict[str, str] = {
+    c["letter"]: c["definition"] for c in CATEGORIES
+}
 LAST_LETTER = CATEGORY_LETTERS[-1]
 
 
@@ -306,7 +310,7 @@ def _categories_block() -> str:
     """The frozen scheme rendered for prompt injection."""
     return "\n".join(
         f"{c['letter']}. {c['name']} -- {c['definition']}. "
-        f"Examples: " + "; ".join(f'\"{e}\"' for e in c["examples"][:4]) + "."
+        f"Examples: " + "; ".join(f'"{e}"' for e in c["examples"][:4]) + "."
         for c in CATEGORIES
     )
 
@@ -408,7 +412,10 @@ def filter_statement(statement: str) -> tuple[str, str, bool]:
 
 
 STRIP_REASONS: tuple[str, ...] = (
-    "non_tutor_actor", "pure_stance", "stance_negation", "non_action",
+    "non_tutor_actor",
+    "pure_stance",
+    "stance_negation",
+    "non_action",
 )
 
 
@@ -419,24 +426,25 @@ STRIP_REASONS: tuple[str, ...] = (
 # A Facet is one action statement with enough provenance to compute every
 # downstream view. Adapters yield Facet instances from each input format.
 
+
 @dataclass
 class Facet:
-    moment_id: str            # unique per (transcript, moment, annotator-or-scenario)
-    transcript_id: str        # parent transcript / conversation id
+    moment_id: str  # unique per (transcript, moment, annotator-or-scenario)
+    transcript_id: str  # parent transcript / conversation id
     turn_start: int
     turn_end: int
-    statement_index: int      # position within action_decomposed
-    statement: str            # the action_decomposed string itself
-    annotation_type: str      # always "scaffolding" after filtering
-    situation_label: str      # GT label of the moment: scaffolding|rigor|...
-    action_label: Optional[str] = None      # SAR's tutor-action call (LM only)
+    statement_index: int  # position within action_decomposed
+    statement: str  # the action_decomposed string itself
+    annotation_type: str  # always "scaffolding" after filtering
+    situation_label: str  # GT label of the moment: scaffolding|rigor|...
+    action_label: Optional[str] = None  # SAR's tutor-action call (LM only)
     result_label: Optional[str] = None
-    model: Optional[str] = None             # LM only
-    prompt: Optional[str] = None            # LM only
-    source: str = ""                        # "hf" | "tutorsim" | "canonical"
+    model: Optional[str] = None  # LM only
+    prompt: Optional[str] = None  # LM only
+    source: str = ""  # "hf" | "tutorsim" | "canonical"
     # Filled in by build_pool / classify_pool:
     stance_prefixed: bool = False
-    category: Optional[str] = None          # one of CATEGORY_LETTERS
+    category: Optional[str] = None  # one of CATEGORY_LETTERS
 
     def to_dict(self) -> dict[str, Any]:
         return asdict(self)
@@ -501,9 +509,7 @@ def load_key_moments_jsonl(jsonl_path: Path) -> Iterator[Facet]:
                     )
 
 
-def load_tutorsim_results(
-    results_dir: Path, scenarios_path: Path
-) -> Iterator[Facet]:
+def load_tutorsim_results(results_dir: Path, scenarios_path: Path) -> Iterator[Facet]:
     """Stream Facets from a tutorsim run results directory.
 
     Args:
@@ -672,14 +678,14 @@ def _transcript_from_scenario(scenario_id: str) -> str:
 _FACET_FIELDS: tuple[str, ...] = tuple(f.name for f in fields(Facet))
 
 
-def _atomic_write_csv(path: Path, header: Iterable[str],
-                      rows: Iterable[dict]) -> None:
+def _atomic_write_csv(path: Path, header: Iterable[str], rows: Iterable[dict]) -> None:
     """Write a CSV to a sibling .tmp then `os.replace` into the final path.
 
     Crash-mid-write leaves the .tmp on disk and the original (or no) file
     intact, so a re-run reads either the last good output or restarts.
     """
     import os
+
     path = Path(path)
     path.parent.mkdir(parents=True, exist_ok=True)
     tmp = path.with_suffix(path.suffix + ".tmp")
@@ -704,18 +710,19 @@ def build_pool(facets: Iterable[Facet]) -> tuple[list[Facet], list[tuple[Facet, 
     return kept, excluded
 
 
-def write_pool_csv(kept: Iterable[Facet], excluded: Iterable[tuple[Facet, str]],
-                   out_dir: Path) -> None:
+def write_pool_csv(
+    kept: Iterable[Facet], excluded: Iterable[tuple[Facet, str]], out_dir: Path
+) -> None:
     """Persist kept facets and excluded facets (with reason) under `out_dir`.
 
     Uses atomic write-and-rename so a crash mid-write never leaves a partial CSV.
     """
     out_dir = Path(out_dir)
     out_dir.mkdir(parents=True, exist_ok=True)
-    _atomic_write_csv(out_dir / "pool.csv", _FACET_FIELDS,
-                      (f.to_dict() for f in kept))
+    _atomic_write_csv(out_dir / "pool.csv", _FACET_FIELDS, (f.to_dict() for f in kept))
     _atomic_write_csv(
-        out_dir / "excluded.csv", _FACET_FIELDS + ("reason",),
+        out_dir / "excluded.csv",
+        _FACET_FIELDS + ("reason",),
         ({**f.to_dict(), "reason": r} for f, r in excluded),
     )
 
@@ -755,10 +762,10 @@ def _coerce_facet_row(row: dict[str, str]) -> Facet:
     return Facet(**coerced)
 
 
-def pool_report(kept: list[Facet],
-                excluded: list[tuple[Facet, str]]) -> str:
+def pool_report(kept: list[Facet], excluded: list[tuple[Facet, str]]) -> str:
     """Plain-text summary of the pool: keep/strip totals and per-reason counts."""
     from collections import Counter
+
     n_total = len(kept) + len(excluded)
     n_keep = len(kept)
     stance_kept = sum(1 for f in kept if f.stance_prefixed)
@@ -769,8 +776,7 @@ def pool_report(kept: list[Facet],
         f"total facets : {n_total}",
         f"  KEEP       : {n_keep} ({100 * n_keep / n_total:.1f}%)  "
         f"[{stance_kept} stance-prefixed]",
-        f"  STRIP      : {len(excluded)} "
-        f"({100 * len(excluded) / n_total:.1f}%)",
+        f"  STRIP      : {len(excluded)} ({100 * len(excluded) / n_total:.1f}%)",
         "",
         "Strip reasons:",
     ]
@@ -853,6 +859,7 @@ def classify_pool(
     if client is None or model is None or thinking is None or batch_size is None:
         try:
             from tutorsim.config import taxonomy_spec
+
             spec = taxonomy_spec()
         except Exception:
             spec = {}
@@ -870,6 +877,7 @@ def classify_pool(
     # Replace with frequency-descending order so high-recurrence statements
     # get classified first (useful for early sanity checks).
     from collections import Counter
+
     counts = Counter(f.statement.strip() for f in kept if f.statement)
     statements = [s for s, _ in sorted(counts.items(), key=lambda kv: (-kv[1], kv[0]))]
 
@@ -878,7 +886,9 @@ def classify_pool(
     n_done = len(statements) - len(pending)
     logger.info(
         "classify_pool: %d unique statements (%d already assigned, %d pending)",
-        len(statements), n_done, len(pending),
+        len(statements),
+        n_done,
+        len(pending),
     )
     if not pending:
         return assigned
@@ -890,20 +900,22 @@ def classify_pool(
         stop_after = min(first_run_probe, total_batches)
         logger.info(
             "First run with no prior progress -> stopping after %d batches "
-            "as a sanity probe. Re-run to continue.", stop_after,
+            "as a sanity probe. Re-run to continue.",
+            stop_after,
         )
     else:
         stop_after = total_batches
 
     if client is None:
         from tutorsim.client import ModelClient
+
         client = ModelClient(model)
 
     ask = _make_classifier(client, thinking=bool(thinking))
 
     for bi in range(stop_after):
         start = bi * batch_size
-        batch = pending[start:start + batch_size]
+        batch = pending[start : start + batch_size]
         if not batch:
             break
         in_flight = batch
@@ -921,7 +933,9 @@ def classify_pool(
         if in_flight:
             logger.warning(
                 "Forced %d statements to '%s' after %d retries",
-                len(in_flight), LAST_LETTER, CLASSIFIER_MAX_RETRIES,
+                len(in_flight),
+                LAST_LETTER,
+                CLASSIFIER_MAX_RETRIES,
             )
             forced = {s: LAST_LETTER for s in in_flight}
             assigned.update(forced)
@@ -940,18 +954,22 @@ def _make_classifier(client: Any, *, thinking: bool = False):
     an enum of A-M so the model cannot return any other letter.
     """
     schema = {
-        "type": "object", "additionalProperties": False,
-        "properties": {"assignments": {
-            "type": "array",
-            "items": {
-                "type": "object", "additionalProperties": False,
-                "properties": {
-                    "id": {"type": "integer"},
-                    "category": {"type": "string", "enum": CATEGORY_LETTERS},
+        "type": "object",
+        "additionalProperties": False,
+        "properties": {
+            "assignments": {
+                "type": "array",
+                "items": {
+                    "type": "object",
+                    "additionalProperties": False,
+                    "properties": {
+                        "id": {"type": "integer"},
+                        "category": {"type": "string", "enum": CATEGORY_LETTERS},
+                    },
+                    "required": ["id", "category"],
                 },
-                "required": ["id", "category"],
-            },
-        }},
+            }
+        },
         "required": ["assignments"],
     }
     cat_block = _categories_block()
@@ -981,9 +999,11 @@ def _make_classifier(client: Any, *, thinking: bool = False):
         try:
             result = json.loads(text)
         except json.JSONDecodeError:
-            logger.warning("classifier returned unparseable JSON for %s; "
-                           "treating batch as empty so retry-on-incomplete fires",
-                           label)
+            logger.warning(
+                "classifier returned unparseable JSON for %s; "
+                "treating batch as empty so retry-on-incomplete fires",
+                label,
+            )
             result = {"assignments": []}
         out: dict[str, str] = {}
         for a in result.get("assignments", []):
@@ -1028,8 +1048,9 @@ def _append_jsonl(path: Path, record: dict) -> None:
         f.write(json.dumps(record) + "\n")
 
 
-def attach_categories(facets: Iterable[Facet],
-                      assignments: dict[str, str]) -> list[Facet]:
+def attach_categories(
+    facets: Iterable[Facet], assignments: dict[str, str]
+) -> list[Facet]:
     """Set `facet.category` for every facet based on its statement.
 
     Raises KeyError on any statement missing from `assignments` so partial
@@ -1050,8 +1071,7 @@ def write_classified_csv(facets: Iterable[Facet], path: Path) -> None:
 
     Uses atomic write-and-rename so a crash mid-write never leaves a partial CSV.
     """
-    _atomic_write_csv(Path(path), _FACET_FIELDS,
-                      (f.to_dict() for f in facets))
+    _atomic_write_csv(Path(path), _FACET_FIELDS, (f.to_dict() for f in facets))
 
 
 def read_classified_csv(path: Path) -> list[Facet]:
@@ -1085,17 +1105,18 @@ def read_paper_distribution(csv_path: Path, series: str = "human"):
     col = f"{series}__macro_mean_pct"
     if col not in df.columns:
         raise KeyError(
-            f"series '{series}' not found in {csv_path} "
-            f"(expected column '{col}')"
+            f"series '{series}' not found in {csv_path} (expected column '{col}')"
         )
-    return pd.DataFrame({
-        "letter": df["letter"],
-        "name": df["name"],
-        "orientation": df["orientation"],
-        "mean_pct": df[col],
-        "ci_low": df[f"{series}__ci_low"],
-        "ci_high": df[f"{series}__ci_high"],
-    }).set_index("letter")
+    return pd.DataFrame(
+        {
+            "letter": df["letter"],
+            "name": df["name"],
+            "orientation": df["orientation"],
+            "mean_pct": df[col],
+            "ci_low": df[f"{series}__ci_low"],
+            "ci_high": df[f"{series}__ci_high"],
+        }
+    ).set_index("letter")
 
 
 # ============================================================================
@@ -1109,6 +1130,7 @@ def read_paper_distribution(csv_path: Path, series: str = "human"):
 #
 # Pandas is required from here down. Importing this module without pandas
 # is fine; only these functions raise if it's missing.
+
 
 def _require_analysis_extras() -> None:
     """Raise ImportError with an install hint if pandas is missing.
@@ -1149,6 +1171,7 @@ def _normal_ci(values, z: float = 1.96) -> tuple[float, float, float]:
         return (mean, mean, mean)
     var = sum((v - mean) ** 2 for v in values) / (n - 1)
     import math
+
     se = math.sqrt(var / n)
     return (mean, max(0.0, mean - z * se), min(1.0, mean + z * se))
 
@@ -1159,9 +1182,8 @@ def _moment_fractions(df, value_col: str, moment_col: str = "moment_id"):
     Returns a DataFrame indexed by moment_id with one column per value;
     rows sum to 1. Missing combinations are 0.
     """
-    pd = importlib.import_module("pandas")
-    counts = (df.groupby([moment_col, value_col]).size()
-                .unstack(fill_value=0))
+    importlib.import_module("pandas")
+    counts = df.groupby([moment_col, value_col]).size().unstack(fill_value=0)
     totals = counts.sum(axis=1).replace(0, 1)
     return counts.div(totals, axis=0)
 
@@ -1185,14 +1207,16 @@ def macro_distribution(df, group_keys: tuple[str, ...] = ()):
         n_moments = len(moment_frac)
         for letter in CATEGORY_LETTERS:
             mean, lo, hi = _normal_ci(moment_frac[letter].tolist())
-            out_rows.append({
-                **{k: v for k, v in zip(group_keys, key)},
-                "letter": letter,
-                "n_moments": n_moments,
-                "mean_pct": mean * 100,
-                "ci_low": lo * 100,
-                "ci_high": hi * 100,
-            })
+            out_rows.append(
+                {
+                    **{k: v for k, v in zip(group_keys, key)},
+                    "letter": letter,
+                    "n_moments": n_moments,
+                    "mean_pct": mean * 100,
+                    "ci_low": lo * 100,
+                    "ci_high": hi * 100,
+                }
+            )
     return pd.DataFrame(out_rows)
 
 
@@ -1215,14 +1239,16 @@ def macro_orientation(df, group_keys: tuple[str, ...] = ()):
         n_moments = len(moment_frac)
         for o in orients:
             mean, lo, hi = _normal_ci(moment_frac[o].tolist())
-            out_rows.append({
-                **{k: v for k, v in zip(group_keys, key)},
-                "orientation": o,
-                "n_moments": n_moments,
-                "mean_pct": mean * 100,
-                "ci_low": lo * 100,
-                "ci_high": hi * 100,
-            })
+            out_rows.append(
+                {
+                    **{k: v for k, v in zip(group_keys, key)},
+                    "orientation": o,
+                    "n_moments": n_moments,
+                    "mean_pct": mean * 100,
+                    "ci_low": lo * 100,
+                    "ci_high": hi * 100,
+                }
+            )
     return pd.DataFrame(out_rows)
 
 
@@ -1260,8 +1286,7 @@ def macro_appropriateness(df, group_keys: tuple[str, ...] = ()):
     return pd.DataFrame(out_rows)
 
 
-def prompt_effect_deltas(lm_df, model_col: str = "model",
-                         prompt_col: str = "prompt"):
+def prompt_effect_deltas(lm_df, model_col: str = "model", prompt_col: str = "prompt"):
     """Per-model SR-minus-plain deltas on the orientation rollup.
 
     Returns a DataFrame indexed by model with columns
@@ -1270,15 +1295,20 @@ def prompt_effect_deltas(lm_df, model_col: str = "model",
     _require_analysis_extras()
     pd = importlib.import_module("pandas")  # used to build the final DataFrame
     orient = macro_orientation(lm_df, group_keys=(model_col, prompt_col))
-    pivot = orient.pivot_table(index=[model_col, "orientation"],
-                               columns=prompt_col, values="mean_pct")
+    pivot = orient.pivot_table(
+        index=[model_col, "orientation"], columns=prompt_col, values="mean_pct"
+    )
     out = {}
     prompts = pivot.columns.tolist()
     if not {"plain"}.issubset(prompts):
-        raise ValueError(f"prompt_effect_deltas requires a 'plain' prompt; got {prompts}")
+        raise ValueError(
+            f"prompt_effect_deltas requires a 'plain' prompt; got {prompts}"
+        )
     sr_col = next((p for p in prompts if p != "plain"), None)
     if sr_col is None:
-        raise ValueError(f"prompt_effect_deltas requires a second prompt alongside 'plain'")
+        raise ValueError(
+            "prompt_effect_deltas requires a second prompt alongside 'plain'"
+        )
     for (model, orientation), row in pivot.iterrows():
         out.setdefault(model, {})[f"d_{orientation}"] = row[sr_col] - row["plain"]
     return pd.DataFrame(out).T.reset_index(names=model_col)
@@ -1287,12 +1317,15 @@ def prompt_effect_deltas(lm_df, model_col: str = "model",
 def js_divergence(p, q, eps: float = 1e-12) -> float:
     """Jensen-Shannon divergence in base 2; output in [0, 1]."""
     import math
-    p = list(p); q = list(q)
+
+    p = list(p)
+    q = list(q)
 
     def kl(a, b):
         out = 0.0
         for ai, bi in zip(a, b):
-            ai = max(ai, eps); bi = max(bi, eps)
+            ai = max(ai, eps)
+            bi = max(bi, eps)
             out += ai * math.log2(ai / bi)
         return out
 
@@ -1300,8 +1333,9 @@ def js_divergence(p, q, eps: float = 1e-12) -> float:
     return 0.5 * kl(p, m) + 0.5 * kl(q, m)
 
 
-def js_divergence_to_human(human_df, lm_df,
-                           group_keys: tuple[str, ...] = ("model", "prompt")):
+def js_divergence_to_human(
+    human_df, lm_df, group_keys: tuple[str, ...] = ("model", "prompt")
+):
     """Per LM cell, JS divergence between its macro distribution and human's.
 
     Returns a DataFrame with `*group_keys, n_moments, js_divergence` sorted
@@ -1310,25 +1344,34 @@ def js_divergence_to_human(human_df, lm_df,
     _require_analysis_extras()
     pd = importlib.import_module("pandas")  # used at return
     h = macro_distribution(human_df)
-    human_vec = (h.set_index("letter")["mean_pct"]
-                  .reindex(CATEGORY_LETTERS, fill_value=0.0) / 100).tolist()
+    human_vec = (
+        h.set_index("letter")["mean_pct"].reindex(CATEGORY_LETTERS, fill_value=0.0)
+        / 100
+    ).tolist()
     cells = macro_distribution(lm_df, group_keys=group_keys)
     rows = []
     for key, sub in cells.groupby(list(group_keys)):
         if not isinstance(key, tuple):
             key = (key,)
-        vec = (sub.set_index("letter")["mean_pct"]
-                  .reindex(CATEGORY_LETTERS, fill_value=0.0) / 100).tolist()
-        rows.append({
-            **{k: v for k, v in zip(group_keys, key)},
-            "n_moments": int(sub["n_moments"].iloc[0]),
-            "js_divergence": js_divergence(vec, human_vec),
-        })
+        vec = (
+            sub.set_index("letter")["mean_pct"].reindex(
+                CATEGORY_LETTERS, fill_value=0.0
+            )
+            / 100
+        ).tolist()
+        rows.append(
+            {
+                **{k: v for k, v in zip(group_keys, key)},
+                "n_moments": int(sub["n_moments"].iloc[0]),
+                "js_divergence": js_divergence(vec, human_vec),
+            }
+        )
     return pd.DataFrame(rows).sort_values("js_divergence").reset_index(drop=True)
 
 
-def build_headline_tables(human_facets: Iterable[Facet],
-                          lm_facets: Iterable[Facet]) -> dict[str, Any]:
+def build_headline_tables(
+    human_facets: Iterable[Facet], lm_facets: Iterable[Facet]
+) -> dict[str, Any]:
     """Compute all five headline tables in one pass.
 
     Returns a dict keyed by table name:
@@ -1339,8 +1382,7 @@ def build_headline_tables(human_facets: Iterable[Facet],
     human_df = facets_to_dataframe(human_facets)
     lm_df = facets_to_dataframe(lm_facets)
     human_df["cell"] = "human"
-    lm_df["cell"] = (lm_df["model"].astype(str) + " / "
-                     + lm_df["prompt"].astype(str))
+    lm_df["cell"] = lm_df["model"].astype(str) + " / " + lm_df["prompt"].astype(str)
     combined = _pd_concat([human_df, lm_df])
     return {
         "distribution": macro_distribution(combined, group_keys=("cell",)),
@@ -1363,6 +1405,7 @@ def write_headline_csvs(tables: dict[str, Any], out_dir: Path) -> None:
     """
     _require_analysis_extras()
     import os
+
     out_dir = Path(out_dir)
     out_dir.mkdir(parents=True, exist_ok=True)
     for name, df in tables.items():
@@ -1390,7 +1433,9 @@ def read_headline_csvs(in_dir: Path) -> dict[str, Any]:
 # Each `run_*` function is idempotent and writes its outputs to disk so the
 # next stage can read them back. They are usable from Python and from the CLI.
 
-InputSpec = dict[str, Any]  # {"kind": "key_moments"|"tutorsim"|"canonical", "path": "...", "scenarios": "..."}
+InputSpec = dict[
+    str, Any
+]  # {"kind": "key_moments"|"tutorsim"|"canonical", "path": "...", "scenarios": "..."}
 
 
 def _adapter_for(spec: InputSpec) -> Iterator[Facet]:
@@ -1398,8 +1443,7 @@ def _adapter_for(spec: InputSpec) -> Iterator[Facet]:
     if kind == "key_moments":
         return load_key_moments_jsonl(Path(spec["path"]))
     if kind == "tutorsim":
-        return load_tutorsim_results(
-            Path(spec["path"]), Path(spec["scenarios"]))
+        return load_tutorsim_results(Path(spec["path"]), Path(spec["scenarios"]))
     if kind == "canonical":
         return load_canonical_jsonl(Path(spec["path"]))
     raise ValueError(f"unknown input kind: {kind!r}")
@@ -1437,8 +1481,9 @@ def run_classify(input_spec: InputSpec, out_dir: Path, **classify_kwargs) -> Pat
     return classified_path
 
 
-def run_headline(human_classified: Path, lm_classified: Path,
-                 out_dir: Path) -> dict[str, Any]:
+def run_headline(
+    human_classified: Path, lm_classified: Path, out_dir: Path
+) -> dict[str, Any]:
     """Compute the 5 headline tables from two classified.csv files."""
     human = read_classified_csv(Path(human_classified))
     lm = read_classified_csv(Path(lm_classified))
@@ -1447,8 +1492,9 @@ def run_headline(human_classified: Path, lm_classified: Path,
     return tables
 
 
-def run_all(human_input: InputSpec, lm_input: InputSpec,
-            out_dir: Path, **classify_kwargs) -> dict[str, Any]:
+def run_all(
+    human_input: InputSpec, lm_input: InputSpec, out_dir: Path, **classify_kwargs
+) -> dict[str, Any]:
     """Run the whole pipeline end-to-end.
 
     Layout under `out_dir`:
@@ -1499,12 +1545,16 @@ def classify_run(
     # first_run_probe disabled: an integrated run classifies to completion in
     # one invocation rather than stopping for a manual re-run.
     assignments = classify_pool(
-        kept, out_dir, client=client, first_run_probe=10 ** 9,
+        kept,
+        out_dir,
+        client=client,
+        first_run_probe=10**9,
     )
     classified = attach_categories(kept, assignments)
     write_classified_csv(classified, out_dir / "classified.csv")
 
     from collections import Counter
+
     counts = Counter(f.category for f in classified)
 
     # Roll categories up to their orientation (scaffolding / rigor / neutral)
@@ -1543,11 +1593,12 @@ def classify_run(
 # 8. CLI dispatcher
 # ============================================================================
 
+
 def _build_argparser() -> argparse.ArgumentParser:
     parser = argparse.ArgumentParser(
         prog="tutorsim taxonomy",
         description="Classify decomposed tutor actions into A-M and produce "
-                    "headline tables. Paper figures live in working-paper notebooks.",
+        "headline tables. Paper figures live in working-paper notebooks.",
     )
     sub = parser.add_subparsers(dest="cmd", required=True)
 
@@ -1555,20 +1606,36 @@ def _build_argparser() -> argparse.ArgumentParser:
 
     p_cls = sub.add_parser("classify", help="filter + classify a single input")
     p_cls.add_argument("--kind", required=True, choices=input_kinds)
-    p_cls.add_argument("--input", required=True,
-                       help="key-moments jsonl, tutorsim results/<run_id>/, "
-                            "or a canonical facet jsonl")
-    p_cls.add_argument("--scenarios",
-                       help="scenarios.jsonl (required for --kind tutorsim)")
+    p_cls.add_argument(
+        "--input",
+        required=True,
+        help="key-moments jsonl, tutorsim results/<run_id>/, "
+        "or a canonical facet jsonl",
+    )
+    p_cls.add_argument(
+        "--scenarios", help="scenarios.jsonl (required for --kind tutorsim)"
+    )
     p_cls.add_argument("--output", required=True, help="output directory")
-    p_cls.add_argument("--max-batches", type=int, default=None,
-                       help="cap LLM batches this run (e.g. for first-run probes)")
+    p_cls.add_argument(
+        "--max-batches",
+        type=int,
+        default=None,
+        help="cap LLM batches this run (e.g. for first-run probes)",
+    )
 
     p_hl = sub.add_parser("headline", help="build the 5 headline CSVs")
-    p_hl.add_argument("--human", required=True, type=Path,
-                      help="classified.csv from `taxonomy classify` for the human pool")
-    p_hl.add_argument("--lm", required=True, type=Path,
-                      help="classified.csv from `taxonomy classify` for the LM pool")
+    p_hl.add_argument(
+        "--human",
+        required=True,
+        type=Path,
+        help="classified.csv from `taxonomy classify` for the human pool",
+    )
+    p_hl.add_argument(
+        "--lm",
+        required=True,
+        type=Path,
+        help="classified.csv from `taxonomy classify` for the LM pool",
+    )
     p_hl.add_argument("--output", required=True, type=Path)
 
     p_run = sub.add_parser("run", help="classify (twice) -> headline end-to-end")
@@ -1595,8 +1662,7 @@ def cli_dispatch(argv: Optional[list[str]] = None) -> int:
             if not args.scenarios:
                 raise SystemExit("--scenarios is required when --kind tutorsim")
             spec["scenarios"] = args.scenarios
-        run_classify(spec, Path(args.output),
-                     max_batches=args.max_batches)
+        run_classify(spec, Path(args.output), max_batches=args.max_batches)
         return 0
 
     if args.cmd == "headline":
@@ -1607,15 +1673,16 @@ def cli_dispatch(argv: Optional[list[str]] = None) -> int:
         human_spec: InputSpec = {"kind": args.human_kind, "path": args.human_input}
         if args.human_kind == "tutorsim":
             if not args.human_scenarios:
-                raise SystemExit("--human-scenarios is required when --human-kind tutorsim")
+                raise SystemExit(
+                    "--human-scenarios is required when --human-kind tutorsim"
+                )
             human_spec["scenarios"] = args.human_scenarios
         lm_spec: InputSpec = {"kind": args.lm_kind, "path": args.lm_input}
         if args.lm_kind == "tutorsim":
             if not args.lm_scenarios:
                 raise SystemExit("--lm-scenarios is required when --lm-kind tutorsim")
             lm_spec["scenarios"] = args.lm_scenarios
-        run_all(human_spec, lm_spec, args.output,
-                max_batches=args.max_batches)
+        run_all(human_spec, lm_spec, args.output, max_batches=args.max_batches)
         return 0
 
     return 1

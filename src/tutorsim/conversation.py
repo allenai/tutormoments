@@ -2,14 +2,15 @@
 
 Provides a synchronous per-scenario loop and a round-based batch loop.
 """
+
 import logging
 import math
-from dataclasses import dataclass, field, fields, asdict
+from dataclasses import asdict, dataclass, field, fields
 from types import SimpleNamespace
 
-from tutorsim.tutor import build_tutor_system_prompt, resolve_tutor
-from tutorsim.student import build_student_system_prompt, resolve_student
 from tutorsim.moments import Moment, _build_reference_transcript
+from tutorsim.student import build_student_system_prompt, resolve_student
+from tutorsim.tutor import build_tutor_system_prompt, resolve_tutor
 
 logger = logging.getLogger(__name__)
 
@@ -28,16 +29,25 @@ NEXT_PROBLEM_TOKEN = "[NEXT_PROBLEM]"  # legacy alias (v5 and earlier prompts)
 # Transcript dataclass (renamed from Exchange)
 # ---------------------------------------------------------------------------
 
+
 @dataclass
 class Transcript:
     scenario_id: str
     tutor_model: str
     generated_turns: list[dict] = field(default_factory=list)
     tutor_usage: dict = field(
-        default_factory=lambda: {"input_tokens": 0, "output_tokens": 0, "total_tokens": 0}
+        default_factory=lambda: {
+            "input_tokens": 0,
+            "output_tokens": 0,
+            "total_tokens": 0,
+        }
     )
     student_usage: dict = field(
-        default_factory=lambda: {"input_tokens": 0, "output_tokens": 0, "total_tokens": 0}
+        default_factory=lambda: {
+            "input_tokens": 0,
+            "output_tokens": 0,
+            "total_tokens": 0,
+        }
     )
     tutor_latencies: list[float] = field(default_factory=list)
     student_latencies: list[float] = field(default_factory=list)
@@ -62,6 +72,7 @@ class Transcript:
 # Private helpers
 # ---------------------------------------------------------------------------
 
+
 def _parse_tutor_tokens(text: str) -> tuple[str, bool, bool]:
     """Strip tutor control tokens and report which were present.
 
@@ -72,8 +83,7 @@ def _parse_tutor_tokens(text: str) -> tuple[str, bool, bool]:
     has_end = END_TOKEN in text
     has_change = (PROBLEM_CHANGE_TOKEN in text) or (NEXT_PROBLEM_TOKEN in text)
     cleaned = (
-        text
-        .replace(END_TOKEN, "")
+        text.replace(END_TOKEN, "")
         .replace(PROBLEM_CHANGE_TOKEN, "")
         .replace(NEXT_PROBLEM_TOKEN, "")
         .rstrip()
@@ -124,6 +134,7 @@ def _append_turns_to_extra(
 # Transcript prefix formatter
 # ---------------------------------------------------------------------------
 
+
 def _format_transcript_prefix(context: list[dict]) -> str:
     """Format scenario.context turns into 'Turn N. ROLE: text' string.
 
@@ -143,6 +154,7 @@ def _format_transcript_prefix(context: list[dict]) -> str:
 # ---------------------------------------------------------------------------
 # Role prompt builder
 # ---------------------------------------------------------------------------
+
 
 def _build_role_prompt(
     role: str,
@@ -194,6 +206,7 @@ def _build_role_prompt(
 # the runtime consumes them and never generates its own)
 # ---------------------------------------------------------------------------
 
+
 def _frozen_persona(scenario: Moment) -> str:
     """Return the moment's frozen student persona, or raise.
 
@@ -215,6 +228,7 @@ def _frozen_persona(scenario: Moment) -> str:
 # ---------------------------------------------------------------------------
 # Public API
 # ---------------------------------------------------------------------------
+
 
 def run_conversation(
     scenario: Moment,
@@ -530,13 +544,19 @@ def run_conversations_batch(
             scenario_images = (images_by_scenario or {}).get(sid)
             tutor_entries.append(
                 build_batch_entry(
-                    sid, tail, json_mode=False, max_tokens=tutor_max_tokens,
-                    images=scenario_images, cacheable_prefix=head,
+                    sid,
+                    tail,
+                    json_mode=False,
+                    max_tokens=tutor_max_tokens,
+                    images=scenario_images,
+                    cacheable_prefix=head,
                 )
             )
 
         tutor_raw = run_batch(
-            tutor_client, tutor_entries, json_mode=False,
+            tutor_client,
+            tutor_entries,
+            json_mode=False,
             display_name=f"tutor_round_{round_num + 1}",
             poll_interval=poll_interval,
             **tutor_gen_kwargs,
@@ -562,7 +582,11 @@ def run_conversations_batch(
                 messages = ["..."]
             if messages:
                 extras[sid], next_turns[sid] = _append_turns_to_extra(
-                    transcript, messages, "TUTOR", extras[sid], next_turns[sid],
+                    transcript,
+                    messages,
+                    "TUTOR",
+                    extras[sid],
+                    next_turns[sid],
                 )
 
             if ended:
@@ -610,13 +634,19 @@ def run_conversations_batch(
             scenario_images = (images_by_scenario or {}).get(sid)
             student_entries.append(
                 build_batch_entry(
-                    sid, tail, json_mode=False, max_tokens=student_max_tokens,
-                    images=scenario_images, cacheable_prefix=head,
+                    sid,
+                    tail,
+                    json_mode=False,
+                    max_tokens=student_max_tokens,
+                    images=scenario_images,
+                    cacheable_prefix=head,
                 )
             )
 
         student_raw = run_batch(
-            student_client, student_entries, json_mode=False,
+            student_client,
+            student_entries,
+            json_mode=False,
             display_name=f"student_round_{round_num + 1}",
             poll_interval=poll_interval,
             **student_gen_kwargs,
@@ -638,7 +668,11 @@ def run_conversations_batch(
 
             messages = _split_messages(result["text"]) or ["..."]
             extras[sid], next_turns[sid] = _append_turns_to_extra(
-                transcript, messages, "STUDENT", extras[sid], next_turns[sid],
+                transcript,
+                messages,
+                "STUDENT",
+                extras[sid],
+                next_turns[sid],
             )
 
             # After the student batch in round_num, each active scenario has

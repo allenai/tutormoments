@@ -5,11 +5,10 @@ the input adapters, pool + CSV round-trips, the LLM classifier with a fake
 client (resume safety, JSON-error handling, total_tokens recording), and
 atomic CSV writes.
 """
+
 from __future__ import annotations
 
-import csv
 import json
-import math
 from dataclasses import asdict
 from pathlib import Path
 
@@ -17,33 +16,48 @@ import pytest
 
 from tutorsim import taxonomy as tx
 
-
 # ---------------------------------------------------------------------------
 # 1. filter_statement: the four reason codes + keep
 # ---------------------------------------------------------------------------
 
-@pytest.mark.parametrize("statement, expected_bucket, expected_reason", [
-    # KEEPs (real tutor actions with a real verb)
-    ("The tutor asks guiding questions about the next step.", "keep", ""),
-    ("After confirmation, the tutor offers a hint.", "keep", ""),
-    ("The tutor scaffolds by introducing a different representation.", "keep", ""),
-    # non_tutor_actor: subject is the student / interaction / etc.
-    ("The student answers correctly.", "strip", "non_tutor_actor"),
-    ("There is no withdrawal of support.", "strip", "non_tutor_actor"),
-    ("No attempt is made to review the student's work.", "strip", "non_tutor_actor"),
-    ("The interaction consists entirely of casual banter.", "strip", "non_tutor_actor"),
-    # pure_stance: stance phrase + only filler
-    ("The tutor is scaffolding.", "strip", "pure_stance"),
-    ("The tutor pushes for rigor.", "strip", "pure_stance"),
-    ("The tutor uses a mix of scaffolding and rigor.", "strip", "pure_stance"),
-    # stance_negation: stance phrase + negation
-    ("The tutor does not push for rigor.", "strip", "stance_negation"),
-    ("The tutor is not scaffolding.", "strip", "stance_negation"),
-    # non_action: tutor verb but the verb is a negation
-    ("The tutor does not ask the student to explain.", "strip", "non_action"),
-    ("The tutor takes no substantive pedagogical action.", "strip", "non_action"),
-    ("The tutor fails to acknowledge the student's correct answer.", "strip", "non_action"),
-])
+
+@pytest.mark.parametrize(
+    "statement, expected_bucket, expected_reason",
+    [
+        # KEEPs (real tutor actions with a real verb)
+        ("The tutor asks guiding questions about the next step.", "keep", ""),
+        ("After confirmation, the tutor offers a hint.", "keep", ""),
+        ("The tutor scaffolds by introducing a different representation.", "keep", ""),
+        # non_tutor_actor: subject is the student / interaction / etc.
+        ("The student answers correctly.", "strip", "non_tutor_actor"),
+        ("There is no withdrawal of support.", "strip", "non_tutor_actor"),
+        (
+            "No attempt is made to review the student's work.",
+            "strip",
+            "non_tutor_actor",
+        ),
+        (
+            "The interaction consists entirely of casual banter.",
+            "strip",
+            "non_tutor_actor",
+        ),
+        # pure_stance: stance phrase + only filler
+        ("The tutor is scaffolding.", "strip", "pure_stance"),
+        ("The tutor pushes for rigor.", "strip", "pure_stance"),
+        ("The tutor uses a mix of scaffolding and rigor.", "strip", "pure_stance"),
+        # stance_negation: stance phrase + negation
+        ("The tutor does not push for rigor.", "strip", "stance_negation"),
+        ("The tutor is not scaffolding.", "strip", "stance_negation"),
+        # non_action: tutor verb but the verb is a negation
+        ("The tutor does not ask the student to explain.", "strip", "non_action"),
+        ("The tutor takes no substantive pedagogical action.", "strip", "non_action"),
+        (
+            "The tutor fails to acknowledge the student's correct answer.",
+            "strip",
+            "non_action",
+        ),
+    ],
+)
 def test_filter_statement(statement, expected_bucket, expected_reason):
     bucket, reason, _ = tx.filter_statement(statement)
     assert bucket == expected_bucket, statement
@@ -61,6 +75,7 @@ def test_filter_statement_stance_prefixed_flag():
 # ---------------------------------------------------------------------------
 # 2. Scheme integrity
 # ---------------------------------------------------------------------------
+
 
 def test_frozen_scheme_shape():
     assert len(tx.CATEGORIES) == 13
@@ -83,11 +98,17 @@ def test_categories_have_required_fields():
 # 3. Pool + CSV round-trip
 # ---------------------------------------------------------------------------
 
+
 def _mk_facet(stmt: str, **overrides) -> tx.Facet:
     base = dict(
-        moment_id="m0", transcript_id="t0", turn_start=1, turn_end=2,
-        statement_index=0, statement=stmt,
-        annotation_type="scaffolding", situation_label="scaffolding",
+        moment_id="m0",
+        transcript_id="t0",
+        turn_start=1,
+        turn_end=2,
+        statement_index=0,
+        statement=stmt,
+        annotation_type="scaffolding",
+        situation_label="scaffolding",
         source="canonical",
     )
     base.update(overrides)
@@ -141,6 +162,7 @@ def test_atomic_write_leaves_no_tmp_after_success(tmp_path):
 # 4. Adapters
 # ---------------------------------------------------------------------------
 
+
 def _write_key_moments_jsonl(path: Path, rows: list[dict]) -> None:
     with path.open("w") as f:
         for r in rows:
@@ -149,28 +171,37 @@ def _write_key_moments_jsonl(path: Path, rows: list[dict]) -> None:
 
 def test_load_key_moments_jsonl(tmp_path):
     src = tmp_path / "kmoments.jsonl"
-    _write_key_moments_jsonl(src, [
-        {
-            "conversation_id": "conv-1",
-            "num_turns": 100,
-            "key_moments": [
-                # scaffolding moment we should pull in
-                {"annotation_type": "scaffolding",
-                 "turn_start": 5, "turn_end": 7,
-                 "situation_label_agg": "scaffolding",
-                 "annotator_id": "ann-A",
-                 "action_decomposed": [
-                     "The tutor asks a guiding question.",
-                     "The tutor offers a hint.",
-                 ]},
-                # rapport moment we should SKIP (annotation_type filter)
-                {"annotation_type": "rapport",
-                 "turn_start": 20, "turn_end": 22,
-                 "annotator_id": "ann-A",
-                 "action_decomposed": ["The tutor expresses warmth."]},
-            ],
-        },
-    ])
+    _write_key_moments_jsonl(
+        src,
+        [
+            {
+                "conversation_id": "conv-1",
+                "num_turns": 100,
+                "key_moments": [
+                    # scaffolding moment we should pull in
+                    {
+                        "annotation_type": "scaffolding",
+                        "turn_start": 5,
+                        "turn_end": 7,
+                        "situation_label_agg": "scaffolding",
+                        "annotator_id": "ann-A",
+                        "action_decomposed": [
+                            "The tutor asks a guiding question.",
+                            "The tutor offers a hint.",
+                        ],
+                    },
+                    # rapport moment we should SKIP (annotation_type filter)
+                    {
+                        "annotation_type": "rapport",
+                        "turn_start": 20,
+                        "turn_end": 22,
+                        "annotator_id": "ann-A",
+                        "action_decomposed": ["The tutor expresses warmth."],
+                    },
+                ],
+            },
+        ],
+    )
     facets = list(tx.load_key_moments_jsonl(src))
     assert len(facets) == 2
     assert {f.statement for f in facets} == {
@@ -200,18 +231,26 @@ def test_load_tutorsim_results_reads_config_and_scenarios(tmp_path):
     # Stage a minimal tutorsim run-results directory + matching scenarios.jsonl.
     run_dir = tmp_path / "run-x"
     (run_dir / "scores").mkdir(parents=True)
-    (run_dir / "config.json").write_text(json.dumps({"tutor": "fake-model",
-                                                     "mode": "plain"}))
-    (run_dir / "scores" / "scen-1.json").write_text(json.dumps({
-        "scenario_id": "scen-1",
-        "annotation_type": "scaffolding",
-        "turn_start": 10, "turn_end": 14,
-        "action_decomposed": ["The tutor asks a guiding question."],
-        "action_label": "scaffolding",
-        "result_label": "pos",
-    }))
+    (run_dir / "config.json").write_text(
+        json.dumps({"tutor": "fake-model", "mode": "plain"})
+    )
+    (run_dir / "scores" / "scen-1.json").write_text(
+        json.dumps(
+            {
+                "scenario_id": "scen-1",
+                "annotation_type": "scaffolding",
+                "turn_start": 10,
+                "turn_end": 14,
+                "action_decomposed": ["The tutor asks a guiding question."],
+                "action_label": "scaffolding",
+                "result_label": "pos",
+            }
+        )
+    )
     scenarios = tmp_path / "scenarios.jsonl"
-    scenarios.write_text(json.dumps({"id": "scen-1", "dimension": "scaffolding"}) + "\n")
+    scenarios.write_text(
+        json.dumps({"id": "scen-1", "dimension": "scaffolding"}) + "\n"
+    )
 
     facets = list(tx.load_tutorsim_results(run_dir, scenarios))
     assert len(facets) == 1
@@ -225,6 +264,7 @@ def test_load_tutorsim_results_reads_config_and_scenarios(tmp_path):
 # ---------------------------------------------------------------------------
 # 5. Headline math (pure, no LLM)
 # ---------------------------------------------------------------------------
+
 
 def test_normal_ci_basic():
     mean, lo, hi = tx._normal_ci([0.5, 0.5, 0.5, 0.5])
@@ -250,7 +290,7 @@ def test_js_divergence_symmetric_and_self_zero():
 
 
 def test_macro_distribution_averages_per_moment(monkeypatch):
-    pd = pytest.importorskip("pandas")
+    pytest.importorskip("pandas")
     # two moments: m1 -> {A:2, B:0} (so A=100%); m2 -> {A:0, B:1} (so B=100%)
     # macro mean: A = (1.0 + 0.0)/2 = 0.5; B = (0.0 + 1.0)/2 = 0.5
     facets = [
@@ -270,6 +310,7 @@ def test_macro_distribution_averages_per_moment(monkeypatch):
 # 6. Classifier wiring + resume + json-error handling + total_tokens
 # ---------------------------------------------------------------------------
 
+
 class _FakeModelResponse:
     def __init__(self, text: str, usage: dict):
         self.text = text
@@ -287,8 +328,11 @@ class _FakeClient:
 
     def generate(self, prompt, **kwargs):
         self.calls.append({"prompt": prompt, **kwargs})
-        payload = (self._payloads.pop(0) if self._payloads
-                   else '{"assignments": [{"id":1,"category":"A"}]}')
+        payload = (
+            self._payloads.pop(0)
+            if self._payloads
+            else '{"assignments": [{"id":1,"category":"A"}]}'
+        )
         return _FakeModelResponse(
             payload,
             {"input_tokens": 100, "output_tokens": 50, "total_tokens": 150},
@@ -315,8 +359,7 @@ def test_classifier_handles_unparseable_json(tmp_path, caplog):
     # Every response is junk -> retries exhausted -> statement forced to LAST_LETTER.
     client = _FakeClient(payloads=["not valid json"] * 8)
     with caplog.at_level("WARNING", logger="tutorsim.taxonomy"):
-        assignments = tx.classify_pool(
-            facets, tmp_path, client=client, max_batches=1)
+        assignments = tx.classify_pool(facets, tmp_path, client=client, max_batches=1)
     assert assignments[facets[0].statement.strip()] == tx.LAST_LETTER
     assert any("unparseable JSON" in rec.message for rec in caplog.records)
 
@@ -327,9 +370,11 @@ def test_classifier_resume_skips_completed_batches(tmp_path):
         _mk_facet("The tutor offers a hint.", moment_id="m2"),
     ]
     # First pass: both classified.
-    first = _FakeClient(payloads=[
-        '{"assignments":[{"id":1,"category":"A"},{"id":2,"category":"E"}]}',
-    ])
+    first = _FakeClient(
+        payloads=[
+            '{"assignments":[{"id":1,"category":"A"},{"id":2,"category":"E"}]}',
+        ]
+    )
     tx.classify_pool(facets, tmp_path, client=first, max_batches=1)
     assert len(first.calls) == 1
 
@@ -342,6 +387,7 @@ def test_classifier_resume_skips_completed_batches(tmp_path):
 # ---------------------------------------------------------------------------
 # 7. CLI extras guard
 # ---------------------------------------------------------------------------
+
 
 def test_require_analysis_extras_passes_when_pandas_present():
     pytest.importorskip("pandas")
@@ -374,9 +420,13 @@ from types import SimpleNamespace
 
 def _ann(**kw):
     base = dict(
-        scenario_id="c1__0_2", annotation_type="scaffolding",
+        scenario_id="c1__0_2",
+        annotation_type="scaffolding",
         action_decomposed=["The tutor asks a guiding question."],
-        turn_start=0, turn_end=2, action_label="scaffolding", result="ok",
+        turn_start=0,
+        turn_end=2,
+        action_label="scaffolding",
+        result="ok",
     )
     base.update(kw)
     return SimpleNamespace(**base)
@@ -387,37 +437,56 @@ def _moment(id="c1__0_2", dimension="scaffolding"):
 
 
 def test_facets_from_annotations_uses_moment_dimension():
-    facets = list(tx.facets_from_annotations(
-        [_ann()], [_moment(dimension="rigor")],
-        model="claude-sonnet-5", mode="plain",
-    ))
+    facets = list(
+        tx.facets_from_annotations(
+            [_ann()],
+            [_moment(dimension="rigor")],
+            model="claude-sonnet-5",
+            mode="plain",
+        )
+    )
     assert len(facets) == 1
     f = facets[0]
-    assert f.situation_label == "rigor"          # from Moment.dimension
-    assert f.result_label == "ok"                # from Annotation.result (not result_label)
+    assert f.situation_label == "rigor"  # from Moment.dimension
+    assert f.result_label == "ok"  # from Annotation.result (not result_label)
     assert f.model == "claude-sonnet-5" and f.prompt == "plain"
     assert f.annotation_type == "scaffolding"
 
 
 def test_facets_from_annotations_skips_non_scaffolding():
-    facets = list(tx.facets_from_annotations(
-        [_ann(annotation_type="rapport")], [_moment()], model="m", mode="plain",
-    ))
+    facets = list(
+        tx.facets_from_annotations(
+            [_ann(annotation_type="rapport")],
+            [_moment()],
+            model="m",
+            mode="plain",
+        )
+    )
     assert facets == []
 
 
 def test_classify_run_writes_classified_and_counts(tmp_path):
     anns = [
-        _ann(scenario_id="c1__0_2", action_decomposed=["The tutor asks a guiding question."]),
+        _ann(
+            scenario_id="c1__0_2",
+            action_decomposed=["The tutor asks a guiding question."],
+        ),
         _ann(scenario_id="c2__0_2", action_decomposed=["The tutor offers a hint."]),
     ]
     moments = [_moment(id="c1__0_2"), _moment(id="c2__0_2")]
-    client = _FakeClient(payloads=[
-        '{"assignments":[{"id":1,"category":"A"},{"id":2,"category":"E"}]}',
-    ])
+    client = _FakeClient(
+        payloads=[
+            '{"assignments":[{"id":1,"category":"A"},{"id":2,"category":"E"}]}',
+        ]
+    )
     out = tmp_path / "taxonomy"
     summary = tx.classify_run(
-        anns, moments, out, model="claude-sonnet-5", mode="plain", client=client,
+        anns,
+        moments,
+        out,
+        model="claude-sonnet-5",
+        mode="plain",
+        client=client,
     )
     assert (out / "classified.csv").exists()
     assert summary["scheme_version"] == tx.SCHEME_VERSION
@@ -430,6 +499,7 @@ def test_classify_run_writes_classified_and_counts(tmp_path):
 
 def test_taxonomy_spec_reads_config():
     from tutorsim import config as cfgmod
+
     cfgmod._reset_config_cache()
     spec = cfgmod.taxonomy_spec()
     assert spec["model"] == "claude-opus-4-8"
@@ -452,7 +522,13 @@ def test_read_paper_distribution_selects_series(tmp_path):
     human = tx.read_paper_distribution(csv, "human")
     assert human.loc["A", "mean_pct"] == pytest.approx(10.18)
     assert human.loc["A", "orientation"] == "scaffolding"
-    assert set(human.columns) >= {"name", "orientation", "mean_pct", "ci_low", "ci_high"}
+    assert set(human.columns) >= {
+        "name",
+        "orientation",
+        "mean_pct",
+        "ci_low",
+        "ci_high",
+    }
     # A model series selects its own column group
     model = tx.read_paper_distribution(csv, "claude_opus_4_8__plain")
     assert model.loc["A", "mean_pct"] == pytest.approx(20.27)

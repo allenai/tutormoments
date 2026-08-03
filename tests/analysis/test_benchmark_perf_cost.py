@@ -31,10 +31,10 @@ def _ex(sid, lats, out_tok, total_tok):
 
 def test_filters_to_id_set_and_dedupes():
     exchanges = [
-        _ex("a", [2.0, 4.0], 100, 1000),   # in set
-        _ex("a", [9.0], 999, 9999),         # duplicate scenario_id -> ignored
-        _ex("b", [6.0], 60, 600),           # in set
-        _ex("z", [100.0], 1, 1),            # NOT in set -> ignored
+        _ex("a", [2.0, 4.0], 100, 1000),  # in set
+        _ex("a", [9.0], 999, 9999),  # duplicate scenario_id -> ignored
+        _ex("b", [6.0], 60, 600),  # in set
+        _ex("z", [100.0], 1, 1),  # NOT in set -> ignored
     ]
     s = bpc.summarize_exchanges(exchanges, id_set={"a", "b"})
     assert s["n_scenarios"] == 2

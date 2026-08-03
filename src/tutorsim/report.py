@@ -28,10 +28,10 @@ No module-level SDK imports.
 # ---------------------------------------------------------------------------
 
 _ACTION_LABEL_TO_DIMENSIONS = {
-    "both":        ("yes", "yes"),
+    "both": ("yes", "yes"),
     "scaffolding": ("yes", "no"),
-    "rigor":       ("no",  "yes"),
-    "neither":     ("no",  "no"),
+    "rigor": ("no", "yes"),
+    "neither": ("no", "no"),
 }
 
 
@@ -42,6 +42,7 @@ def _to_dims(label):
 # ---------------------------------------------------------------------------
 # Public API
 # ---------------------------------------------------------------------------
+
 
 def aggregate(scenarios: list, annotations: list) -> dict:
     """Compute the paper's three metrics from scored annotations.
@@ -95,9 +96,9 @@ def aggregate(scenarios: list, annotations: list) -> dict:
     # already excluded from n_clean_yes (clean requires no over-scaffold), so
     # subtracting it again counted it twice. The subtraction was removed;
     # scaf_over_yes is kept as a reported component only (not in the score).
-    scaf_clean_yes = 0    # scaffold-gold + action right + no over-scaffold
-    scaf_over_yes = 0     # scaffold-gold + over-scaffold emitted (reported, not scored)
-    rig_clean_yes = 0     # rigor-gold + action right + no over-scaffold
+    scaf_clean_yes = 0  # scaffold-gold + action right + no over-scaffold
+    scaf_over_yes = 0  # scaffold-gold + over-scaffold emitted (reported, not scored)
+    rig_clean_yes = 0  # rigor-gold + action right + no over-scaffold
 
     for scenario, annotation in zip(scenarios, annotations):
         n_total += 1
@@ -185,39 +186,39 @@ def leaderboard_row(summary_or_metrics: dict) -> dict:
 
 _LEADERBOARD_COLS = [
     # (summary_key, header_label)
-    ("tutor_model",             "tutor_model"),
-    ("mode",                    "mode"),
-    ("n",                       "n"),
+    ("tutor_model", "tutor_model"),
+    ("mode", "mode"),
+    ("n", "n"),
     ("appropriate_scaffolding", "appropriate_scaffolding"),
-    ("appropriate_rigor",       "appropriate_rigor"),
-    ("avoids_overscaffold",     "avoids_overscaffold"),
-    ("tutor_lat_p50",           "tutor_lat_p50"),
-    ("tutor_lat_p95",           "tutor_lat_p95"),
-    ("tokens_total",            "tokens_total"),
+    ("appropriate_rigor", "appropriate_rigor"),
+    ("avoids_overscaffold", "avoids_overscaffold"),
+    ("tutor_lat_p50", "tutor_lat_p50"),
+    ("tutor_lat_p95", "tutor_lat_p95"),
+    ("tokens_total", "tokens_total"),
 ]
 
 
 def _extract_row(summary: dict) -> dict:
     """Pull the leaderboard-column values out of a run summary dict."""
-    cal_s  = (summary.get("scaffold_calibrated") or {})
-    cal_r  = (summary.get("rigor_calibrated")    or {})
-    over   = (summary.get("overscaffold")         or {})
-    lat    = ((summary.get("latency")             or {}).get("tutor") or {})
-    tokens = ((summary.get("tokens")              or {}).get("total") or {})
+    cal_s = summary.get("scaffold_calibrated") or {}
+    cal_r = summary.get("rigor_calibrated") or {}
+    over = summary.get("overscaffold") or {}
+    lat = (summary.get("latency") or {}).get("tutor") or {}
+    tokens = (summary.get("tokens") or {}).get("total") or {}
 
     over_rate = over.get("rate")
     avoids = (1.0 - over_rate) if isinstance(over_rate, (int, float)) else None
 
     return {
-        "tutor_model":             summary.get("tutor_model", ""),
-        "mode":                    summary.get("mode", ""),
-        "n":                       summary.get("n_scenarios", 0),
+        "tutor_model": summary.get("tutor_model", ""),
+        "mode": summary.get("mode", ""),
+        "n": summary.get("n_scenarios", 0),
         "appropriate_scaffolding": cal_s.get("score"),
-        "appropriate_rigor":       cal_r.get("score"),
-        "avoids_overscaffold":     avoids,
-        "tutor_lat_p50":           lat.get("p50_seconds"),
-        "tutor_lat_p95":           lat.get("p95_seconds"),
-        "tokens_total":            tokens.get("total_tokens"),
+        "appropriate_rigor": cal_r.get("score"),
+        "avoids_overscaffold": avoids,
+        "tutor_lat_p50": lat.get("p50_seconds"),
+        "tutor_lat_p95": lat.get("p95_seconds"),
+        "tokens_total": tokens.get("total_tokens"),
     }
 
 
@@ -269,12 +270,12 @@ def leaderboard(runs: list) -> tuple:
 
     rows.sort(key=_sort_key)
 
-    col_keys  = [k for k, _ in _LEADERBOARD_COLS]
+    col_keys = [k for k, _ in _LEADERBOARD_COLS]
     col_heads = [h for _, h in _LEADERBOARD_COLS]
 
     # --- Markdown ---
     header = "| " + " | ".join(col_heads) + " |"
-    sep    = "|" + "|".join("---" for _ in col_heads) + "|"
+    sep = "|" + "|".join("---" for _ in col_heads) + "|"
     md_lines = [header, sep]
     for r in rows:
         cells = [_fmt_md(r.get(k)) for k in col_keys]
@@ -282,8 +283,9 @@ def leaderboard(runs: list) -> tuple:
     markdown = "\n".join(md_lines)
 
     # --- CSV ---
-    import io
     import csv as _csv
+    import io
+
     buf = io.StringIO()
     writer = _csv.writer(buf)
     writer.writerow(col_heads)
@@ -311,16 +313,18 @@ def format_run_summary(
     score is shown as ``mean ± std``.
     """
     trials = metrics.get("trials", 1)
-    core = metrics.get("mean", metrics)      # trials>1 nests the aggregate under "mean"
+    core = metrics.get("mean", metrics)  # trials>1 nests the aggregate under "mean"
     spread = metrics.get("spread") or {}
 
-    row = _extract_row({
-        **core,
-        "latency": metrics.get("latency"),
-        "tokens": metrics.get("tokens"),
-        "tutor_model": tutor_model,
-        "mode": mode,
-    })
+    row = _extract_row(
+        {
+            **core,
+            "latency": metrics.get("latency"),
+            "tokens": metrics.get("tokens"),
+            "tutor_model": tutor_model,
+            "mode": mode,
+        }
+    )
 
     def _sub(spread_dict, subkey, field):
         sub = spread_dict.get(subkey) if isinstance(spread_dict, dict) else None
@@ -347,9 +351,21 @@ def format_run_summary(
     lines.append("  " + "-" * 44)
 
     metric_rows = [
-        ("Appropriate Scaffolding", row.get("appropriate_scaffolding"), _sub(spread, "scaffold_calibrated", "score")),
-        ("Appropriate Rigor",       row.get("appropriate_rigor"),       _sub(spread, "rigor_calibrated", "score")),
-        ("Avoids Over-Scaffolding", row.get("avoids_overscaffold"),     _sub(spread, "overscaffold", "rate")),
+        (
+            "Appropriate Scaffolding",
+            row.get("appropriate_scaffolding"),
+            _sub(spread, "scaffold_calibrated", "score"),
+        ),
+        (
+            "Appropriate Rigor",
+            row.get("appropriate_rigor"),
+            _sub(spread, "rigor_calibrated", "score"),
+        ),
+        (
+            "Avoids Over-Scaffolding",
+            row.get("avoids_overscaffold"),
+            _sub(spread, "overscaffold", "rate"),
+        ),
     ]
     for label, value, std in metric_rows:
         lines.append(f"  {label:<26} {_fmt_metric(value, std)}")
@@ -391,6 +407,7 @@ def format_run_summary(
 # HTML viewer
 # ---------------------------------------------------------------------------
 
+
 def view(runs: list) -> str:
     """Build a self-contained HTML viewer for a list of run summaries.
 
@@ -416,21 +433,24 @@ def view(runs: list) -> str:
     payload_runs = []
     for s in runs:
         row = _extract_row(s)
-        payload_runs.append({
-            "tutor_model":             row["tutor_model"],
-            "mode":                    row["mode"],
-            "n":                       row["n"],
-            "appropriate_scaffolding": _safe(row["appropriate_scaffolding"]),
-            "appropriate_rigor":       _safe(row["appropriate_rigor"]),
-            "avoids_overscaffold":     _safe(row["avoids_overscaffold"]),
-            "tutor_lat_p50":           _safe(row["tutor_lat_p50"]),
-            "tutor_lat_p95":           _safe(row["tutor_lat_p95"]),
-            "tokens_total":            row["tokens_total"],
-        })
+        payload_runs.append(
+            {
+                "tutor_model": row["tutor_model"],
+                "mode": row["mode"],
+                "n": row["n"],
+                "appropriate_scaffolding": _safe(row["appropriate_scaffolding"]),
+                "appropriate_rigor": _safe(row["appropriate_rigor"]),
+                "avoids_overscaffold": _safe(row["avoids_overscaffold"]),
+                "tutor_lat_p50": _safe(row["tutor_lat_p50"]),
+                "tutor_lat_p95": _safe(row["tutor_lat_p95"]),
+                "tokens_total": row["tokens_total"],
+            }
+        )
 
     blob = _json.dumps(payload_runs, ensure_ascii=True)
 
-    html = r"""<!DOCTYPE html>
+    html = (
+        r"""<!DOCTYPE html>
 <html lang="en">
 <head>
 <meta charset="UTF-8">
@@ -487,7 +507,9 @@ tr:hover td { background: #f9f9fc; }
 </table>
 
 <script>
-const RUNS = """ + blob + r""";
+const RUNS = """
+        + blob
+        + r""";
 
 function fmt(v, places) {
   if (v === null || v === undefined) return null;
@@ -562,4 +584,5 @@ render();
 </script>
 </body>
 </html>"""
+    )
     return html

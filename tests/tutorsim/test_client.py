@@ -1,20 +1,36 @@
 import json
+from unittest.mock import MagicMock, patch
+
 import pytest
-from unittest.mock import patch, MagicMock
-from tutorsim.client import infer_provider, _anthropic_thinking_param, _strip_json_fences, _mime_from_path, build_batch_entry, write_jsonl, ModelClient, ModelResponse, run_sync_entries, run_batch
+
+from tutorsim.client import (
+    ModelClient,
+    ModelResponse,
+    _anthropic_thinking_param,
+    _mime_from_path,
+    _strip_json_fences,
+    build_batch_entry,
+    infer_provider,
+    run_batch,
+    run_sync_entries,
+    write_jsonl,
+)
 
 
-@pytest.mark.parametrize("model,expected", [
-    ("claude-opus-4-6", "anthropic"),
-    ("claude-haiku-4-5-20251001", "anthropic"),
-    ("gpt-5.5-2026-04-23", "openai"),
-    ("o1-preview", "openai"),
-    ("o3-mini", "openai"),
-    ("o4-mini", "openai"),
-    ("gemini-3.1-pro-preview", "gemini"),
-    ("deepseek-ai/DeepSeek-V3", "together"),
-    ("meta-llama/Llama-3.3-70B", "together"),
-])
+@pytest.mark.parametrize(
+    "model,expected",
+    [
+        ("claude-opus-4-6", "anthropic"),
+        ("claude-haiku-4-5-20251001", "anthropic"),
+        ("gpt-5.5-2026-04-23", "openai"),
+        ("o1-preview", "openai"),
+        ("o3-mini", "openai"),
+        ("o4-mini", "openai"),
+        ("gemini-3.1-pro-preview", "gemini"),
+        ("deepseek-ai/DeepSeek-V3", "together"),
+        ("meta-llama/Llama-3.3-70B", "together"),
+    ],
+)
 def test_infer_provider_routes_by_prefix(model, expected):
     assert infer_provider(model) == expected
 
@@ -30,7 +46,14 @@ def test_infer_provider_unknown_raises():
 
 class TestAnthropicThinkingParam:
     def test_adaptive_models_get_adaptive_shape(self):
-        for m in ("claude-opus-4-8", "claude-opus-4-7", "claude-opus-4-6", "claude-sonnet-4-6", "claude-sonnet-5", "claude-fable-5"):
+        for m in (
+            "claude-opus-4-8",
+            "claude-opus-4-7",
+            "claude-opus-4-6",
+            "claude-sonnet-4-6",
+            "claude-sonnet-5",
+            "claude-fable-5",
+        ):
             assert _anthropic_thinking_param(m, 0) == {"type": "adaptive"}
 
     def test_haiku_4_5_gets_legacy_enabled_shape(self):
@@ -38,10 +61,12 @@ class TestAnthropicThinkingParam:
         # (extended thinking only, per the Anthropic models overview) --
         # sending {"type": "adaptive"} there would 400.
         assert _anthropic_thinking_param("claude-haiku-4-5", 4096) == {
-            "type": "enabled", "budget_tokens": 4096,
+            "type": "enabled",
+            "budget_tokens": 4096,
         }
         assert _anthropic_thinking_param("claude-haiku-4-5-20251001", 0) == {
-            "type": "enabled", "budget_tokens": 16384,
+            "type": "enabled",
+            "budget_tokens": 16384,
         }
 
     def test_unknown_or_future_model_defaults_to_adaptive(self):
@@ -53,12 +78,14 @@ class TestAnthropicThinkingParam:
 
     def test_legacy_model_gets_enabled_with_budget(self):
         assert _anthropic_thinking_param("claude-sonnet-4-5", 8192) == {
-            "type": "enabled", "budget_tokens": 8192,
+            "type": "enabled",
+            "budget_tokens": 8192,
         }
 
     def test_legacy_model_zero_budget_defaults_16384(self):
         assert _anthropic_thinking_param("claude-sonnet-4-5", 0) == {
-            "type": "enabled", "budget_tokens": 16384,
+            "type": "enabled",
+            "budget_tokens": 16384,
         }
 
 
@@ -89,7 +116,9 @@ def test_build_batch_entry_json_mode_shape():
 
 
 def test_build_batch_entry_optional_fields():
-    e = build_batch_entry("k", "p", images=["a.png"], json_mode=False, cacheable_prefix="PRE")
+    e = build_batch_entry(
+        "k", "p", images=["a.png"], json_mode=False, cacheable_prefix="PRE"
+    )
     assert "response_mime_type" not in e["request"]["generation_config"]
     assert e["request"]["images"] == ["a.png"]
     assert e["cacheable_prefix"] == "PRE"
@@ -123,6 +152,7 @@ def test_modelclient_missing_key_raises(monkeypatch):
 # Task 6: generate() + provider builders + retry + usage/latency
 # ===================================================================
 
+
 def _fake_anthropic_message(text="hi", in_tok=10, out_tok=5):
     msg = MagicMock()
     block = MagicMock()
@@ -142,7 +172,9 @@ def test_generate_anthropic_returns_text_and_usage(monkeypatch):
     monkeypatch.setenv("ANTHROPIC_API_KEY", "sk-test")
     with patch("anthropic.Anthropic") as MockAnthropic:
         client_obj = MagicMock()
-        client_obj.messages.create.return_value = _fake_anthropic_message("answer", 12, 3)
+        client_obj.messages.create.return_value = _fake_anthropic_message(
+            "answer", 12, 3
+        )
         MockAnthropic.return_value = client_obj
         c = ModelClient("claude-opus-4-6")
         resp = c.generate("Q", json_mode=False, max_tokens=64)
@@ -155,8 +187,10 @@ def test_generate_anthropic_returns_text_and_usage(monkeypatch):
 
 def test_generate_retries_then_succeeds(monkeypatch):
     monkeypatch.setenv("ANTHROPIC_API_KEY", "sk-test")
-    with patch("anthropic.Anthropic") as MockAnthropic, \
-         patch("tutorsim.client.time.sleep"):
+    with (
+        patch("anthropic.Anthropic") as MockAnthropic,
+        patch("tutorsim.client.time.sleep"),
+    ):
         client_obj = MagicMock()
         client_obj.messages.create.side_effect = [
             RuntimeError("boom"),
@@ -172,8 +206,10 @@ def test_generate_retries_then_succeeds(monkeypatch):
 def test_generate_exhausts_retries_raises(monkeypatch):
     """After max_retries failures, generate() raises RuntimeError."""
     monkeypatch.setenv("ANTHROPIC_API_KEY", "sk-test")
-    with patch("anthropic.Anthropic") as MockAnthropic, \
-         patch("tutorsim.client.time.sleep"):
+    with (
+        patch("anthropic.Anthropic") as MockAnthropic,
+        patch("tutorsim.client.time.sleep"),
+    ):
         client_obj = MagicMock()
         client_obj.messages.create.side_effect = RuntimeError("always fails")
         MockAnthropic.return_value = client_obj
@@ -199,7 +235,9 @@ def test_generate_anthropic_json_mode_adds_system_message(monkeypatch):
     monkeypatch.setenv("ANTHROPIC_API_KEY", "sk-test")
     with patch("anthropic.Anthropic") as MockAnthropic:
         client_obj = MagicMock()
-        client_obj.messages.create.return_value = _fake_anthropic_message('{"a":1}', 5, 3)
+        client_obj.messages.create.return_value = _fake_anthropic_message(
+            '{"a":1}', 5, 3
+        )
         MockAnthropic.return_value = client_obj
         c = ModelClient("claude-opus-4-6")
         c.generate("Q", json_mode=True)
@@ -217,7 +255,9 @@ def test_generate_anthropic_output_schema_sets_format(monkeypatch):
     monkeypatch.setenv("ANTHROPIC_API_KEY", "sk-test")
     with patch("anthropic.Anthropic") as MockAnthropic:
         client_obj = MagicMock()
-        client_obj.messages.create.return_value = _fake_anthropic_message('{"x":1}', 5, 2)
+        client_obj.messages.create.return_value = _fake_anthropic_message(
+            '{"x":1}', 5, 2
+        )
         MockAnthropic.return_value = client_obj
         c = ModelClient("claude-opus-4-8")
         schema = {
@@ -242,7 +282,8 @@ def test_generate_output_schema_rejected_for_non_anthropic(monkeypatch):
 
 
 def test_get_retry_config_values():
-    from tutorsim.config import get_retry_config, get_batch_timeout
+    from tutorsim.config import get_batch_timeout, get_retry_config
+
     cfg = get_retry_config()
     assert cfg["max_retries"] == 5
     assert cfg["base_delay"] == 5
@@ -255,14 +296,13 @@ def test_get_retry_config_values():
 
 from tutorsim.client import (
     VISION_CAPABLE_PREFIXES,
-    validate_vision_support,
     _base64_bytes,
-    _presigned_url,
     _build_image_blocks_anthropic,
-    _build_image_blocks_openai,
     _build_image_blocks_gemini,
+    _build_image_blocks_openai,
+    _presigned_url,
     _should_use_presigned_url,
-    _interleave_text_and_images,
+    validate_vision_support,
 )
 
 
@@ -298,6 +338,7 @@ class TestShouldUsePresignedUrl:
 class TestBase64Bytes:
     def test_returns_base64_string_from_file(self, tmp_path):
         import base64
+
         p = tmp_path / "test.png"
         raw = b"\x89PNG fake"
         p.write_bytes(raw)
@@ -311,7 +352,9 @@ class TestBase64Bytes:
 class TestPresignedUrl:
     def test_delegates_to_backend(self):
         with patch("tutorsim.client._get_backend") as mock_be:
-            mock_be.return_value.get_presigned_url.return_value = "https://example.com/img.png"
+            mock_be.return_value.get_presigned_url.return_value = (
+                "https://example.com/img.png"
+            )
             result = _presigned_url("images/img.png", expires_seconds=3600)
         assert result == "https://example.com/img.png"
         mock_be.return_value.get_presigned_url.assert_called_once_with(
@@ -325,7 +368,9 @@ class TestBuildImageBlocksAnthropic:
 
     def test_base64_block_shape(self):
         with patch("tutorsim.client._base64_bytes", return_value="ZmFrZQ=="):
-            blocks = _build_image_blocks_anthropic(["photo.png"], use_url=False, enable_cache=False)
+            blocks = _build_image_blocks_anthropic(
+                ["photo.png"], use_url=False, enable_cache=False
+            )
         assert len(blocks) == 1
         b = blocks[0]
         assert b["type"] == "image"
@@ -336,19 +381,28 @@ class TestBuildImageBlocksAnthropic:
 
     def test_cache_control_added_when_enable_cache(self):
         with patch("tutorsim.client._base64_bytes", return_value="ZmFrZQ=="):
-            blocks = _build_image_blocks_anthropic(["photo.jpg"], use_url=False, enable_cache=True)
+            blocks = _build_image_blocks_anthropic(
+                ["photo.jpg"], use_url=False, enable_cache=True
+            )
         assert blocks[0]["cache_control"] == {"type": "ephemeral"}
 
     def test_url_block_shape(self):
-        with patch("tutorsim.client._presigned_url", return_value="https://s3.example.com/img.png"):
-            blocks = _build_image_blocks_anthropic(["photo.png"], use_url=True, enable_cache=False)
+        with patch(
+            "tutorsim.client._presigned_url",
+            return_value="https://s3.example.com/img.png",
+        ):
+            blocks = _build_image_blocks_anthropic(
+                ["photo.png"], use_url=True, enable_cache=False
+            )
         b = blocks[0]
         assert b["source"]["type"] == "url"
         assert b["source"]["url"] == "https://s3.example.com/img.png"
 
     def test_multiple_images(self):
         with patch("tutorsim.client._base64_bytes", side_effect=["b64a", "b64b"]):
-            blocks = _build_image_blocks_anthropic(["a.png", "b.webp"], use_url=False, enable_cache=False)
+            blocks = _build_image_blocks_anthropic(
+                ["a.png", "b.webp"], use_url=False, enable_cache=False
+            )
         assert len(blocks) == 2
         assert blocks[0]["source"]["media_type"] == "image/png"
         assert blocks[1]["source"]["media_type"] == "image/webp"
@@ -365,7 +419,10 @@ class TestBuildImageBlocksOpenAI:
         assert "ZmFrZQ==" in b["image_url"]["url"]
 
     def test_presigned_url_shape(self):
-        with patch("tutorsim.client._presigned_url", return_value="https://cdn.example.com/img.jpg"):
+        with patch(
+            "tutorsim.client._presigned_url",
+            return_value="https://cdn.example.com/img.jpg",
+        ):
             blocks = _build_image_blocks_openai(["photo.jpg"], use_url=True)
         b = blocks[0]
         assert b["image_url"]["url"] == "https://cdn.example.com/img.jpg"
@@ -401,13 +458,22 @@ def test_anthropic_cacheable_prefix_is_separate_block(monkeypatch):
     with patch("anthropic.Anthropic") as anth:
         client_obj = MagicMock()
         captured = {}
+
         def _create(**kwargs):
             captured.update(kwargs)
             m = MagicMock()
-            b = MagicMock(); b.type = "text"; b.text = "ok"; m.content = [b]
-            m.usage = MagicMock(input_tokens=1, output_tokens=1,
-                                cache_creation_input_tokens=0, cache_read_input_tokens=0)
+            b = MagicMock()
+            b.type = "text"
+            b.text = "ok"
+            m.content = [b]
+            m.usage = MagicMock(
+                input_tokens=1,
+                output_tokens=1,
+                cache_creation_input_tokens=0,
+                cache_read_input_tokens=0,
+            )
             return m
+
         client_obj.messages.create.side_effect = _create
         anth.return_value = client_obj
         c = ModelClient("claude-opus-4-6")
@@ -424,13 +490,15 @@ def test_anthropic_cacheable_prefix_is_separate_block(monkeypatch):
 # Task 8: run_sync_entries + run_batch (anthropic/openai/gemini)
 # ===================================================================
 
+
 def test_run_sync_entries_collects_by_key(monkeypatch):
     monkeypatch.setenv("ANTHROPIC_API_KEY", "sk-test")
     with patch("anthropic.Anthropic") as MockAnthropic:
         MockAnthropic.return_value = MagicMock()
         c = ModelClient("claude-opus-4-6")
         with patch.object(
-            c, "generate",
+            c,
+            "generate",
             return_value=ModelResponse(
                 "R", {"input_tokens": 1, "output_tokens": 1, "total_tokens": 2}, 0.0
             ),
@@ -451,13 +519,19 @@ def test_run_sync_entries_records_error_per_key(monkeypatch):
             out = run_sync_entries(c, [build_batch_entry("k1", "p1")])
     assert out["k1"]["text"] == ""
     assert "boom" in out["k1"]["error"]
-    assert out["k1"]["usage"] == {"input_tokens": 0, "output_tokens": 0, "total_tokens": 0}
+    assert out["k1"]["usage"] == {
+        "input_tokens": 0,
+        "output_tokens": 0,
+        "total_tokens": 0,
+    }
 
 
 def test_run_batch_anthropic_remaps_custom_ids(monkeypatch):
     monkeypatch.setenv("ANTHROPIC_API_KEY", "sk-test")
-    with patch("anthropic.Anthropic") as MockAnthropic, \
-         patch("tutorsim.client.time.sleep"):
+    with (
+        patch("anthropic.Anthropic") as MockAnthropic,
+        patch("tutorsim.client.time.sleep"),
+    ):
         client_obj = MagicMock()
         batch = MagicMock()
         batch.id = "b1"
@@ -478,11 +552,15 @@ def test_run_batch_anthropic_remaps_custom_ids(monkeypatch):
             r.result.message = msg
             return r
 
-        client_obj.messages.batches.results.return_value = [_result(0, "A"), _result(1, "B")]
+        client_obj.messages.batches.results.return_value = [
+            _result(0, "A"),
+            _result(1, "B"),
+        ]
         MockAnthropic.return_value = client_obj
         c = ModelClient("claude-opus-4-6")
         out = run_batch(
-            c, [build_batch_entry("kA", "pA"), build_batch_entry("kB", "pB")],
+            c,
+            [build_batch_entry("kA", "pA"), build_batch_entry("kB", "pB")],
             poll_interval=0,
         )
     assert out["kA"]["text"] == "A"
@@ -493,8 +571,10 @@ def test_run_batch_anthropic_sends_thinking_and_effort(monkeypatch):
     """Batch requests must carry the same thinking/effort params as sync calls
     (benchmark fidelity: batch mode may not silently diverge from run_conversation)."""
     monkeypatch.setenv("ANTHROPIC_API_KEY", "sk-test")
-    with patch("anthropic.Anthropic") as MockAnthropic, \
-         patch("tutorsim.client.time.sleep"):
+    with (
+        patch("anthropic.Anthropic") as MockAnthropic,
+        patch("tutorsim.client.time.sleep"),
+    ):
         client_obj = MagicMock()
         batch = MagicMock()
         batch.id = "b1"
@@ -505,8 +585,11 @@ def test_run_batch_anthropic_sends_thinking_and_effort(monkeypatch):
         MockAnthropic.return_value = client_obj
         c = ModelClient("claude-opus-4-8")
         run_batch(
-            c, [build_batch_entry("kA", "pA")],
-            poll_interval=0, thinking=True, effort="xhigh",
+            c,
+            [build_batch_entry("kA", "pA")],
+            poll_interval=0,
+            thinking=True,
+            effort="xhigh",
         )
         (submitted,) = client_obj.messages.batches.create.call_args.kwargs["requests"]
     assert submitted["params"]["thinking"] == {"type": "adaptive"}
@@ -516,8 +599,10 @@ def test_run_batch_anthropic_sends_thinking_and_effort(monkeypatch):
 def test_run_batch_anthropic_resume_rebuilds_id_map(monkeypatch):
     """Resume via existing_batch_id must rebuild the deterministic r{i} map."""
     monkeypatch.setenv("ANTHROPIC_API_KEY", "sk-test")
-    with patch("anthropic.Anthropic") as MockAnthropic, \
-         patch("tutorsim.client.time.sleep"):
+    with (
+        patch("anthropic.Anthropic") as MockAnthropic,
+        patch("tutorsim.client.time.sleep"),
+    ):
         client_obj = MagicMock()
         batch = MagicMock()
         batch.id = "b1"
@@ -537,12 +622,17 @@ def test_run_batch_anthropic_resume_rebuilds_id_map(monkeypatch):
             r.result.message = msg
             return r
 
-        client_obj.messages.batches.results.return_value = [_result(0, "A"), _result(1, "B")]
+        client_obj.messages.batches.results.return_value = [
+            _result(0, "A"),
+            _result(1, "B"),
+        ]
         MockAnthropic.return_value = client_obj
         c = ModelClient("claude-opus-4-6")
         out = run_batch(
-            c, [build_batch_entry("kA", "pA"), build_batch_entry("kB", "pB")],
-            poll_interval=0, existing_batch_id="b1",
+            c,
+            [build_batch_entry("kA", "pA"), build_batch_entry("kB", "pB")],
+            poll_interval=0,
+            existing_batch_id="b1",
         )
     # No fresh submission on resume.
     client_obj.messages.batches.create.assert_not_called()
@@ -553,8 +643,7 @@ def test_run_batch_anthropic_resume_rebuilds_id_map(monkeypatch):
 
 def test_run_batch_openai_parses_results(monkeypatch):
     monkeypatch.setenv("OPENAI_API_KEY", "sk-test")
-    with patch("openai.OpenAI") as MockOpenAI, \
-         patch("tutorsim.client.time.sleep"):
+    with patch("openai.OpenAI") as MockOpenAI, patch("tutorsim.client.time.sleep"):
         client_obj = MagicMock()
         uploaded = MagicMock()
         uploaded.id = "file-1"
@@ -567,13 +656,21 @@ def test_run_batch_openai_parses_results(monkeypatch):
         client_obj.batches.retrieve.return_value = batch
 
         lines = "\n".join(
-            json.dumps({
-                "custom_id": cid,
-                "response": {"body": {
-                    "choices": [{"message": {"content": text}}],
-                    "usage": {"prompt_tokens": 2, "completion_tokens": 3, "total_tokens": 5},
-                }},
-            })
+            json.dumps(
+                {
+                    "custom_id": cid,
+                    "response": {
+                        "body": {
+                            "choices": [{"message": {"content": text}}],
+                            "usage": {
+                                "prompt_tokens": 2,
+                                "completion_tokens": 3,
+                                "total_tokens": 5,
+                            },
+                        }
+                    },
+                }
+            )
             for cid, text in [("kA", "A"), ("kB", "B")]
         )
         content_obj = MagicMock()
@@ -582,7 +679,8 @@ def test_run_batch_openai_parses_results(monkeypatch):
         MockOpenAI.return_value = client_obj
         c = ModelClient("gpt-5.4")
         out = run_batch(
-            c, [build_batch_entry("kA", "pA"), build_batch_entry("kB", "pB")],
+            c,
+            [build_batch_entry("kA", "pA"), build_batch_entry("kB", "pB")],
             poll_interval=0,
         )
     assert out["kA"]["text"] == "A"
@@ -593,8 +691,7 @@ def test_run_batch_openai_parses_results(monkeypatch):
 
 def test_run_batch_gemini_parses_results(monkeypatch):
     monkeypatch.setenv("GEMINI_API_KEY", "key-test")
-    with patch("google.genai.Client") as MockGenai, \
-         patch("tutorsim.client.time.sleep"):
+    with patch("google.genai.Client") as MockGenai, patch("tutorsim.client.time.sleep"):
         client_obj = MagicMock()
         uploaded = MagicMock()
         uploaded.name = "files/up1"
@@ -607,24 +704,27 @@ def test_run_batch_gemini_parses_results(monkeypatch):
         client_obj.batches.get.return_value = batch
 
         lines = "\n".join(
-            json.dumps({
-                "key": key,
-                "response": {
-                    "candidates": [{"content": {"parts": [{"text": text}]}}],
-                    "usageMetadata": {
-                        "promptTokenCount": 4,
-                        "candidatesTokenCount": 6,
-                        "totalTokenCount": 10,
+            json.dumps(
+                {
+                    "key": key,
+                    "response": {
+                        "candidates": [{"content": {"parts": [{"text": text}]}}],
+                        "usageMetadata": {
+                            "promptTokenCount": 4,
+                            "candidatesTokenCount": 6,
+                            "totalTokenCount": 10,
+                        },
                     },
-                },
-            })
+                }
+            )
             for key, text in [("kA", "A"), ("kB", "B")]
         )
         client_obj.files.download.return_value = lines.encode("utf-8")
         MockGenai.return_value = client_obj
         c = ModelClient("gemini-3.1-pro-preview")
         out = run_batch(
-            c, [build_batch_entry("kA", "pA"), build_batch_entry("kB", "pB")],
+            c,
+            [build_batch_entry("kA", "pA"), build_batch_entry("kB", "pB")],
             poll_interval=0,
         )
     assert out["kA"]["text"] == "A"

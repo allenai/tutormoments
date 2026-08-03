@@ -11,7 +11,7 @@ and are never constructed at runtime (see ``tutorsim_build/`` for that).
 import hashlib
 import json
 import logging
-from dataclasses import dataclass, asdict
+from dataclasses import asdict, dataclass
 from pathlib import Path
 from typing import Any
 
@@ -47,6 +47,7 @@ def _missing_dataset_message(path: Path) -> str:
 # Hashing
 # ---------------------------------------------------------------------------
 
+
 def file_sha256(path: str | Path) -> str:
     """Return the SHA-256 hex digest for a file."""
     digest = hashlib.sha256()
@@ -64,7 +65,9 @@ def records_content_hash(records: list[dict]) -> str:
     """
     digest = hashlib.sha256()
     for rec in records:
-        digest.update(json.dumps(rec, sort_keys=True, ensure_ascii=False).encode("utf-8"))
+        digest.update(
+            json.dumps(rec, sort_keys=True, ensure_ascii=False).encode("utf-8")
+        )
         digest.update(b"\n")
     return digest.hexdigest()
 
@@ -72,6 +75,7 @@ def records_content_hash(records: list[dict]) -> str:
 # ---------------------------------------------------------------------------
 # Moment
 # ---------------------------------------------------------------------------
+
 
 def _normalize_cut_votes(value: Any) -> dict:
     """Normalize provenance.cut_votes to its internal dict form.
@@ -126,6 +130,7 @@ class Moment:
 # ---------------------------------------------------------------------------
 # Loading
 # ---------------------------------------------------------------------------
+
 
 def _read_moments_jsonl(path: str | Path) -> list[Moment]:
     """Read a moments.jsonl file into Moment objects, in file order."""
@@ -255,7 +260,9 @@ def validate_dataset(release_dir: str | Path) -> dict:
         )
 
     # Schema v2: every record must carry the frozen student persona.
-    traitless = [m.id for m in moments if not (m.student.get("trait") or {}).get("persona")]
+    traitless = [
+        m.id for m in moments if not (m.student.get("trait") or {}).get("persona")
+    ]
     if traitless:
         raise ValueError(
             f"{len(traitless)} moment(s) have no student.trait persona "
@@ -276,6 +283,7 @@ def validate_dataset(release_dir: str | Path) -> dict:
 # ---------------------------------------------------------------------------
 # Reference transcript (runtime fallback for batch mode; reused by build)
 # ---------------------------------------------------------------------------
+
 
 def _build_reference_transcript(conversation: dict, cut_turn: int) -> str:
     """Format the post-cut real human turns from a full conversation.

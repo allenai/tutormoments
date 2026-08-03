@@ -22,7 +22,10 @@ LOCAL_RELEASE = REPO / "data/balanced_520_release"
 
 def _shipped_schema() -> dict:
     from importlib.resources import files
-    return json.loads((files("tutorsim_build") / "moments.schema.json").read_text(encoding="utf-8"))
+
+    return json.loads(
+        (files("tutorsim_build") / "moments.schema.json").read_text(encoding="utf-8")
+    )
 
 
 def _validate_records(jsonl_path: Path):
@@ -44,14 +47,28 @@ def _full_moment(mid="t:c__hum_1_2"):
         context=[{"turn_number": 1, "role": "tutor", "text": "Q"}],
         dimension="rigor",
         student={
-            "mode": "oracle", "reference": "", "context": "",
-            "trait": {"persona": "The student hedges.", "trait_mode": "joined-3",
-                      "generator_model": "claude-opus-4-6", "generated_at": "2026-06-18T00:00:00"},
+            "mode": "oracle",
+            "reference": "",
+            "context": "",
+            "trait": {
+                "persona": "The student hedges.",
+                "trait_mode": "joined-3",
+                "generator_model": "claude-opus-4-6",
+                "generated_at": "2026-06-18T00:00:00",
+            },
         },
         rubric={"gold": "rigor", "hint": ""},
-        provenance={"conv_id": "c", "cut_turn": 1, "turn_start": 1, "turn_end": 2,
-                    "moment_id": None, "annotator_id": "a-1", "chosen_cut_turn": 1,
-                    "cut_votes": {"1": 1}, "cluster_size": 1},
+        provenance={
+            "conv_id": "c",
+            "cut_turn": 1,
+            "turn_start": 1,
+            "turn_end": 2,
+            "moment_id": None,
+            "annotator_id": "a-1",
+            "chosen_cut_turn": 1,
+            "cut_votes": {"1": 1},
+            "cluster_size": 1,
+        },
     )
 
 
@@ -65,7 +82,11 @@ def test_write_release_refuses_nonconforming_record(tmp_path):
     """A record violating the schema (provenance missing required fields)
     cannot be released, independent of the trait check."""
     m = _full_moment()
-    m.provenance = {"conv_id": "c", "cut_turn": 1, "cut_votes": {}}  # missing 6 required fields
+    m.provenance = {
+        "conv_id": "c",
+        "cut_turn": 1,
+        "cut_votes": {},
+    }  # missing 6 required fields
     with pytest.raises(ValueError, match="schema"):
         write_release([m], tmp_path, set_name="t", created="2026-07-03")
 
@@ -75,8 +96,10 @@ def test_mini_release_fixture_conforms():
     _validate_records(MINI_RELEASE / "moments.jsonl")
 
 
-@pytest.mark.skipif(not (LOCAL_RELEASE / "moments.jsonl").exists(),
-                    reason="local balanced_520 release not present")
+@pytest.mark.skipif(
+    not (LOCAL_RELEASE / "moments.jsonl").exists(),
+    reason="local balanced_520 release not present",
+)
 def test_local_balanced_520_release_conforms():
     """The real release dir (when present locally) satisfies the shipped schema."""
     _validate_records(LOCAL_RELEASE / "moments.jsonl")

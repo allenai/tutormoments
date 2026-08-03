@@ -8,16 +8,16 @@ import pytest
 
 from tutorsim_build.classify import (
     JUNK_TEXTS,
-    VALID_SITUATION_LABELS,
     VALID_LABELS,
+    VALID_SITUATION_LABELS,
     _parse_situation_label,
     load_labeller_templates,
     load_situation_prompt,
     pick_template,
 )
 
-
 # --- _parse_situation_label -------------------------------------------------
+
 
 def test_parse_situation_label_valid_json():
     label, had_error = _parse_situation_label('{"scaffolding": "yes", "rigor": "no"}')
@@ -32,7 +32,9 @@ def test_parse_situation_label_unwraps_list():
 
 
 def test_parse_situation_label_coerces_unknown_value_to_unclear():
-    label, had_error = _parse_situation_label('{"scaffolding": "maybe", "rigor": "yes"}')
+    label, had_error = _parse_situation_label(
+        '{"scaffolding": "maybe", "rigor": "yes"}'
+    )
     assert label == {"scaffolding": "unclear", "rigor": "yes"}
     assert had_error is False
 
@@ -54,6 +56,7 @@ def test_valid_situation_labels_set():
 
 
 # --- load_labeller_templates / pick_template --------------------------------
+
 
 def test_load_labeller_templates_dict_routes_per_type():
     templates = load_labeller_templates(
@@ -94,6 +97,7 @@ def test_pick_template_raises_when_unmapped_and_no_fallback():
 
 
 # --- JUNK_TEXTS -------------------------------------------------------------
+
 
 def test_junk_texts_contains_known_placeholders():
     assert "" in JUNK_TEXTS

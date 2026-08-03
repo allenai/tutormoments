@@ -3,11 +3,11 @@
 Trait generation moved to tutorsim_build (frozen personas ship in the
 release); its tests live in tests/tutorsim_build/test_traits.py.
 """
-import pytest
 
 # ---------------------------------------------------------------------------
 # Tests: build_student_system_prompt (oracle mode) -- Task 4
 # ---------------------------------------------------------------------------
+
 
 class TestBuildStudentSystemPrompt:
     """Tests for build_student_system_prompt() -- oracle prompt render + substitutions."""
@@ -101,18 +101,20 @@ class TestBuildStudentSystemPrompt:
 # Tests: resolve_student -- Task 4
 # ---------------------------------------------------------------------------
 
+
 class TestResolveStudent:
     """Tests for resolve_student() -- hosted model resolution + registry."""
 
     def test_resolve_student_no_id_returns_hosted_claude_opus(self, monkeypatch):
         """resolve_student() with no args returns hosted claude-opus-4-6 with thinking=False."""
-        import os
         monkeypatch.setenv("ANTHROPIC_API_KEY", "test-key")
 
         # Patch anthropic.Anthropic so no real HTTP call is made.
         import unittest.mock as mock
+
         with mock.patch("anthropic.Anthropic"):
             from tutorsim.student import resolve_student
+
             result = resolve_student()
 
         assert result["kind"] == "hosted"
@@ -121,8 +123,9 @@ class TestResolveStudent:
 
     def test_resolve_student_registered(self, monkeypatch):
         """A @register_student-decorated callable is returned by resolve_student(name)."""
-        from tutorsim.config import register_student, _STUDENT_REGISTRY
         import unittest.mock as mock
+
+        from tutorsim.config import _STUDENT_REGISTRY, register_student
 
         # Register a dummy student.
         @register_student("dummy")
@@ -132,6 +135,7 @@ class TestResolveStudent:
         monkeypatch.setenv("ANTHROPIC_API_KEY", "test-key")
         with mock.patch("anthropic.Anthropic"):
             from tutorsim.student import resolve_student
+
             result = resolve_student("dummy")
 
         assert result["kind"] == "registered"

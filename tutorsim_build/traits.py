@@ -9,6 +9,7 @@ Public API:
     generate_trait(transcript_prefix, mode, *, model_client, ...) -> str
     generate_traits_for_moments(moments, *, model_client, model_name) -> int
 """
+
 import datetime
 import logging
 from typing import Optional
@@ -98,13 +99,15 @@ def get_dimension_description(persona_dimension: str) -> str:
 
     if persona_dimension == "all_engagement":
         texts = [
-            get_dimension_description(n) for n in sorted(ALL_ENGAGEMENT_DIMENSIONS.keys())
+            get_dimension_description(n)
+            for n in sorted(ALL_ENGAGEMENT_DIMENSIONS.keys())
         ]
         return "\n\n".join(f"{i + 1}. {t}" for i, t in enumerate(texts))
 
     if persona_dimension == "all_cognitive":
         texts = [
-            get_dimension_description(n) for n in sorted(ALL_COGNITIVE_DIMENSIONS.keys())
+            get_dimension_description(n)
+            for n in sorted(ALL_COGNITIVE_DIMENSIONS.keys())
         ]
         return "\n\n".join(f"{i + 1}. {t}" for i, t in enumerate(texts))
 
@@ -114,6 +117,7 @@ def get_dimension_description(persona_dimension: str) -> str:
 # ---------------------------------------------------------------------------
 # Adapter (wraps tutorsim.client.ModelClient)
 # ---------------------------------------------------------------------------
+
 
 class _ModelWrapperAdapter:
     """Thin shim around tutorsim ModelClient mimicking TraitGenerator's model interface.
@@ -155,6 +159,7 @@ class _ModelWrapperAdapter:
 # TraitGenerator (live path only)
 # ---------------------------------------------------------------------------
 
+
 class TraitGenerator:
     """Generate student traits from example conversations.
 
@@ -183,11 +188,9 @@ class TraitGenerator:
         else:
             suffix = " The description should be 1 sentence long."
 
-        return (
-            template
-            .replace("{dimension_description}", dimension_description)
-            .replace("{sentence_count_suffix}", suffix)
-        )
+        return template.replace(
+            "{dimension_description}", dimension_description
+        ).replace("{sentence_count_suffix}", suffix)
 
     def _get_user_prompt(
         self, conversation_text: str, num_sentences: Optional[int] = None
@@ -198,10 +201,8 @@ class TraitGenerator:
         {conversation_text} and {num_sentences}.
         """
         template = resource_text(f"{_TRAIT_GEN_DIR}/user.txt").rstrip("\n")
-        return (
-            template
-            .replace("{conversation_text}", conversation_text)
-            .replace("{num_sentences}", str(num_sentences))
+        return template.replace("{conversation_text}", conversation_text).replace(
+            "{num_sentences}", str(num_sentences)
         )
 
     def parse_trait_output(self, raw_output: str) -> tuple:
@@ -323,6 +324,7 @@ class TraitGenerator:
 # Module-level wrappers
 # ---------------------------------------------------------------------------
 
+
 def generate_trait(
     transcript_prefix: str,
     mode: str = DEFAULT_TRAIT_MODE,
@@ -349,8 +351,7 @@ def _format_transcript_prefix(context: list) -> str:
     personas were generated from this same rendering of the pre-cut turns.
     """
     return "\n".join(
-        f"Turn {t['turn_number']}. {t['role'].upper()}: {t['text']}"
-        for t in context
+        f"Turn {t['turn_number']}. {t['role'].upper()}: {t['text']}" for t in context
     )
 
 
@@ -379,8 +380,9 @@ def generate_traits_for_moments(
             "persona": persona.strip(),
             "trait_mode": trait_mode,
             "generator_model": model_name,
-            "generated_at": datetime.datetime.now(datetime.timezone.utc)
-                            .strftime("%Y-%m-%dT%H:%M:%S"),
+            "generated_at": datetime.datetime.now(datetime.timezone.utc).strftime(
+                "%Y-%m-%dT%H:%M:%S"
+            ),
         }
         generated += 1
         logger.info("trait generated for %s (%d chars)", moment.id, len(persona))

@@ -2,16 +2,18 @@
 
 TDD: tests written first, then implementation.
 """
-import pytest
-from unittest.mock import MagicMock
+
 from types import SimpleNamespace
+from unittest.mock import MagicMock
+
+import pytest
 
 from tutorsim.moments import Moment as Scenario
-
 
 # ---------------------------------------------------------------------------
 # Helpers
 # ---------------------------------------------------------------------------
+
 
 def _resp(text, usage=None, latency=None):
     """Build a fake LLM response."""
@@ -29,7 +31,11 @@ _FROZEN_TRAIT = {
 def _make_scenario(cut_turn=5, persona="fake-persona"):
     """Build a minimal Scenario for testing (carries a frozen student trait)."""
     context = [
-        {"turn_number": i + 1, "role": "tutor" if i % 2 == 0 else "student", "text": f"text {i + 1}"}
+        {
+            "turn_number": i + 1,
+            "role": "tutor" if i % 2 == 0 else "student",
+            "text": f"text {i + 1}",
+        }
         for i in range(cut_turn)
     ]
     return Scenario(
@@ -95,9 +101,11 @@ def _patch_all(monkeypatch, tutor_responses, student_responses):
 # Tests: module imports and Transcript dataclass
 # ---------------------------------------------------------------------------
 
+
 def test_imports():
     """Module and Transcript are importable."""
     from tutorsim.conversation import Transcript, run_conversation
+
     assert Transcript is not None
     assert run_conversation is not None
 
@@ -105,6 +113,7 @@ def test_imports():
 def test_transcript_defaults():
     """Transcript has sensible defaults."""
     from tutorsim.conversation import Transcript
+
     t = Transcript(scenario_id="abc", tutor_model="m")
     assert t.scenario_id == "abc"
     assert t.tutor_model == "m"
@@ -120,6 +129,7 @@ def test_transcript_defaults():
 def test_transcript_to_dict():
     """to_dict() returns all fields."""
     from tutorsim.conversation import Transcript
+
     t = Transcript(scenario_id="x", tutor_model="y")
     d = t.to_dict()
     assert d["scenario_id"] == "x"
@@ -131,8 +141,10 @@ def test_transcript_to_dict():
 # Tests: private helpers
 # ---------------------------------------------------------------------------
 
+
 def test_parse_tutor_tokens_no_tokens():
     from tutorsim.conversation import _parse_tutor_tokens
+
     text, ended, changed = _parse_tutor_tokens("Hello there!")
     assert text == "Hello there!"
     assert ended is False
@@ -141,6 +153,7 @@ def test_parse_tutor_tokens_no_tokens():
 
 def test_parse_tutor_tokens_end():
     from tutorsim.conversation import _parse_tutor_tokens
+
     text, ended, changed = _parse_tutor_tokens("Great work! [END]")
     assert "[END]" not in text
     assert ended is True
@@ -149,6 +162,7 @@ def test_parse_tutor_tokens_end():
 
 def test_parse_tutor_tokens_problem_change():
     from tutorsim.conversation import _parse_tutor_tokens
+
     text, ended, changed = _parse_tutor_tokens("OK, let's move on. [PROBLEM_CHANGE]")
     assert "[PROBLEM_CHANGE]" not in text
     assert ended is False
@@ -158,6 +172,7 @@ def test_parse_tutor_tokens_problem_change():
 def test_parse_tutor_tokens_next_problem_legacy():
     """[NEXT_PROBLEM] is the legacy alias for [PROBLEM_CHANGE]."""
     from tutorsim.conversation import _parse_tutor_tokens
+
     text, ended, changed = _parse_tutor_tokens("Done! [NEXT_PROBLEM]")
     assert "[NEXT_PROBLEM]" not in text
     assert ended is False
@@ -167,6 +182,7 @@ def test_parse_tutor_tokens_next_problem_legacy():
 def test_parse_tutor_tokens_end_takes_precedence():
     """When both END and PROBLEM_CHANGE appear, ended wins."""
     from tutorsim.conversation import _parse_tutor_tokens
+
     text, ended, changed = _parse_tutor_tokens("[END] [PROBLEM_CHANGE]")
     assert ended is True
     assert changed is False
@@ -174,33 +190,39 @@ def test_parse_tutor_tokens_end_takes_precedence():
 
 def test_split_messages_single():
     from tutorsim.conversation import _split_messages
+
     assert _split_messages("Hello") == ["Hello"]
 
 
 def test_split_messages_next_delimiter():
     from tutorsim.conversation import _split_messages
+
     result = _split_messages("Msg1 [NEXT] Msg2")
     assert result == ["Msg1", "Msg2"]
 
 
 def test_split_messages_new_message_delimiter():
     from tutorsim.conversation import _split_messages
+
     result = _split_messages("Msg1 [NEW_MESSAGE] Msg2")
     assert result == ["Msg1", "Msg2"]
 
 
 def test_split_messages_empty_string():
     from tutorsim.conversation import _split_messages
+
     assert _split_messages("") == []
 
 
 def test_split_messages_whitespace_only():
     from tutorsim.conversation import _split_messages
+
     assert _split_messages("   ") == []
 
 
 def test_add_usage():
     from tutorsim.conversation import _add_usage
+
     total = {"input_tokens": 10, "output_tokens": 5, "total_tokens": 15}
     _add_usage(total, {"input_tokens": 3, "output_tokens": 2, "total_tokens": 5})
     assert total == {"input_tokens": 13, "output_tokens": 7, "total_tokens": 20}
@@ -209,6 +231,7 @@ def test_add_usage():
 def test_add_usage_missing_keys():
     """Missing keys in new dict are treated as 0."""
     from tutorsim.conversation import _add_usage
+
     total = {"input_tokens": 10, "output_tokens": 0, "total_tokens": 10}
     _add_usage(total, {})
     assert total["input_tokens"] == 10
@@ -217,6 +240,7 @@ def test_add_usage_missing_keys():
 def test_format_transcript_prefix():
     """_format_transcript_prefix uses real turn_number and UPPERCASE role."""
     from tutorsim.conversation import _format_transcript_prefix
+
     context = [
         {"turn_number": 26, "role": "tutor", "text": "Hello!"},
         {"turn_number": 27, "role": "student", "text": "Hi there."},
@@ -228,6 +252,7 @@ def test_format_transcript_prefix():
 def test_format_transcript_prefix_real_turn_numbers():
     """Non-sequential turn numbers (e.g. from enrichments) are preserved exactly."""
     from tutorsim.conversation import _format_transcript_prefix
+
     context = [
         {"turn_number": 5, "role": "tutor", "text": "A"},
         {"turn_number": 7, "role": "student", "text": "B"},
@@ -239,6 +264,7 @@ def test_format_transcript_prefix_real_turn_numbers():
 
 def test_format_transcript_prefix_empty():
     from tutorsim.conversation import _format_transcript_prefix
+
     assert _format_transcript_prefix([]) == ""
 
 
@@ -246,12 +272,18 @@ def test_format_transcript_prefix_empty():
 # Tests: run_conversation happy path
 # ---------------------------------------------------------------------------
 
+
 def test_run_conversation_single_round_end(monkeypatch):
     """Tutor says [END] after first turn -> conversation stops after 1 tutor turn."""
     from tutorsim.conversation import run_conversation
 
     scenario = _make_scenario(cut_turn=5)
-    tutor_resp = [_resp("Good job! [END]", usage={"input_tokens": 10, "output_tokens": 5, "total_tokens": 15})]
+    tutor_resp = [
+        _resp(
+            "Good job! [END]",
+            usage={"input_tokens": 10, "output_tokens": 5, "total_tokens": 15},
+        )
+    ]
     student_resp = []  # never called
 
     tutor_client, student_client = _patch_all(monkeypatch, tutor_resp, student_resp)
@@ -387,6 +419,7 @@ def test_run_conversation_multi_message_split(monkeypatch):
 # Tests: usage accumulation
 # ---------------------------------------------------------------------------
 
+
 def test_run_conversation_usage_accumulated(monkeypatch):
     """Token usage is summed across all tutor calls."""
     from tutorsim.conversation import run_conversation
@@ -396,7 +429,9 @@ def test_run_conversation_usage_accumulated(monkeypatch):
     usage2 = {"input_tokens": 8, "output_tokens": 3, "total_tokens": 11}
 
     tutor_resp = [_resp("T1", usage=usage1), _resp("[END]", usage=usage2)]
-    student_resp = [_resp("S1", usage={"input_tokens": 4, "output_tokens": 2, "total_tokens": 6})]
+    student_resp = [
+        _resp("S1", usage={"input_tokens": 4, "output_tokens": 2, "total_tokens": 6})
+    ]
 
     _patch_all(monkeypatch, tutor_resp, student_resp)
 
@@ -440,6 +475,7 @@ def test_run_conversation_none_latency_not_appended(monkeypatch):
 # Tests: scenario_id and tutor_model on Transcript
 # ---------------------------------------------------------------------------
 
+
 def test_run_conversation_transcript_ids(monkeypatch):
     """Transcript carries correct scenario_id and tutor_model."""
     from tutorsim.conversation import run_conversation
@@ -456,6 +492,7 @@ def test_run_conversation_transcript_ids(monkeypatch):
 # ---------------------------------------------------------------------------
 # Tests: registered (callable) tutor/student
 # ---------------------------------------------------------------------------
+
 
 def test_registered_tutor(monkeypatch):
     """Registered tutor callable is invoked with generated_turns."""
@@ -476,8 +513,12 @@ def test_registered_tutor(monkeypatch):
         "tutorsim.conversation.resolve_student",
         lambda id=None: {"kind": "registered", "fn": lambda turns: "student reply"},
     )
-    monkeypatch.setattr("tutorsim.conversation.build_tutor_system_prompt", lambda mode, **kw: "SYS")
-    monkeypatch.setattr("tutorsim.conversation.build_student_system_prompt", lambda **kw: "SYS")
+    monkeypatch.setattr(
+        "tutorsim.conversation.build_tutor_system_prompt", lambda mode, **kw: "SYS"
+    )
+    monkeypatch.setattr(
+        "tutorsim.conversation.build_student_system_prompt", lambda **kw: "SYS"
+    )
 
     result = run_conversation(scenario, "custom-tutor", max_turns=4)
 
@@ -513,8 +554,12 @@ def test_registered_student(monkeypatch):
         "tutorsim.conversation.resolve_student",
         lambda id=None: {"kind": "registered", "fn": fake_student},
     )
-    monkeypatch.setattr("tutorsim.conversation.build_tutor_system_prompt", lambda mode, **kw: "SYS")
-    monkeypatch.setattr("tutorsim.conversation.build_student_system_prompt", lambda **kw: "SYS")
+    monkeypatch.setattr(
+        "tutorsim.conversation.build_tutor_system_prompt", lambda mode, **kw: "SYS"
+    )
+    monkeypatch.setattr(
+        "tutorsim.conversation.build_student_system_prompt", lambda **kw: "SYS"
+    )
 
     result = run_conversation(scenario, "custom-tutor", max_turns=4)
 
@@ -525,6 +570,7 @@ def test_registered_student(monkeypatch):
 # ---------------------------------------------------------------------------
 # Tests: cacheable prefix passed to generate
 # ---------------------------------------------------------------------------
+
 
 def test_cacheable_prefix_passed_to_client(monkeypatch):
     """Client.generate is called with cacheable_prefix (the static head)."""
@@ -547,8 +593,13 @@ def test_cacheable_prefix_passed_to_client(monkeypatch):
         "tutorsim.conversation.resolve_student",
         lambda id=None: {"kind": "hosted", "client": student_client, "kwargs": {}},
     )
-    monkeypatch.setattr("tutorsim.conversation.build_tutor_system_prompt", lambda mode, **kw: "TUTOR_SYS")
-    monkeypatch.setattr("tutorsim.conversation.build_student_system_prompt", lambda **kw: "STUDENT_SYS")
+    monkeypatch.setattr(
+        "tutorsim.conversation.build_tutor_system_prompt",
+        lambda mode, **kw: "TUTOR_SYS",
+    )
+    monkeypatch.setattr(
+        "tutorsim.conversation.build_student_system_prompt", lambda **kw: "STUDENT_SYS"
+    )
 
     run_conversation(scenario, "fake-tutor", max_turns=4)
 
@@ -564,6 +615,7 @@ def test_cacheable_prefix_passed_to_client(monkeypatch):
 # Tests: frozen student trait (schema v2 — the runtime consumes, never generates)
 # ---------------------------------------------------------------------------
 
+
 def test_frozen_persona_flows_into_student_system_prompt(monkeypatch):
     """The persona handed to build_student_system_prompt is the scenario's
     frozen student.trait.persona — no trait generation happens."""
@@ -574,7 +626,9 @@ def test_frozen_persona_flows_into_student_system_prompt(monkeypatch):
 
     tutor_client = MagicMock()
     tutor_client.model = "fake-tutor"
-    tutor_client.generate = MagicMock(side_effect=[_resp("Hello there"), _resp("[END]")])
+    tutor_client.generate = MagicMock(
+        side_effect=[_resp("Hello there"), _resp("[END]")]
+    )
     student_client = MagicMock()
     student_client.model = "fake-student"
     student_client.generate = MagicMock(return_value=_resp("OK"))
@@ -587,13 +641,18 @@ def test_frozen_persona_flows_into_student_system_prompt(monkeypatch):
         "tutorsim.conversation.resolve_student",
         lambda id=None: {"kind": "hosted", "client": student_client, "kwargs": {}},
     )
-    monkeypatch.setattr("tutorsim.conversation.build_tutor_system_prompt", lambda mode, **kw: "TUTOR_SYS")
+    monkeypatch.setattr(
+        "tutorsim.conversation.build_tutor_system_prompt",
+        lambda mode, **kw: "TUTOR_SYS",
+    )
 
     def capture_student_prompt(**kw):
         seen.update(kw)
         return "STUDENT_SYS"
 
-    monkeypatch.setattr("tutorsim.conversation.build_student_system_prompt", capture_student_prompt)
+    monkeypatch.setattr(
+        "tutorsim.conversation.build_student_system_prompt", capture_student_prompt
+    )
 
     run_conversation(scenario, "fake-tutor", max_turns=4)
     assert seen.get("persona") == "oracle-frozen-persona"
@@ -622,8 +681,13 @@ def test_hosted_student_without_trait_is_hard_error(monkeypatch):
         "tutorsim.conversation.resolve_student",
         lambda id=None: {"kind": "hosted", "client": student_client, "kwargs": {}},
     )
-    monkeypatch.setattr("tutorsim.conversation.build_tutor_system_prompt", lambda mode, **kw: "TUTOR_SYS")
-    monkeypatch.setattr("tutorsim.conversation.build_student_system_prompt", lambda **kw: "STUDENT_SYS")
+    monkeypatch.setattr(
+        "tutorsim.conversation.build_tutor_system_prompt",
+        lambda mode, **kw: "TUTOR_SYS",
+    )
+    monkeypatch.setattr(
+        "tutorsim.conversation.build_student_system_prompt", lambda **kw: "STUDENT_SYS"
+    )
 
     with pytest.raises(RuntimeError, match="frozen student trait"):
         run_conversation(scenario, "fake-tutor", max_turns=4)
@@ -644,8 +708,12 @@ def test_registered_student_needs_no_trait(monkeypatch):
         "tutorsim.conversation.resolve_student",
         lambda id=None: {"kind": "registered", "fn": lambda turns: "student reply"},
     )
-    monkeypatch.setattr("tutorsim.conversation.build_tutor_system_prompt", lambda mode, **kw: "SYS")
-    monkeypatch.setattr("tutorsim.conversation.build_student_system_prompt", lambda **kw: "SYS")
+    monkeypatch.setattr(
+        "tutorsim.conversation.build_tutor_system_prompt", lambda mode, **kw: "SYS"
+    )
+    monkeypatch.setattr(
+        "tutorsim.conversation.build_student_system_prompt", lambda **kw: "SYS"
+    )
 
     result = run_conversation(scenario, "custom-tutor", max_turns=4)
     assert result.ended_via == "END"
@@ -655,11 +723,17 @@ def test_registered_student_needs_no_trait(monkeypatch):
 # Helpers for batch tests
 # ---------------------------------------------------------------------------
 
+
 def _make_scenario_id(sid: str, cut_turn: int = 5) -> "Scenario":
     """Like _make_scenario but with a custom scenario id."""
     from tutorsim.moments import Moment as Scenario
+
     context = [
-        {"turn_number": i + 1, "role": "tutor" if i % 2 == 0 else "student", "text": f"text {i + 1}"}
+        {
+            "turn_number": i + 1,
+            "role": "tutor" if i % 2 == 0 else "student",
+            "text": f"text {i + 1}",
+        }
         for i in range(cut_turn)
     ]
     return Scenario(
@@ -688,8 +762,13 @@ def _make_scenario_id(sid: str, cut_turn: int = 5) -> "Scenario":
     )
 
 
-def _patch_batch(monkeypatch, tutor_batch_results: list[dict], student_batch_results: list[dict],
-                 tutor_kwargs: dict | None = None, student_kwargs: dict | None = None):
+def _patch_batch(
+    monkeypatch,
+    tutor_batch_results: list[dict],
+    student_batch_results: list[dict],
+    tutor_kwargs: dict | None = None,
+    student_kwargs: dict | None = None,
+):
     """Patch resolve_tutor, resolve_student, system prompts, trait, and tutorsim.client.run_batch.
 
     tutor_batch_results: list of {sid: {"text": ...}} dicts, one per round.
@@ -707,11 +786,19 @@ def _patch_batch(monkeypatch, tutor_batch_results: list[dict], student_batch_res
 
     monkeypatch.setattr(
         "tutorsim.conversation.resolve_tutor",
-        lambda id: {"kind": "hosted", "client": tutor_client, "kwargs": tutor_kwargs or {}},
+        lambda id: {
+            "kind": "hosted",
+            "client": tutor_client,
+            "kwargs": tutor_kwargs or {},
+        },
     )
     monkeypatch.setattr(
         "tutorsim.conversation.resolve_student",
-        lambda id=None: {"kind": "hosted", "client": student_client, "kwargs": student_kwargs or {}},
+        lambda id=None: {
+            "kind": "hosted",
+            "client": student_client,
+            "kwargs": student_kwargs or {},
+        },
     )
     monkeypatch.setattr(
         "tutorsim.conversation.build_tutor_system_prompt",
@@ -746,9 +833,11 @@ def _patch_batch(monkeypatch, tutor_batch_results: list[dict], student_batch_res
 # Tests: run_conversations_batch
 # ---------------------------------------------------------------------------
 
+
 def test_batch_import():
     """run_conversations_batch is importable."""
     from tutorsim.conversation import run_conversations_batch
+
     assert run_conversations_batch is not None
 
 
@@ -761,8 +850,14 @@ def test_batch_two_scenarios_returns_two_transcripts(monkeypatch):
 
     # Round 1: both tutors reply normally, both students reply normally.
     # max_turns=2 => 1 round (1 tutor + 1 student = 2 speaking turns).
-    tutor_round1 = {"sid-1": {"text": "Hello from tutor"}, "sid-2": {"text": "Hi from tutor"}}
-    student_round1 = {"sid-1": {"text": "Student reply 1"}, "sid-2": {"text": "Student reply 2"}}
+    tutor_round1 = {
+        "sid-1": {"text": "Hello from tutor"},
+        "sid-2": {"text": "Hi from tutor"},
+    }
+    student_round1 = {
+        "sid-1": {"text": "Student reply 1"},
+        "sid-2": {"text": "Student reply 2"},
+    }
 
     _patch_batch(monkeypatch, [tutor_round1], [student_round1])
 
@@ -788,7 +883,9 @@ def test_batch_forwards_roster_thinking_and_effort_to_run_batch(monkeypatch):
     student_round1 = {"sid-1": {"text": "Student reply"}}
 
     run_batch_mock = _patch_batch(
-        monkeypatch, [tutor_round1], [student_round1],
+        monkeypatch,
+        [tutor_round1],
+        [student_round1],
         tutor_kwargs={"thinking": True, "effort": "xhigh"},
         student_kwargs={"thinking": False},
     )
@@ -845,7 +942,9 @@ def test_batch_ended_scenario_pruned_from_later_rounds(monkeypatch):
     # Round 2 tutor: only s2 active.
     tutor_round2 = {"sid-2": {"text": "Final turn. [END]"}}
 
-    run_batch_mock = _patch_batch(monkeypatch, [tutor_round1, tutor_round2], [student_round1])
+    run_batch_mock = _patch_batch(
+        monkeypatch, [tutor_round1, tutor_round2], [student_round1]
+    )
 
     results = run_conversations_batch(
         [s1, s2], tutor_id="fake-tutor", max_turns=6, poll_interval=0
@@ -866,7 +965,12 @@ def test_batch_latencies_omitted(monkeypatch):
 
     s1 = _make_scenario_id("sid-1", cut_turn=3)
 
-    tutor_round1 = {"sid-1": {"text": "Hello", "usage": {"input_tokens": 5, "output_tokens": 3, "total_tokens": 8}}}
+    tutor_round1 = {
+        "sid-1": {
+            "text": "Hello",
+            "usage": {"input_tokens": 5, "output_tokens": 3, "total_tokens": 8},
+        }
+    }
     student_round1 = {"sid-1": {"text": "Hi back"}}
 
     _patch_batch(monkeypatch, [tutor_round1], [student_round1])
@@ -905,6 +1009,7 @@ def test_batch_round_based_ordering(monkeypatch):
 # End-to-end integration test: tutor.py + student.py + conversation.py
 # ---------------------------------------------------------------------------
 
+
 def test_run_conversation_e2e_mocked_models(monkeypatch):
     """End-to-end mocked conversation: verifies tutor + student + conversation compose.
 
@@ -924,16 +1029,18 @@ def test_run_conversation_e2e_mocked_models(monkeypatch):
     tutor_resps = [
         _resp(
             "Great start! [NEW_MESSAGE] Keep thinking about that.",
-            usage={"input_tokens": 100, "output_tokens": 30, "total_tokens": 130}
+            usage={"input_tokens": 100, "output_tokens": 30, "total_tokens": 130},
         ),
-        _resp("[END]", usage={"input_tokens": 95, "output_tokens": 5, "total_tokens": 100})
+        _resp(
+            "[END]", usage={"input_tokens": 95, "output_tokens": 5, "total_tokens": 100}
+        ),
     ]
 
     # Student returns a canned reply
     student_resps = [
         _resp(
             "I see. Let me try again.",
-            usage={"input_tokens": 80, "output_tokens": 20, "total_tokens": 100}
+            usage={"input_tokens": 80, "output_tokens": 20, "total_tokens": 100},
         )
     ]
 

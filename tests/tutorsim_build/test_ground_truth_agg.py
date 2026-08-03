@@ -10,8 +10,6 @@ its behavior.
 
 import json
 
-import pytest
-
 from tutorsim_build.groundtruth import (
     DEFAULT_RESULT_LABEL,
     _invalidate_agg_cache,
@@ -24,9 +22,16 @@ from tutorsim_build.groundtruth import (
 )
 
 
-def _moment(annotator_id, turn_start, turn_end, annotation_type="scaffolding",
-            action_decomposed=None, result_decomposed=None, situation_label=None,
-            result="r"):
+def _moment(
+    annotator_id,
+    turn_start,
+    turn_end,
+    annotation_type="scaffolding",
+    action_decomposed=None,
+    result_decomposed=None,
+    situation_label=None,
+    result="r",
+):
     m = {
         "annotator_id": annotator_id,
         "turn_start": turn_start,
@@ -43,6 +48,7 @@ def _moment(annotator_id, turn_start, turn_end, annotation_type="scaffolding",
 
 # --- _scaffolding_clusters -------------------------------------------------
 
+
 def test_scaffolding_clusters_ignores_rapport_moments():
     moments = [
         _moment("t1", 1, 5, annotation_type="rapport"),
@@ -58,11 +64,13 @@ def test_scaffolding_clusters_ignores_rapport_moments():
 def test_scaffolding_clusters_groups_overlapping_different_annotators():
     moments = [
         _moment("t1", 1, 10),
-        _moment("t2", 1, 10),   # identical range as t1 -- IoU == 1.0
+        _moment("t2", 1, 10),  # identical range as t1 -- IoU == 1.0
         _moment("t3", 50, 60),  # disjoint -- separate cluster
     ]
     clusters = _scaffolding_clusters(moments)
-    cluster_sets = sorted([frozenset(idxs) for idxs, _ in clusters], key=lambda s: min(s))
+    cluster_sets = sorted(
+        [frozenset(idxs) for idxs, _ in clusters], key=lambda s: min(s)
+    )
     assert cluster_sets == [frozenset({0, 1}), frozenset({2})]
 
 
@@ -78,6 +86,7 @@ def test_scaffolding_clusters_does_not_directly_link_same_annotator():
 
 
 # --- _unify_facets ----------------------------------------------------------
+
 
 def test_unify_facets_concatenates_across_annotators_in_order():
     cluster_moments = [
@@ -95,7 +104,13 @@ def test_unify_facets_keeps_only_first_occurrence_per_annotator():
     cluster_moments = [
         _moment("t1", 1, 10, action_decomposed=["a1"], result_decomposed=["r1"]),
         _moment("t2", 5, 14, action_decomposed=["b1"], result_decomposed=["r2"]),
-        _moment("t1", 9, 18, action_decomposed=["a2-should-be-dropped"], result_decomposed=["r2-dropped"]),
+        _moment(
+            "t1",
+            9,
+            18,
+            action_decomposed=["a2-should-be-dropped"],
+            result_decomposed=["r2-dropped"],
+        ),
     ]
     unified_action, unified_result = _unify_facets(cluster_moments)
     assert unified_action == ["a1", "b1"]
@@ -103,6 +118,7 @@ def test_unify_facets_keeps_only_first_occurrence_per_annotator():
 
 
 # --- compute_situation_label_agg (regression after refactor onto _scaffolding_clusters) ---
+
 
 def test_compute_situation_label_agg_majority_votes_overlapping_cluster():
     moments = [
@@ -118,14 +134,22 @@ def test_compute_situation_label_agg_majority_votes_overlapping_cluster():
 
 def test_compute_situation_label_agg_unknown_when_no_signal():
     moments = [
-        _moment("t1", 1, 10, situation_label={"scaffolding": "no_mention", "rigor": "unclear"}),
-        _moment("t2", 2, 10, situation_label={"scaffolding": None, "rigor": "no_mention"}),
+        _moment(
+            "t1",
+            1,
+            10,
+            situation_label={"scaffolding": "no_mention", "rigor": "unclear"},
+        ),
+        _moment(
+            "t2", 2, 10, situation_label={"scaffolding": None, "rigor": "no_mention"}
+        ),
     ]
     agg = compute_situation_label_agg(moments)
     assert agg == {0: "unknown", 1: "unknown"}
 
 
 # --- plan_action_result_agg --------------------------------------------------
+
 
 def _plan_for(moments, cached_agg=None):
     cached_agg = cached_agg or {}
@@ -213,6 +237,7 @@ def test_plan_reclassifies_when_unified_facets_changed():
 
 # --- _invalidate_agg_cache (selective --refresh-agg) -------------------------
 
+
 def _full_cache(moments):
     sig = frozenset(moment_key(m) for m in moments)
     return {
@@ -239,9 +264,9 @@ def test_invalidate_agg_cache_action_reclassifies_action_reuses_result():
     invalidated = _invalidate_agg_cache(_full_cache(moments), "action")
     plan, to_action, to_result = _plan_for(moments, invalidated)
     _, action_item, result_item = plan[0]
-    assert action_item[0] == "classify"          # action label cleared -> reclassify
+    assert action_item[0] == "classify"  # action label cleared -> reclassify
     assert to_action == [{"key": action_item[1], "facets": ["a1", "b1"]}]
-    assert result_item == ("reuse", "pos")        # result untouched -> still reused
+    assert result_item == ("reuse", "pos")  # result untouched -> still reused
     assert to_result == []
 
 
@@ -252,7 +277,7 @@ def test_invalidate_agg_cache_result_reclassifies_result_reuses_action():
     _, action_item, result_item = plan[0]
     assert action_item == ("reuse", "scaffolding")  # action untouched -> still reused
     assert to_action == []
-    assert result_item[0] == "classify"             # result label cleared -> reclassify
+    assert result_item[0] == "classify"  # result label cleared -> reclassify
     assert to_result == [{"key": result_item[1], "facets": ["r1", "r2"]}]
 
 
@@ -271,6 +296,7 @@ def test_invalidate_agg_cache_does_not_mutate_input():
 
 # --- load_existing_action_result_agg -----------------------------------------
 
+
 def test_load_existing_action_result_agg_reconstructs_cache(tmp_path):
     gt_dir = tmp_path / "ground_truth"
     gt_dir.mkdir()
@@ -286,7 +312,9 @@ def test_load_existing_action_result_agg_reconstructs_cache(tmp_path):
     moments[1]["student_outcome_agg"] = "pos"
 
     (gt_dir / "conv1.json").write_text(
-        json.dumps({"conversation_id": "conv1", "num_turns": 100, "key_moments": moments}),
+        json.dumps(
+            {"conversation_id": "conv1", "num_turns": 100, "key_moments": moments}
+        ),
         encoding="utf-8",
     )
 
@@ -307,7 +335,9 @@ def test_load_existing_action_result_agg_skips_clusters_without_agg_labels(tmp_p
 
     moments = [_moment("t1", 1, 10, action_decomposed=["a1"], result_decomposed=["r1"])]
     (gt_dir / "conv1.json").write_text(
-        json.dumps({"conversation_id": "conv1", "num_turns": 10, "key_moments": moments}),
+        json.dumps(
+            {"conversation_id": "conv1", "num_turns": 10, "key_moments": moments}
+        ),
         encoding="utf-8",
     )
 

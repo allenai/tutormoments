@@ -1,7 +1,7 @@
 """Config loading and tutor/student registries for tutorsim."""
 
-from dataclasses import dataclass
 import os
+from dataclasses import dataclass
 from pathlib import Path
 from typing import Optional
 
@@ -9,7 +9,6 @@ import yaml
 
 from tutorsim.client import infer_provider
 from tutorsim.resources import resource_text
-
 
 _CONFIG_CACHE = {}
 _TUTOR_REGISTRY: dict[str, callable] = {}
@@ -167,8 +166,7 @@ def resolve_model(model_id: str, config_path: str | os.PathLike | None = None) -
     if model_id not in cfg["models"]:
         valid_ids = list(cfg["models"].keys())
         raise ValueError(
-            f"Model '{model_id}' not in roster. "
-            f"Valid models: {', '.join(valid_ids)}"
+            f"Model '{model_id}' not in roster. Valid models: {', '.join(valid_ids)}"
         )
     provider = infer_provider(model_id)
     env = cfg["providers"][provider]["env"]
@@ -247,6 +245,7 @@ class RunConfig:
         resolved_tutors: Dict[model_id -> kwargs dict] for resolved tutors.
         config_source: Where the config was loaded from.
     """
+
     tutors: list[str]
     modes: list[str]
     dataset: str | None

@@ -1,22 +1,23 @@
 """Tests for tutorsim.results — the run-results store (TDD: write tests first)."""
-import json
-import pytest
-from pathlib import Path
 
 from tutorsim.results import (
-    make_run_id,
-    write_config, read_config,
-    write_transcript, read_transcript,
-    write_score, read_score,
-    write_summary, read_summary,
     is_done,
     list_runs,
+    make_run_id,
+    read_config,
+    read_score,
+    read_summary,
+    read_transcript,
+    write_config,
+    write_score,
+    write_summary,
+    write_transcript,
 )
-
 
 # ---------------------------------------------------------------------------
 # make_run_id
 # ---------------------------------------------------------------------------
+
 
 def test_make_run_id_basic():
     result = make_run_id("claude-opus-4-8", "plain", "balanced_520", "20260626")
@@ -24,7 +25,9 @@ def test_make_run_id_basic():
 
 
 def test_make_run_id_slash_replaced():
-    result = make_run_id("deepseek-ai/DeepSeek-V4-Pro", "plain", "balanced_520", "20260626")
+    result = make_run_id(
+        "deepseek-ai/DeepSeek-V4-Pro", "plain", "balanced_520", "20260626"
+    )
     assert "/" not in result
     assert result == "deepseek-ai_DeepSeek-V4-Pro_plain_balanced_520_20260626"
 
@@ -37,6 +40,7 @@ def test_make_run_id_multiple_slashes():
 # ---------------------------------------------------------------------------
 # config round-trip
 # ---------------------------------------------------------------------------
+
 
 def test_write_read_config(tmp_path):
     run_id = "testrun_plain_ds_20260626"
@@ -54,10 +58,14 @@ def test_read_config_missing_returns_none(tmp_path):
 # transcript round-trip
 # ---------------------------------------------------------------------------
 
+
 def test_write_read_transcript(tmp_path):
     run_id = "testrun_plain_ds_20260626"
     scenario_id = "conv-abc_m1"
-    transcript = {"scenario_id": scenario_id, "turns": [{"role": "tutor", "text": "Hello"}]}
+    transcript = {
+        "scenario_id": scenario_id,
+        "turns": [{"role": "tutor", "text": "Hello"}],
+    }
     write_transcript(run_id, scenario_id, transcript, results_root=str(tmp_path))
     loaded = read_transcript(run_id, scenario_id, results_root=str(tmp_path))
     assert loaded == transcript
@@ -70,6 +78,7 @@ def test_read_transcript_missing_returns_none(tmp_path):
 # ---------------------------------------------------------------------------
 # score round-trip
 # ---------------------------------------------------------------------------
+
 
 def test_write_read_score(tmp_path):
     run_id = "testrun_plain_ds_20260626"
@@ -88,6 +97,7 @@ def test_read_score_missing_returns_none(tmp_path):
 # summary round-trip
 # ---------------------------------------------------------------------------
 
+
 def test_write_read_summary(tmp_path):
     run_id = "testrun_plain_ds_20260626"
     summary = {"n_scenarios": 10, "scaffolding_rate": 0.8}
@@ -103,6 +113,7 @@ def test_read_summary_missing_returns_none(tmp_path):
 # ---------------------------------------------------------------------------
 # is_done (resume guard)
 # ---------------------------------------------------------------------------
+
 
 def test_is_done_false_when_neither_exists(tmp_path):
     run_id = "testrun_plain_ds_20260626"
@@ -127,8 +138,12 @@ def test_is_done_false_when_only_score(tmp_path):
 def test_is_done_true_when_both_exist(tmp_path):
     run_id = "testrun_plain_ds_20260626"
     scenario_id = "conv-abc_m1"
-    write_transcript(run_id, scenario_id, {"scenario_id": scenario_id, "completed": True},
-                     results_root=str(tmp_path))
+    write_transcript(
+        run_id,
+        scenario_id,
+        {"scenario_id": scenario_id, "completed": True},
+        results_root=str(tmp_path),
+    )
     write_score(run_id, scenario_id, {"score": 1.0}, results_root=str(tmp_path))
     assert is_done(run_id, scenario_id, results_root=str(tmp_path)) is True
 
@@ -136,6 +151,7 @@ def test_is_done_true_when_both_exist(tmp_path):
 # ---------------------------------------------------------------------------
 # list_runs
 # ---------------------------------------------------------------------------
+
 
 def test_list_runs_empty(tmp_path):
     assert list_runs(results_root=str(tmp_path)) == []

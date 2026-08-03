@@ -13,7 +13,11 @@ boto3 = pytest.importorskip("boto3")
 moto = pytest.importorskip("moto")
 from moto import mock_aws
 
-_SCRIPT = Path(__file__).resolve().parents[2] / "tutorsim_build" / "publish_ground_truth_s3.py"
+_SCRIPT = (
+    Path(__file__).resolve().parents[2]
+    / "tutorsim_build"
+    / "publish_ground_truth_s3.py"
+)
 
 
 def _load_module():

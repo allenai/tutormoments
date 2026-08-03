@@ -20,6 +20,7 @@ Usage:
     python analysis/split_ground_truth.py --ground-truth-dir data/ground_truth_hybrid
     python analysis/split_ground_truth.py --output analysis/my_split.json
 """
+
 import argparse
 import json
 import random
@@ -39,16 +40,32 @@ DEFAULT_SEED = 42
 
 def main():
     parser = argparse.ArgumentParser()
-    parser.add_argument("--ground-truth-dir", default=str(DEFAULT_GT_DIR),
-                        help=f"Ground truth directory (default: {DEFAULT_GT_DIR})")
-    parser.add_argument("--original-split", default=str(DEFAULT_ORIG_SPLIT),
-                        help=f"Original train/test split JSON (default: {DEFAULT_ORIG_SPLIT})")
-    parser.add_argument("--transcripts", default=str(DEFAULT_TRANSCRIPTS),
-                        help=f"Transcripts JSONL file (default: {DEFAULT_TRANSCRIPTS})")
-    parser.add_argument("--seed", type=int, default=DEFAULT_SEED,
-                        help=f"Random seed for shuffling new IDs (default: {DEFAULT_SEED})")
-    parser.add_argument("--output", default=str(DEFAULT_OUTPUT),
-                        help=f"Output JSON file (default: {DEFAULT_OUTPUT})")
+    parser.add_argument(
+        "--ground-truth-dir",
+        default=str(DEFAULT_GT_DIR),
+        help=f"Ground truth directory (default: {DEFAULT_GT_DIR})",
+    )
+    parser.add_argument(
+        "--original-split",
+        default=str(DEFAULT_ORIG_SPLIT),
+        help=f"Original train/test split JSON (default: {DEFAULT_ORIG_SPLIT})",
+    )
+    parser.add_argument(
+        "--transcripts",
+        default=str(DEFAULT_TRANSCRIPTS),
+        help=f"Transcripts JSONL file (default: {DEFAULT_TRANSCRIPTS})",
+    )
+    parser.add_argument(
+        "--seed",
+        type=int,
+        default=DEFAULT_SEED,
+        help=f"Random seed for shuffling new IDs (default: {DEFAULT_SEED})",
+    )
+    parser.add_argument(
+        "--output",
+        default=str(DEFAULT_OUTPUT),
+        help=f"Output JSON file (default: {DEFAULT_OUTPUT})",
+    )
     args = parser.parse_args()
 
     gt_dir = Path(args.ground_truth_dir)
@@ -84,7 +101,9 @@ def main():
     # Exclude original IDs that have no ground truth file
     orig_no_gt = orig_all - gt_ids
     if orig_no_gt:
-        print(f"Excluding {len(orig_no_gt)} original ID(s) with no ground truth: {sorted(orig_no_gt)}")
+        print(
+            f"Excluding {len(orig_no_gt)} original ID(s) with no ground truth: {sorted(orig_no_gt)}"
+        )
         orig_train = [x for x in orig_train if x in gt_ids]
         orig_test = [x for x in orig_test if x in gt_ids]
         orig_all = set(orig_train) | set(orig_test)
@@ -112,7 +131,9 @@ def main():
 
     # New IDs: in transcripts + ground truth, but not in original split
     new_ids = sorted(gt_ids & transcript_ids - orig_all)
-    print(f"New IDs (in transcripts & ground truth, not in original split): {len(new_ids)}")
+    print(
+        f"New IDs (in transcripts & ground truth, not in original split): {len(new_ids)}"
+    )
 
     # Shuffle new IDs and split equally between train and test
     rng = random.Random(args.seed)
@@ -136,7 +157,9 @@ def main():
         json.dump(out, f, indent=2, ensure_ascii=False)
 
     print(f"\nSplit {len(train_ids) + len(test_ids)} conversations (seed={args.seed})")
-    print(f"  train: {len(train_ids)} ({len(orig_train)} original + {len(new_train)} new)")
+    print(
+        f"  train: {len(train_ids)} ({len(orig_train)} original + {len(new_train)} new)"
+    )
     print(f"  test:  {len(test_ids)} ({len(orig_test)} original + {len(new_test)} new)")
     print(f"Written to {output_path}")
 

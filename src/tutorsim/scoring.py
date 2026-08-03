@@ -15,7 +15,7 @@ No module-level SDK imports.
 import json
 import logging
 import re as _re
-from dataclasses import dataclass, asdict, field
+from dataclasses import asdict, dataclass, field
 from typing import Any
 
 from tutorsim.resources import resource_text
@@ -32,6 +32,7 @@ VALID_ANNOTATION_TYPES = {"scaffolding", "rapport"}
 # Annotate-pass: excerpt builder
 # Benchmark forces context_window=0 (context_before=0, context_after=0).
 # ---------------------------------------------------------------------------
+
 
 def _format_excerpt(
     conversation: dict,
@@ -127,6 +128,7 @@ def _suggestion_text(situation_label_agg: str | None) -> str:
 #   - No screenshot support needed here
 # ---------------------------------------------------------------------------
 
+
 def _load_annotate_prompt(ann_type: str) -> str:
     """Load the scorer annotate prompt for the given annotation type."""
     return resource_text(f"{_SCORER_PROMPTS_DIR}/annotate/{ann_type}.md")
@@ -185,7 +187,9 @@ def _build_annotate_entries(
 
             prompt = prompt_cache[ann_type]
             prompt = prompt.replace("{annotator_style}", "")
-            prompt = prompt.replace("{suggestion}", _suggestion_text(det.get("situation_label_agg")))
+            prompt = prompt.replace(
+                "{suggestion}", _suggestion_text(det.get("situation_label_agg"))
+            )
             prompt = prompt.replace("{excerpt}", excerpt)
             prompt = prompt.replace("{turn_start}", str(turn_start))
             prompt = prompt.replace("{turn_end}", str(turn_end))
@@ -199,6 +203,7 @@ def _build_annotate_entries(
 # ---------------------------------------------------------------------------
 # Annotate-pass: parse and merge
 # ---------------------------------------------------------------------------
+
 
 def _parse_and_merge(
     raw_entries: dict,
@@ -242,7 +247,9 @@ def _parse_and_merge(
             parsed["_usage"] = data.get("usage", {})
             analyses[key] = parsed
         except json.JSONDecodeError as e:
-            errors.append({"key": key, "error": f"JSON parse error: {e}", "raw": text[:500]})
+            errors.append(
+                {"key": key, "error": f"JSON parse error: {e}", "raw": text[:500]}
+            )
 
     if errors:
         logger.warning("Parse errors: %d", len(errors))
@@ -254,7 +261,9 @@ def _parse_and_merge(
 
     for conv_id, conv_data in detections_by_conv.items():
         detections = conv_data.get("detections", [])
-        p1_usage = conv_data.get("usage", {"input_tokens": 0, "output_tokens": 0, "total_tokens": 0})
+        p1_usage = conv_data.get(
+            "usage", {"input_tokens": 0, "output_tokens": 0, "total_tokens": 0}
+        )
         total_usage = dict(p1_usage)
 
         annotations = []
@@ -264,27 +273,33 @@ def _parse_and_merge(
 
             if key in analyses:
                 a = analyses[key]
-                annotations.append({
-                    "annotation_type": ann_type,
-                    "turn_start": det.get("turn_start"),
-                    "turn_end": det.get("turn_end"),
-                    "situation": a.get("situation", ""),
-                    "action": a.get("action", ""),
-                    "result": a.get("result", ""),
-                })
+                annotations.append(
+                    {
+                        "annotation_type": ann_type,
+                        "turn_start": det.get("turn_start"),
+                        "turn_end": det.get("turn_end"),
+                        "situation": a.get("situation", ""),
+                        "action": a.get("action", ""),
+                        "result": a.get("result", ""),
+                    }
+                )
 
                 p2_usage = a.get("_usage", {})
                 for field in ("input_tokens", "output_tokens", "total_tokens"):
-                    total_usage[field] = total_usage.get(field, 0) + p2_usage.get(field, 0)
+                    total_usage[field] = total_usage.get(field, 0) + p2_usage.get(
+                        field, 0
+                    )
             else:
-                annotations.append({
-                    "annotation_type": ann_type,
-                    "turn_start": det.get("turn_start", 0),
-                    "turn_end": det.get("turn_end", 0),
-                    "situation": "",
-                    "action": "[Analysis unavailable -- batch failed for this moment]",
-                    "result": "",
-                })
+                annotations.append(
+                    {
+                        "annotation_type": ann_type,
+                        "turn_start": det.get("turn_start", 0),
+                        "turn_end": det.get("turn_end", 0),
+                        "situation": "",
+                        "action": "[Analysis unavailable -- batch failed for this moment]",
+                        "result": "",
+                    }
+                )
 
         results[conv_id] = {
             "conversation_id": conv_id,
@@ -292,8 +307,10 @@ def _parse_and_merge(
             "usage": total_usage,
             "pass1_detections": len(detections),
             "pass2_analyzed": sum(
-                1 for i, d in enumerate(detections)
-                if f"{conv_id}__{d.get('annotation_type', 'scaffolding')}__{i}" in analyses
+                1
+                for i, d in enumerate(detections)
+                if f"{conv_id}__{d.get('annotation_type', 'scaffolding')}__{i}"
+                in analyses
             ),
         }
 
@@ -304,6 +321,7 @@ def _parse_and_merge(
 # Annotation dataclass
 # ---------------------------------------------------------------------------
 
+
 @dataclass
 class Annotation:
     """A scored annotation produced by the 3-pass annotator pipeline.
@@ -313,16 +331,22 @@ class Annotation:
     """
 
     scenario_id: str
-    annotation_type: str          # "scaffolding" | "rapport"
+    annotation_type: str  # "scaffolding" | "rapport"
     turn_start: int
     turn_end: int
     situation: str
     action: str
     result: str
-    action_decomposed: list       # action decomposition phrases
-    overscaffold_decomposed: list # over-scaffolding decomposition phrases
-    action_label: str             # "scaffolding" | "rigor" | "both" | "neither" | "unclear"
-    usage: dict = field(default_factory=lambda: {"input_tokens": 0, "output_tokens": 0, "total_tokens": 0})
+    action_decomposed: list  # action decomposition phrases
+    overscaffold_decomposed: list  # over-scaffolding decomposition phrases
+    action_label: str  # "scaffolding" | "rigor" | "both" | "neither" | "unclear"
+    usage: dict = field(
+        default_factory=lambda: {
+            "input_tokens": 0,
+            "output_tokens": 0,
+            "total_tokens": 0,
+        }
+    )
 
     def to_dict(self) -> dict[str, Any]:
         """Return all fields as a plain dict."""
@@ -332,6 +356,7 @@ class Annotation:
 # ---------------------------------------------------------------------------
 # Synthetic conversation builder
 # ---------------------------------------------------------------------------
+
 
 def _build_synthetic_conversation(
     scenario: Any,
@@ -357,23 +382,27 @@ def _build_synthetic_conversation(
     # Prefix turns from scenario.context: [{turn_number, role, text}]
     # Role stored lowercase in new schema; annotator pipeline expects uppercase.
     for ctx_turn in scenario.context:
-        turns.append({
-            "turn_number": ctx_turn["turn_number"],
-            "role": ctx_turn["role"].upper(),
-            "text": ctx_turn["text"],
-            "type": "DIALOGUE",
-            "timestamp": "",
-        })
+        turns.append(
+            {
+                "turn_number": ctx_turn["turn_number"],
+                "role": ctx_turn["role"].upper(),
+                "text": ctx_turn["text"],
+                "type": "DIALOGUE",
+                "timestamp": "",
+            }
+        )
 
     # Generated turns from transcript.generated_turns: already {turn_number, role, text}
     for gen_turn in transcript.generated_turns:
-        turns.append({
-            "turn_number": gen_turn["turn_number"],
-            "role": gen_turn["role"],
-            "text": gen_turn["text"],
-            "type": "DIALOGUE",
-            "timestamp": "",
-        })
+        turns.append(
+            {
+                "turn_number": gen_turn["turn_number"],
+                "role": gen_turn["role"],
+                "text": gen_turn["text"],
+                "type": "DIALOGUE",
+                "timestamp": "",
+            }
+        )
 
     # ---- Build conversation dict (remapped: conversation_id = scenario.id) ----
     # Original annotator_bridge used scenario.conv_id as conversation_id, then
@@ -400,9 +429,7 @@ def _build_synthetic_conversation(
 
     cut_turn = scenario.provenance.get("cut_turn", "?")
     hint = scenario.rubric.get("hint", "")
-    description = (
-        f"AI tutor continuation from cut at turn {cut_turn}: {hint}"
-    )
+    description = f"AI tutor continuation from cut at turn {cut_turn}: {hint}"
 
     # situation_label_agg from scenario.dimension (= rubric["gold"])
     situation_label_agg = scenario.dimension
@@ -504,7 +531,7 @@ def _parse_decomposed(text: str) -> "tuple[list[str], bool]":
         pass
 
     # Attempt 2: extract a bracketed array from surrounding text
-    m = _re.search(r'\[.*\]', text, _re.DOTALL)
+    m = _re.search(r"\[.*\]", text, _re.DOTALL)
     if m:
         try:
             parsed = json.loads(m.group(0))
@@ -516,21 +543,25 @@ def _parse_decomposed(text: str) -> "tuple[list[str], bool]":
     return [], True
 
 
-def _build_overscaffold_prompt(situation: str, action: str, result_text: str,
-                               template: str) -> "str | None":
+def _build_overscaffold_prompt(
+    situation: str, action: str, result_text: str, template: str
+) -> "str | None":
     """Build the over-scaffolding decomposition prompt for one annotation.
 
     Returns None when both action and result are junk -- there is no described
     tutor behavior or outcome to analyze, so the caller skips the API call and
     writes an empty facet list.
     """
-    if (action.strip().lower() in JUNK_TEXTS
-            and result_text.strip().lower() in JUNK_TEXTS):
+    if (
+        action.strip().lower() in JUNK_TEXTS
+        and result_text.strip().lower() in JUNK_TEXTS
+    ):
         return None
-    return (template
-            .replace("{situation}", situation)
-            .replace("{action}", action)
-            .replace("{result}", result_text))
+    return (
+        template.replace("{situation}", situation)
+        .replace("{action}", action)
+        .replace("{result}", result_text)
+    )
 
 
 def _build_decompose_entries(
@@ -586,13 +617,16 @@ def _build_decompose_entries(
                 if ann_type != "scaffolding":
                     continue
                 # Skip when both action and result are junk (no tutor behavior to analyze)
-                if (action.strip().lower() in JUNK_TEXTS
-                        and result_text.strip().lower() in JUNK_TEXTS):
+                if (
+                    action.strip().lower() in JUNK_TEXTS
+                    and result_text.strip().lower() in JUNK_TEXTS
+                ):
                     continue
-                prompt = (template
-                          .replace("{situation}", situation)
-                          .replace("{action}", action)
-                          .replace("{result}", result_text))
+                prompt = (
+                    template.replace("{situation}", situation)
+                    .replace("{action}", action)
+                    .replace("{result}", result_text)
+                )
                 key = f"overscaffold__{conv_id}__{idx}"
 
             entries.append(build_batch_entry(key, prompt, json_mode=True))
@@ -656,6 +690,7 @@ def _parse_action_label(text: str) -> tuple:
     Returns (label, had_error). Falls back to "unclear" if either dimension
     is missing or isn't "yes"/"no".
     """
+
     def _coerce(val) -> str | None:
         v = str(val).strip().lower()
         return v if v in ("yes", "no") else None
@@ -672,8 +707,12 @@ def _parse_action_label(text: str) -> tuple:
         pass
 
     if scaffolding is None or rigor is None:
-        m_scaf = _re.search(r'["\']?scaffolding["\']?\s*:\s*["\']?(yes|no)["\']?', text, _re.IGNORECASE)
-        m_rigor = _re.search(r'["\']?rigor["\']?\s*:\s*["\']?(yes|no)["\']?', text, _re.IGNORECASE)
+        m_scaf = _re.search(
+            r'["\']?scaffolding["\']?\s*:\s*["\']?(yes|no)["\']?', text, _re.IGNORECASE
+        )
+        m_rigor = _re.search(
+            r'["\']?rigor["\']?\s*:\s*["\']?(yes|no)["\']?', text, _re.IGNORECASE
+        )
         if scaffolding is None and m_scaf:
             scaffolding = m_scaf.group(1).lower()
         if rigor is None and m_rigor:
@@ -760,7 +799,9 @@ def _build_structure_entries(
                 skip_action.append((conv_id, idx))
             else:
                 key = f"action__{conv_id}__{idx}"
-                prompt = action_template.replace("{action_list}", _format_facet_list(action_facets))
+                prompt = action_template.replace(
+                    "{action_list}", _format_facet_list(action_facets)
+                )
                 action_entries.append(build_batch_entry(key, prompt, json_mode=True))
 
     return action_entries, skip_action
@@ -854,7 +895,8 @@ def score_batch(pairs: "list[tuple[Any, Any]]") -> "dict[str, Annotation]":
     annotate_entries = _build_annotate_entries(conversations, detections)
     logger.info(
         "Classification pass 1/3 (annotate): %d entries, scorer=%s",
-        len(annotate_entries), scorer_model,
+        len(annotate_entries),
+        scorer_model,
     )
     annotate_raw = run_batch(
         client,
@@ -868,7 +910,9 @@ def score_batch(pairs: "list[tuple[Any, Any]]") -> "dict[str, Annotation]":
 
     for sid, conv_data in parsed.items():
         if sid in usage_by_sid:
-            usage_by_sid[sid] = _sum_usage(usage_by_sid[sid], conv_data.get("usage", {}))
+            usage_by_sid[sid] = _sum_usage(
+                usage_by_sid[sid], conv_data.get("usage", {})
+            )
 
     # Build the results shape expected by _build_decompose_entries /
     # _build_structure_entries: {sid: {"annotations": [ann_dict, ...]}}
@@ -876,14 +920,16 @@ def score_batch(pairs: "list[tuple[Any, Any]]") -> "dict[str, Annotation]":
     for sid in detections:
         annotations_list = parsed.get(sid, {}).get("annotations", [])
         if not annotations_list:
-            annotations_list = [{
-                "annotation_type": "scaffolding",
-                "turn_start": 0,
-                "turn_end": 0,
-                "situation": "",
-                "action": "[Analysis unavailable -- batch failed for this moment]",
-                "result": "",
-            }]
+            annotations_list = [
+                {
+                    "annotation_type": "scaffolding",
+                    "turn_start": 0,
+                    "turn_end": 0,
+                    "situation": "",
+                    "action": "[Analysis unavailable -- batch failed for this moment]",
+                    "result": "",
+                }
+            ]
         results[sid] = {"annotations": annotations_list}
 
     # -------------------------------------------------------------------------
@@ -892,8 +938,12 @@ def score_batch(pairs: "list[tuple[Any, Any]]") -> "dict[str, Annotation]":
     # by key prefix to assign.
     # (Result decomposition was dropped along with student-outcome labelling.)
     # -------------------------------------------------------------------------
-    action_decomp_entries, action_decomp_locs = _build_decompose_entries(results, "action")
-    overscaffold_entries, overscaffold_locs = _build_decompose_entries(results, "overscaffold")
+    action_decomp_entries, action_decomp_locs = _build_decompose_entries(
+        results, "action"
+    )
+    overscaffold_entries, overscaffold_locs = _build_decompose_entries(
+        results, "overscaffold"
+    )
 
     decompose_entries = action_decomp_entries + overscaffold_entries
 
@@ -917,7 +967,9 @@ def score_batch(pairs: "list[tuple[Any, Any]]") -> "dict[str, Annotation]":
             key = entry["key"]
             raw = decompose_raw.get(key, {})
             if conv_id in usage_by_sid:
-                usage_by_sid[conv_id] = _sum_usage(usage_by_sid[conv_id], raw.get("usage", {}))
+                usage_by_sid[conv_id] = _sum_usage(
+                    usage_by_sid[conv_id], raw.get("usage", {})
+                )
             text = raw.get("text", "")
             try:
                 parsed_val = json.loads(text) if text else []
@@ -929,7 +981,9 @@ def score_batch(pairs: "list[tuple[Any, Any]]") -> "dict[str, Annotation]":
                 anns[idx][field_name] = facets if facets is not None else []
 
     _assign_decomposed(action_decomp_locs, action_decomp_entries, "action_decomposed")
-    _assign_decomposed(overscaffold_locs, overscaffold_entries, "overscaffold_decomposed")
+    _assign_decomposed(
+        overscaffold_locs, overscaffold_entries, "overscaffold_decomposed"
+    )
 
     # Ensure all annotations have decomposed fields (default [] for skipped ones).
     for conv_id, conv_data in results.items():
@@ -940,8 +994,8 @@ def score_batch(pairs: "list[tuple[Any, Any]]") -> "dict[str, Annotation]":
     # -------------------------------------------------------------------------
     # Pass 3: Structure (action classification in one pooled batch)
     # -------------------------------------------------------------------------
-    action_struct_entries, skip_action = (
-        _build_structure_entries(results, target="scaffolding")
+    action_struct_entries, skip_action = _build_structure_entries(
+        results, target="scaffolding"
     )
     structure_entries = action_struct_entries
 
@@ -961,7 +1015,7 @@ def score_batch(pairs: "list[tuple[Any, Any]]") -> "dict[str, Annotation]":
         structure_raw = {}
 
     # Apply default labels to skipped (no-facet) annotations.
-    for (conv_id, idx) in skip_action:
+    for conv_id, idx in skip_action:
         anns = results.get(conv_id, {}).get("annotations", [])
         if idx < len(anns):
             anns[idx]["action_label"] = DEFAULT_ACTION_LABEL
@@ -972,24 +1026,28 @@ def score_batch(pairs: "list[tuple[Any, Any]]") -> "dict[str, Annotation]":
         for entry in entries:
             key = entry["key"]
             raw = structure_raw.get(key, {})
-            without_prefix = key[len(prefix):]
+            without_prefix = key[len(prefix) :]
             last_sep = without_prefix.rfind("__")
             if last_sep == -1:
                 continue
             conv_id = without_prefix[:last_sep]
-            idx_str = without_prefix[last_sep + 2:]
+            idx_str = without_prefix[last_sep + 2 :]
             try:
                 idx = int(idx_str)
             except ValueError:
                 continue
             if conv_id in usage_by_sid:
-                usage_by_sid[conv_id] = _sum_usage(usage_by_sid[conv_id], raw.get("usage", {}))
+                usage_by_sid[conv_id] = _sum_usage(
+                    usage_by_sid[conv_id], raw.get("usage", {})
+                )
             label, _ = parse_fn(raw.get("text", ""))
             anns = results.get(conv_id, {}).get("annotations", [])
             if idx < len(anns):
                 anns[idx][field_name] = label
 
-    _assign_labels(action_struct_entries, "action__", _parse_action_label, "action_label")
+    _assign_labels(
+        action_struct_entries, "action__", _parse_action_label, "action_label"
+    )
 
     # Ensure all annotations have label fields.
     for conv_id, conv_data in results.items():
