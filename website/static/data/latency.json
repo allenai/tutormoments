@@ -1,5 +1,5 @@
 {
-  "source": "Figure 7, TutorSim-Preview working paper (2026-06-30). score = mean of evaluation-aware Appropriate Scaffolding and Appropriate Rigor (exact, from Table 8). TODO: latency_s values are read off the paper figure to ~±0.2s; replace with exact values via scripts/refresh-data.py.",
+  "source": "Figure 7, TutorMoments-Preview working paper (2026-06-30). score = mean of evaluation-aware Appropriate Scaffolding and Appropriate Rigor (exact, from Table 8). TODO: latency_s values are read off the paper figure to ~±0.2s; replace with exact values via scripts/refresh-data.py.",
   "models": [
     { "id": "claude-opus-4-8", "name": "Claude Opus 4.8", "latency_s": 12.5, "latency_estimated": true, "score": 0.8445 },
     { "id": "claude-sonnet-4-6", "name": "Claude Sonnet 4.6", "latency_s": 10.0, "latency_estimated": true, "score": 0.8115 },

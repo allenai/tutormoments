@@ -1,16 +1,16 @@
 #!/usr/bin/env python3
-"""Regenerate the site's chart data from a local allenai/tutorsim checkout.
+"""Regenerate the site's chart data from a local allenai/tutormoments checkout.
 
-The tutorsim repo gitignores its results, so the website keeps its own copies as
+The tutormoments repo gitignores its results, so the website keeps its own copies as
 static JSON. Re-run this after benchmarking new models:
 
-    python3 scripts/refresh-data.py /path/to/tutorsim
+    python3 scripts/refresh-data.py /path/to/tutormoments
 
 Reads (same sources as the repo's analysis/working-paper-20260630 scripts):
   results/benchmark/_full_combined/<model>__<prompt>/scores.json   -> leaderboard.json
   results/benchmark/<model>_v10_<prompt>_tutor_oracle_student*/exchanges/*.json
                                                                    -> latency.json
-  data/taxonomy/{human,lm}/classified.csv (via tutorsim.taxonomy)  -> action_distribution.json
+  data/taxonomy/{human,lm}/classified.csv (via tutormoments.taxonomy)  -> action_distribution.json
 
 Writes to static/data/. Sections of the site hide automatically when their JSON
 is absent, so partial refreshes are fine.
@@ -243,10 +243,10 @@ def main() -> None:
         description=__doc__, formatter_class=argparse.RawDescriptionHelpFormatter
     )
     ap.add_argument(
-        "tutorsim_repo",
+        "tutormoments_repo",
         type=Path,
         nargs="?",
-        help="path to a local allenai/tutorsim checkout with results",
+        help="path to a local allenai/tutormoments checkout with results",
     )
     ap.add_argument(
         "--action-csv",
@@ -256,11 +256,11 @@ def main() -> None:
     )
     args = ap.parse_args()
 
-    if not (args.tutorsim_repo or args.action_csv):
-        ap.error("pass a tutorsim checkout path and/or --action-csv")
+    if not (args.tutormoments_repo or args.action_csv):
+        ap.error("pass a tutormoments checkout path and/or --action-csv")
 
-    if args.tutorsim_repo:
-        repo = args.tutorsim_repo.expanduser().resolve()
+    if args.tutormoments_repo:
+        repo = args.tutormoments_repo.expanduser().resolve()
         if not repo.exists():
             ap.error(f"{repo} does not exist")
         build_benchmark_json(repo)

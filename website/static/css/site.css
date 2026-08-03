@@ -1,4 +1,4 @@
-/* TutorSim-Preview site — Ai2 brand treatment
+/* TutorMoments-Preview site — Ai2 brand treatment
    Fonts: Space Grotesk (headings; free stand-in for Ai2's PP Telegraf),
    Manrope (body), Roboto Mono (numerals). Loaded from Google Fonts in index.html. */
 
@@ -403,23 +403,6 @@ a:hover { color: var(--pink); text-decoration-color: var(--pink); }
   max-width: 78ch;
 }
 .acknowledgments h3 { color: #fff; font-size: 1.1rem; margin-bottom: 12px; }
-
-.funders {
-  display: flex;
-  align-items: center;
-  gap: 20px;
-  flex-wrap: wrap;
-  margin-top: 24px;
-}
-.funder-chip {
-  background: #fff;
-  border-radius: 12px;
-  padding: 14px 22px;
-  display: flex;
-  align-items: center;
-  max-width: 100%;
-}
-.funder-chip img { height: 44px; max-width: 100%; width: auto; object-fit: contain; display: block; }
 
 /* ---------- Footer ---------- */
 

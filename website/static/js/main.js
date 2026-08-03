@@ -1,4 +1,4 @@
-/* TutorSim-Preview site
+/* TutorMoments-Preview site
    Renders the leaderboard table and the two findings charts from static/data/*.json.
    Charts are hand-rolled SVG; per-model colors and marker shapes match the paper's
    figures (Okabe-Ito palette; see analysis/working-paper-20260630 in allenai/tutormoments)

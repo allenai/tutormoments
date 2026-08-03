@@ -1,5 +1,5 @@
 {
-  "source": "Table 8, TutorSim-Preview working paper (2026-06-30). Regenerate with scripts/refresh-data.py.",
+  "source": "Table 8, TutorMoments-Preview working paper (2026-06-30). Regenerate with scripts/refresh-data.py.",
   "n_moments": 520,
   "human": { "scaffolding": 0.458, "rigor": 0.182, "avoids_over": 0.496 },
   "models": [
