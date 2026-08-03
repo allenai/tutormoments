@@ -1626,7 +1626,7 @@ wheels = [
 ]
 
 [[package]]
-name = "tutorsim"
+name = "tutormoments"
 version = "0.1.0"
 source = { editable = "." }
 dependencies = [

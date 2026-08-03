@@ -1,4 +1,4 @@
 # JSONL data files are content-hashed (dataset manifests store a SHA-256 of the
 # bytes). Pin them to LF on every platform so an autocrlf checkout on Windows
-# can't rewrite line endings and break the hash. See tutorsim dataset validate.
+# can't rewrite line endings and break the hash. See tutormoments dataset validate.
 *.jsonl text eol=lf
