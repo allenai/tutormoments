@@ -1,5 +1,5 @@
-"""Paper and results analysis for tutorsim (notebooks, plots, taxonomy).
+"""Paper and results analysis for tutormoments (notebooks, plots, taxonomy).
 
 Interpretation layers over benchmark results — not required to run or score
-the benchmark. May import the tutorsim runtime; never imported by it.
+the benchmark. May import the tutormoments runtime; never imported by it.
 """
