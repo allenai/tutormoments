@@ -1,0 +1,49 @@
+{
+  "source": "Table 8, TutorSim-Preview working paper (2026-06-30). Regenerate with scripts/refresh-data.py.",
+  "n_moments": 520,
+  "human": { "scaffolding": 0.458, "rigor": 0.182, "avoids_over": 0.496 },
+  "models": [
+    {
+      "id": "claude-opus-4-8",
+      "name": "Claude Opus 4.8",
+      "plain": { "scaffolding": 0.615, "rigor": 0.208, "avoids_over": 0.462 },
+      "eval_aware": { "scaffolding": 0.858, "rigor": 0.831, "avoids_over": 0.896 }
+    },
+    {
+      "id": "claude-sonnet-4-6",
+      "name": "Claude Sonnet 4.6",
+      "plain": { "scaffolding": 0.573, "rigor": 0.085, "avoids_over": 0.437 },
+      "eval_aware": { "scaffolding": 0.831, "rigor": 0.792, "avoids_over": 0.913 }
+    },
+    {
+      "id": "deepseek-ai_DeepSeek-V4-Pro",
+      "name": "DeepSeek V4 Pro",
+      "plain": { "scaffolding": 0.485, "rigor": 0.088, "avoids_over": 0.379 },
+      "eval_aware": { "scaffolding": 0.712, "rigor": 0.492, "avoids_over": 0.623 }
+    },
+    {
+      "id": "gemini-2.5-pro",
+      "name": "Gemini 2.5 Pro",
+      "plain": { "scaffolding": 0.727, "rigor": 0.223, "avoids_over": 0.546 },
+      "eval_aware": { "scaffolding": 0.896, "rigor": 0.712, "avoids_over": 0.854 }
+    },
+    {
+      "id": "gemini-3.5-flash",
+      "name": "Gemini 3.5 Flash",
+      "plain": { "scaffolding": 0.723, "rigor": 0.158, "avoids_over": 0.598 },
+      "eval_aware": { "scaffolding": 0.885, "rigor": 0.646, "avoids_over": 0.817 }
+    },
+    {
+      "id": "gpt-5.5-2026-04-23",
+      "name": "GPT 5.5",
+      "plain": { "scaffolding": 0.269, "rigor": 0.046, "avoids_over": 0.173 },
+      "eval_aware": { "scaffolding": 0.773, "rigor": 0.531, "avoids_over": 0.665 }
+    },
+    {
+      "id": "gpt-5.4-mini-2026-03-17",
+      "name": "GPT 5.4 mini",
+      "plain": { "scaffolding": 0.181, "rigor": 0.023, "avoids_over": 0.188 },
+      "eval_aware": { "scaffolding": 0.738, "rigor": 0.404, "avoids_over": 0.598 }
+    }
+  ]
+}

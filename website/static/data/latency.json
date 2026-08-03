@@ -1,0 +1,12 @@
+{
+  "source": "Figure 7, TutorSim-Preview working paper (2026-06-30). score = mean of evaluation-aware Appropriate Scaffolding and Appropriate Rigor (exact, from Table 8). TODO: latency_s values are read off the paper figure to ~±0.2s; replace with exact values via scripts/refresh-data.py.",
+  "models": [
+    { "id": "claude-opus-4-8", "name": "Claude Opus 4.8", "latency_s": 12.5, "latency_estimated": true, "score": 0.8445 },
+    { "id": "claude-sonnet-4-6", "name": "Claude Sonnet 4.6", "latency_s": 10.0, "latency_estimated": true, "score": 0.8115 },
+    { "id": "deepseek-ai_DeepSeek-V4-Pro", "name": "DeepSeek V4 Pro", "latency_s": 7.0, "latency_estimated": true, "score": 0.602 },
+    { "id": "gemini-2.5-pro", "name": "Gemini 2.5 Pro", "latency_s": 17.6, "latency_estimated": true, "score": 0.804 },
+    { "id": "gemini-3.5-flash", "name": "Gemini 3.5 Flash", "latency_s": 9.0, "latency_estimated": true, "score": 0.7655 },
+    { "id": "gpt-5.5-2026-04-23", "name": "GPT 5.5", "latency_s": 10.3, "latency_estimated": true, "score": 0.652 },
+    { "id": "gpt-5.4-mini-2026-03-17", "name": "GPT 5.4 mini", "latency_s": 4.2, "latency_estimated": true, "score": 0.571 }
+  ]
+}

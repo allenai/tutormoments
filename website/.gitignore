@@ -1,0 +1,6 @@
+# The project website intentionally ships HTML, a PDF, and its own static/data/ JSON.
+# The repo-root .gitignore globally ignores *.html, *.pdf, and data/; re-include them here.
+!*.html
+!*.pdf
+!static/data/
+!static/data/**

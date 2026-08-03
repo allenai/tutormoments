@@ -1,0 +1,230 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <title>TutorSim-Preview: When Help is Unhelpful — Evaluating AI Tutors for Productive Struggle</title>
+  <meta name="description" content="TutorSim is a replay-based framework for evaluating whether AI tutors know when to help a student and when to hold back, built on real tutoring transcripts annotated by experienced math teachers.">
+
+  <link rel="icon" type="image/svg+xml" href="./static/images/favicon.svg">
+
+  <link rel="preconnect" href="https://fonts.googleapis.com">
+  <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+  <link href="https://fonts.googleapis.com/css2?family=Space+Grotesk:wght@500;700&family=Manrope:wght@400..800&family=Roboto+Mono:wght@400;500&display=swap" rel="stylesheet">
+  <!-- bump ?v= when the stylesheet or script changes so browsers drop their cached copy -->
+  <link rel="stylesheet" href="./static/css/site.css?v=5">
+</head>
+<body>
+
+<nav class="nav" aria-label="main navigation">
+  <div class="container">
+    <a class="nav-brand" href="./">TutorSim</a>
+    <a class="nav-ai2" href="https://allenai.org" title="Allen Institute for AI">Ai2</a>
+  </div>
+</nav>
+
+<header class="hero">
+  <div class="container">
+    <h1><span class="preview-mark">TutorSim&#8209;Preview:</span><br>When Help is Unhelpful — Evaluating AI Tutors for Productive Struggle</h1>
+
+    <div class="links">
+      <a class="pill pill-primary" href="./static/paper/tutorsim-preview.pdf">
+        <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M14 2H6a2 2 0 0 0-2 2v16a2 2 0 0 0 2 2h12a2 2 0 0 0 2-2V8z"/><polyline points="14 2 14 8 20 8"/><line x1="16" y1="13" x2="8" y2="13"/><line x1="16" y1="17" x2="8" y2="17"/></svg>
+        Paper
+      </a>
+      <a class="pill" href="https://github.com/allenai/tutormoments">
+        <svg viewBox="0 0 24 24" fill="currentColor" aria-hidden="true"><path d="M12 .5C5.65.5.5 5.65.5 12c0 5.08 3.29 9.39 7.86 10.91.58.11.79-.25.79-.55v-2.15c-3.2.7-3.88-1.36-3.88-1.36-.52-1.33-1.28-1.69-1.28-1.69-1.04-.71.08-.7.08-.7 1.15.08 1.76 1.19 1.76 1.19 1.03 1.75 2.69 1.25 3.34.95.11-.74.4-1.25.73-1.53-2.55-.29-5.24-1.28-5.24-5.69 0-1.26.45-2.28 1.19-3.09-.12-.29-.52-1.46.11-3.05 0 0 .97-.31 3.17 1.18a11 11 0 0 1 5.78 0c2.2-1.49 3.17-1.18 3.17-1.18.63 1.59.23 2.76.11 3.05.74.81 1.19 1.83 1.19 3.09 0 4.42-2.7 5.39-5.27 5.67.41.36.78 1.06.78 2.14v3.17c0 .31.21.67.8.55A11.51 11.51 0 0 0 23.5 12C23.5 5.65 18.35.5 12 .5z"/></svg>
+        Code
+      </a>
+      <!-- TODO: link the dataset pill when TutorSim-Transcripts-Preview is published -->
+      <span class="pill pill-disabled">
+        <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><ellipse cx="12" cy="5" rx="9" ry="3"/><path d="M21 12c0 1.66-4 3-9 3s-9-1.34-9-3"/><path d="M3 5v14c0 1.66 4 3 9 3s9-1.34 9-3V5"/></svg>
+        Dataset <span class="soon">soon</span>
+      </span>
+      <!-- TODO: link the blog pill when the Ai2 blog post goes live -->
+      <span class="pill pill-disabled">
+        <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M17 3a2.83 2.83 0 1 1 4 4L7.5 20.5 2 22l1.5-5.5z"/></svg>
+        Blog <span class="soon">soon</span>
+      </span>
+    </div>
+  </div>
+</header>
+
+<section class="section" id="leaderboard">
+  <div class="container">
+    <div class="section-head">
+      <span class="kicker">Leaderboard</span>
+    </div>
+
+    <div class="table-card">
+      <table id="leaderboard-table" aria-describedby="leaderboard-note">
+        <!-- Rendered by main.js from static/data/leaderboard.json -->
+      </table>
+    </div>
+    <p class="table-note" id="leaderboard-note">
+      Best score per column
+      in <strong style="color: var(--pink);">pink</strong>.
+      <strong>Human tutors</strong>, scored the same way at the same decision points, get 0.458 (appropriate
+      scaffolding), 0.182 (appropriate rigor), and 0.496 (avoids over-scaffolding). Human tutors should be considered a naturalistic reference,
+      not a ceiling. Annotators deliberately flagged moments where tutoring could have gone better, so the
+      dataset concentrates on missed opportunities rather than ideal practice.
+    </p>
+    <div class="section-explain">
+      <p>
+        We ran seven language models ("LM") as tutors over 520 teacher-identified key moments from real math tutoring
+        sessions, split evenly between moments that called for <strong>scaffolding</strong> (making the problem more
+        accessible) and moments that called for a <strong>push for rigor</strong> (asking the student to do harder thinking).
+        Each score is the share of moments where the model did what the moment called for. The <em>plain</em>
+        prompt just tells the model to tutor well; the <em>evaluation-aware</em> prompt spells out the
+        scaffolding-vs-rigor trade-off.
+      </p>
+    </div>
+  </div>
+</section>
+
+<section class="section band-white" id="how-it-works">
+  <div class="container approach-grid">
+    <div class="section-head">
+      <span class="kicker">How TutorSim works</span>
+    </div>
+
+    <div>
+      <div class="animation-card">
+        <iframe src="./static/animation/index.html?v=3" title="Animated walkthrough of the TutorSim replay pipeline" loading="lazy"></iframe>
+      </div>
+      <p class="animation-caption">The TutorSim pipeline, step by step. Use controls to walk through a replay.</p>
+    </div>
+
+    <div class="prose">
+      <h2>Replaying from key learning moments</h2>
+      <p>
+        Ask a good math tutor for help and you'll likely get a question back: <em>"what do you know about
+        what the problem is asking?"</em> The tutor isn't being unhelpful by asking a question back. Instead, they are diagnosing what
+        type of support may be needed. Language models, though, are trained to be a "helpful assistant".
+        TutorSim-Preview assesses whether the LM's helpful assistant character traits interfere with the core
+        skills of a tutor: diagnosing the right level of support vs push to provide at a given moment in order to maintain the productive
+        struggle that learning research has long tied to stronger understanding.
+      </p>
+      <p>
+        Most tutoring benchmarks reward one behavior across the board without asking whether that was the right move given the student's behavior at the time. For example, "never give away the answer", or "always reward scaffolding".
+        TutorSim characterizes tutoring as judgment calls made in context. Expert teachers annotated real
+        human-student transcripts to select key learning moments where tutors faced a choice between
+        introducing scaffolds or pushing for rigor. For every key moment, several teachers annotated why this
+        was a scaffolding / rigor situation, what actions the human tutor took, and the resulting effectiveness.
+        The majority label of whether it is a scaffolding or push for rigor moment becomes the ground truth an
+        LM tutor is scored against. The result is a behavioral profile of each model: when it faces different
+        tutoring situations, what pedagogical choices does it make, and do they fit the moment?
+      </p>
+      <p>
+        Told only to "tutor well," models tend to over-help — giving too much support and rarely pushing
+        students to do deeper thinking. Spelling out the trade-off in the prompt lifts every score, but  models still differ widely
+        in how reliably they make that shift. We also find that prompting models to push rigor concentraits model behavior on fewer rigor-pushing strategies than human tutors deploy.
+      </p>
+    </div>
+  </div>
+</section>
+
+<section class="section" id="findings">
+  <div class="container">
+    <div class="section-head">
+      <span class="kicker">Findings</span>
+    </div>
+
+    <!-- Action frequency vs. human (paper Fig. 4). Hidden until
+         static/data/action_distribution.json is generated by scripts/refresh-data.py -->
+    <div class="chart-block" id="actions-block" hidden>
+      <h3 class="chart-title">Models lean on fewer moves than human tutors</h3>
+      <p class="chart-sub">
+        Share of tutor actions across twelve pedagogical moves, for each model and for the human tutors in
+        the same transcripts (dashed line). Prompting for the evaluation shifts models toward asking students
+        to justify their answers — while humans spread their choices across more varied strategies, including
+        simply stepping back and letting the student work.
+      </p>
+      <div class="chart-tabs" role="tablist" aria-label="Prompt condition">
+        <button role="tab" aria-selected="true" data-prompt="plain">Plain prompt</button>
+        <button role="tab" aria-selected="false" data-prompt="eval_aware">Evaluation-aware prompt</button>
+      </div>
+      <div class="chart-card">
+        <div id="actions-chart"></div>
+        <div class="chart-legend" id="actions-legend"></div>
+      </div>
+    </div>
+
+    <!-- Performance vs. latency (paper Fig. 7) -->
+    <div class="chart-block" id="latency-block">
+      <h3 class="chart-title">The best tutors are also the slowest</h3>
+      <p class="chart-sub">
+        Overall performance (mean of appropriate scaffolding and appropriate rigor, evaluation-aware prompt)
+        against average response latency per tutor turn. The strongest models take 10+ seconds to answer —
+        a long time for production education technology deployments. Fast, pedagogically sound tutors are an open target.
+      </p>
+      <div class="chart-card">
+        <div id="latency-chart"></div>
+      </div>
+      <p class="chart-footnote" id="latency-footnote"></p>
+    </div>
+  </div>
+</section>
+
+<section class="section band-dark" id="authors">
+  <div class="container">
+    <div class="section-head">
+      <span class="kicker">The team</span>
+      <h2>Authors</h2>
+    </div>
+
+    <p class="authors">
+      <span class="author">Albert Zhang<sup>2</sup></span>,
+      <span class="author">Alexis Ross<sup>4</sup></span>,
+      <span class="author">Kajal Patel<sup>1</sup></span>,
+      <span class="author">Julian Bernado<sup>5</sup></span>,
+      <span class="author">Rebecca Bowie<sup>2</sup></span>,
+      <span class="author">Ana Trindade Ribeiro<sup>5</sup></span>,
+      <span class="author">Daniel Halper<sup>6</sup></span>,
+      <span class="author">Haripriya Valayaputtur<sup>6</sup></span>,
+      <span class="author">Jacob Andreas<sup>4</sup></span>,
+      <span class="author">Susanna Loeb<sup>5</sup></span>,
+      <span class="author">Lucy Li<sup>3</sup></span>,
+      <span class="author">Kyle Lo<sup>1,3</sup></span>,
+      <span class="author">Ryan Knight<sup>2</sup></span>
+    </p>
+    <p class="affiliations">
+      <span><sup>1</sup>Allen Institute for AI</span>
+      <span><sup>2</sup>Insource Services</span>
+      <span><sup>3</sup>University of Washington</span>
+      <span><sup>4</sup>MIT</span>
+      <span><sup>5</sup>Stanford</span>
+      <span><sup>6</sup>Step Up Labs</span>
+    </p>
+
+    <div class="acknowledgments">
+      <h3>Acknowledgments</h3>
+      <p>
+        This project has been made possible in part by grant number 2024-351534 from the Chan Zuckerberg
+        Initiative DAF, an advised fund of Silicon Valley Community Foundation, and through support from
+        the Gates Foundation.
+      </p>
+      <div class="funders">
+        <span class="funder-chip"><img src="./static/images/gates-foundation.png" alt="Gates Foundation"></span>
+        <span class="funder-chip"><img src="./static/images/czi.png" alt="Chan Zuckerberg Initiative"></span>
+      </div>
+    </div>
+  </div>
+</section>
+
+<footer class="footer">
+  <div class="container">
+    <span>&copy; 2026 TutorSim Authors</span>
+    <span>
+      <a href="./static/paper/tutorsim-preview.pdf">Paper</a>
+      <a href="https://github.com/allenai/tutormoments">Code</a>
+      <a href="https://allenai.org">Ai2</a>
+    </span>
+  </div>
+</footer>
+
+<div class="chart-tooltip" id="chart-tooltip" role="status"></div>
+
+<script src="./static/js/main.js?v=7"></script>
+</body>
+</html>
