@@ -1,6 +1,6 @@
-# Tutorsim
+# Tutormoments
 
-Tutorsim is a benchmark for measuring how well language models tutor. It runs a
+Tutormoments is a benchmark for measuring how well language models tutor. It runs a
 model-under-test against a simulated student on frozen tutoring **moments**
 (expert teacher-annotated key moments cut from real tutoring transcripts), then scores
 the generated continuation. 
@@ -13,17 +13,17 @@ The implemented metrics are:
 
 ## Installation
 
-Tutorsim requires Python 3.11 or newer. Install from a checkout:
+Tutormoments requires Python 3.11 or newer. Install from a checkout:
 
 ```bash
 python -m pip install --upgrade pip
 python -m pip install -e .
 ```
 
-This installs the `tutorsim` command and the `tutorsim` Python package — the
+This installs the `tutormoments` command and the `tutormoments` Python package — the
 benchmark runtime. Everything a run depends on ships inside the package:
-`src/tutorsim/default_config.yaml` and the tutor/student/scorer prompts under
-`src/tutorsim/prompts/`.
+`src/tutormoments/default_config.yaml` and the tutor/student/scorer prompts under
+`src/tutormoments/prompts/`.
 
 ## Running
 
@@ -34,11 +34,11 @@ run the benchmark.
 ```bash
 export ANTHROPIC_API_KEY=...   # or the provider's key
 
-tutorsim run \
+tutormoments run \
   --tutors claude-opus-4-8 \
   --modes plain scaffolding_rigor \
   --sample 10 \
-  --dataset <org>/tutorsim-transcripts-preview
+  --dataset <org>/tutormoments-transcripts-preview
 ```
 
 Useful run options:
@@ -93,7 +93,7 @@ config (up to LLM sampling nondeterminism).
 Aggregate completed run summaries into leaderboard files:
 
 ```bash
-tutorsim report --results-root results --out leaderboard
+tutormoments report --results-root results --out leaderboard
 ```
 
 This writes `leaderboard.md` and `leaderboard.csv`.
@@ -101,7 +101,7 @@ This writes `leaderboard.md` and `leaderboard.csv`.
 Build a self-contained HTML viewer:
 
 ```bash
-tutorsim view --results-root results --out viewer.html
+tutormoments view --results-root results --out viewer.html
 ```
 
 The report and viewer commands read `summary.json` files from run directories.
@@ -119,7 +119,7 @@ models:
 ```
 
 ```bash
-tutorsim run --tutors my-new-model-id --data_path <release dir>
+tutormoments run --tutors my-new-model-id --data_path <release dir>
 ```
 
 Tutors are selectable per-run via the CLI. The Student model is set in the config; changing the student model would change the shape of the evaluation. Modify your 
@@ -135,7 +135,7 @@ You can register a different approach to the LM Tutor / Synthetic student,
 for example a synthetic student without student-traits.
 
 ```python
-from tutorsim import register_tutor, register_student
+from tutormoments import register_tutor, register_student
 
 @register_tutor("my-tutor")
 def my_tutor(conversation):
@@ -146,14 +146,14 @@ def my_student(conversation):
     return "next student turn"
 ```
 
-For CLI use, import the registration module before calling `tutorsim.cli.main()`
+For CLI use, import the registration module before calling `tutormoments.cli.main()`
 from a small wrapper script. There is not yet a plugin discovery mechanism.
 
 Example wrapper:
 
 ```python
-from tutorsim import register_tutor, register_student
-from tutorsim.cli import main
+from tutormoments import register_tutor, register_student
+from tutormoments.cli import main
 
 
 @register_tutor("my-tutor")
@@ -173,7 +173,7 @@ if __name__ == "__main__":
 Then run the wrapper with normal CLI arguments, for example:
 
 ```bash
-python my_tutorsim_wrapper.py run --tutors my-tutor --sample 1 --data_path <release dir>
+python my_tutormoments_wrapper.py run --tutors my-tutor --sample 1 --data_path <release dir>
 ```
 
 ## The dataset
@@ -195,7 +195,7 @@ The released dataset carries two representations of the same underlying data:
 Validate a local release directory:
 
 ```bash
-tutorsim-build dataset validate --data_path data/balanced_520_release
+tutormoments-build dataset validate --data_path data/balanced_520_release
 ```
 
 The release ships `moments.jsonl` with `moments.manifest.json` and
@@ -208,7 +208,7 @@ paths), a file-level `file_sha256`, creation date, and provenance.
 
 ## Scoring
 
-Tutorsim scores generated continuations with model-backed annotation passes and
+Tutormoments scores generated continuations with model-backed annotation passes and
 then aggregates per-moment scores into leaderboard metrics:
 
 | Metric | summary.json source | Interpretation |
@@ -225,11 +225,11 @@ and `avoids_overscaffold`.
 
 The action taxonomy classifies each decomposed tutor action into a 13-letter
 scheme and produces the tables behind the paper's action-distribution figures.
-The *data generation* lives in the runtime (`tutorsim.taxonomy` +
-`tutorsim taxonomy`); the *figures* are rendered by the notebooks under
-`analysis/working-paper-*`, which import `from tutorsim import taxonomy`.
+The *data generation* lives in the runtime (`tutormoments.taxonomy` +
+`tutormoments taxonomy`); the *figures* are rendered by the notebooks under
+`analysis/working-paper-*`, which import `from tutormoments import taxonomy`.
 
-**Every `tutorsim run` classifies its own LM-side actions** — alongside the
+**Every `tutormoments run` classifies its own LM-side actions** — alongside the
 headline metrics — writing `results/<run_id>/taxonomy/classified.csv` and a
 `taxonomy` block (raw category counts) into `summary.json`. This adds an LLM
 classification pass per run (model set by the `taxonomy` config block, default
@@ -239,7 +239,7 @@ The comparison figures plot each LM against a fixed **human reference**
 distribution. That reference is the paper's frozen, published distribution —
 [`analysis/working-paper-20260630/v1_action_taxonomy_distribution.csv`](analysis/working-paper-20260630/v1_action_taxonomy_distribution.csv)
 — so you do **not** re-classify the ground truth; the figure notebooks load it
-by default via `tutorsim.taxonomy.read_paper_distribution(...)`. Only the LM
+by default via `tutormoments.taxonomy.read_paper_distribution(...)`. Only the LM
 side comes from your run. Rendering the figures needs pandas + matplotlib —
 install the `analysis` extra:
 
@@ -256,14 +256,14 @@ produce the full headline tables from classified facets:
 
 ```bash
 # Regenerate the human reference from the ground-truth bundle:
-tutorsim taxonomy classify --kind key_moments --input key_moments.jsonl --output ./human
+tutormoments taxonomy classify --kind key_moments --input key_moments.jsonl --output ./human
 
 # Re-classify a completed run's LM side (normally emitted by the run itself):
-tutorsim taxonomy classify --kind tutorsim --input results/<run_id>/ \
+tutormoments taxonomy classify --kind tutormoments --input results/<run_id>/ \
   --scenarios data/balanced_520_release/moments.jsonl --output ./lm
 
 # Headline tables from classified facets (needs a classified human side):
-tutorsim taxonomy headline --human ./human/classified.csv --lm ./lm/classified.csv --output ./headline
+tutormoments taxonomy headline --human ./human/classified.csv --lm ./lm/classified.csv --output ./headline
 ```
 
 ## Repository Layout
@@ -273,27 +273,27 @@ tutorsim taxonomy headline --human ./human/classified.csv --lm ./lm/classified.c
 ├── pyproject.toml
 ├── configs/
 │   └── local.example.yaml
-├── src/tutorsim/            installable benchmark runtime
-├── tutorsim_build/           maintainer-only dataset construction + release tooling
+├── src/tutormoments/            installable benchmark runtime
+├── tutormoments_build/           maintainer-only dataset construction + release tooling
 ├── analysis/                paper notebooks, plots, taxonomy figures
 ├── data/                    local datasets and release dirs, gitignored
 ├── results/                 run outputs, gitignored
-└── tests/                   tutorsim/ (runtime), tutorsim_build/, analysis/
+└── tests/                   tutormoments/ (runtime), tutormoments_build/, analysis/
 ```
 
 The core rule: code needed to run or score the benchmark lives in
-`src/tutorsim/`; code that creates the dataset lives in `tutorsim_build/`;
+`src/tutormoments/`; code that creates the dataset lives in `tutormoments_build/`;
 code that explains or visualizes results lives in `analysis/`. Build and
 analysis code may import the runtime; the runtime never imports them.
 
 ## Configuration
 
-Tutorsim loads config in this order:
+Tutormoments loads config in this order:
 
-1. `tutorsim run --config path/to/config.yaml`
-2. `TUTORSIM_CONFIG`
+1. `tutormoments run --config path/to/config.yaml`
+2. `TUTORMOMENTS_CONFIG`
 3. `./config.yaml`
-4. packaged `src/tutorsim/default_config.yaml`
+4. packaged `src/tutormoments/default_config.yaml`
 
 Use `configs/local.example.yaml` as a starting point for local overrides.
 
@@ -306,21 +306,21 @@ Config files have these top-level sections:
 | `models` | Model roster for hosted tutor models. The provider is inferred from the model ID. |
 | `student` | Hosted model and mode used for the simulated student. |
 | `scorer` | Hosted model used for the scoring passes. |
-| `defaults` | Default `trials` and `max_turns` values for `tutorsim run`. |
+| `defaults` | Default `trials` and `max_turns` values for `tutormoments run`. |
 | `retry` | Retry behavior for direct model calls. |
 | `batch` | Batch API polling timeout for scorer/provider paths that use batch APIs. |
 
 
 ## Logging
 
-Both CLIs (`tutorsim` and `tutorsim-build`) log progress to the console at
+Both CLIs (`tutormoments` and `tutormoments-build`) log progress to the console at
 INFO level, and every run automatically writes its own log file — nothing to
 enable:
 
-- `tutorsim run` writes `results/<run_id>/run.log` per cell, next to
+- `tutormoments run` writes `results/<run_id>/run.log` per cell, next to
   `config.json` and `summary.json`. The run directory is the complete record
   of the run: what ran, what was resumed, and which moments failed.
-- `tutorsim-build dataset build` / `build-from-run` / `build-ground-truth`
+- `tutormoments-build dataset build` / `build-from-run` / `build-ground-truth`
   write a `build.log` into their output directory (skipped on `--dry-run`).
 
 Log files append, so a resumed run continues the same log. In a multi-tutor
@@ -334,7 +334,7 @@ Two optional knobs: `--log-level DEBUG|INFO|WARNING|ERROR` controls
 verbosity, and `--log-file FILE` additionally writes one combined log for the
 whole invocation — useful for watching a sweep across lanes, or for the
 subcommands without an output directory (`report`, `view`, `validate`).
-`TUTORSIM_LOG_LEVEL` / `TUTORSIM_LOG_FILE` environment variables set defaults
+`TUTORMOMENTS_LOG_LEVEL` / `TUTORMOMENTS_LOG_FILE` environment variables set defaults
 for the flags.
 
 ## Development
@@ -350,7 +350,7 @@ pip install -e ".[analysis]"               # + pandas/matplotlib for analysis fi
 Run from a local directory
 
 ```
-tutorsim run \
+tutormoments run \
   --tutors claude-opus-4-8 \
   --modes plain scaffolding_rigor \
   --sample 10 \
@@ -360,25 +360,25 @@ tutorsim run \
 Run the runtime test suite without real API calls:
 
 ```bash
-pytest tests/tutorsim -q          # runtime only (needs [dev])
+pytest tests/tutormoments -q          # runtime only (needs [dev])
 pytest tests -q                   # full suite (needs [dev,build-dev,analysis]; missing extras skip)
 ```
 
 
 ### Dataset construction (maintainers)
 
-Dataset construction lives in `tutorsim_build/` — outside the runtime package,
+Dataset construction lives in `tutormoments_build/` — outside the runtime package,
 because changing it can change the benchmark itself. Install with the `build`
-extra and use the `tutorsim-build` CLI:
+extra and use the `tutormoments-build` CLI:
 
 ```bash
 # Raw human annotations -> per-conversation ground-truth JSON (LLM batch pipeline)
-tutorsim-build dataset build-ground-truth --input <annotations.jsonl> --labeller hybrid
+tutormoments-build dataset build-ground-truth --input <annotations.jsonl> --labeller hybrid
 
 # Ground truth + transcripts + id list -> release dir (moments.jsonl + manifest)
-tutorsim-build dataset build \
+tutormoments-build dataset build \
   --set balanced_520 \
-  --ids tutorsim_build/balanced_520_ids.json \
+  --ids tutormoments_build/balanced_520_ids.json \
   --ground-truth <ground-truth dir> \
   --transcripts <transcripts dir> \
   --tutoring-provider-a-jsonl <transcripts.jsonl> \
@@ -387,16 +387,16 @@ tutorsim-build dataset build \
 
 # Rebuild the paper's exact 520 from the published reference run
 # (the canonical record of the benchmark-time detections)
-tutorsim-build dataset build-from-run \
+tutormoments-build dataset build-from-run \
   --set balanced_520 \
   --reference-run <benchmark_520_full_run.jsonl> \
   --tutoring-provider-a-jsonl <transcripts.jsonl> \
-  --ids tutorsim_build/balanced_520_ids.json \
+  --ids tutormoments_build/balanced_520_ids.json \
   --out data/balanced_520_release \
   --created 2026-07-01
 ```
 
-`tutorsim_build/balanced_520_ids.json` is the canonical, frozen selection of
+`tutormoments_build/balanced_520_ids.json` is the canonical, frozen selection of
 the paper's 520 moments (committed; deidentified UUID surrogates only). The
 selection is not derivable — the sampler that chose it predates this repo —
 so the id list plus the published reference run are the reproduction path.

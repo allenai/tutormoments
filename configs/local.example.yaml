@@ -1,9 +1,9 @@
-# Copy to config.yaml or pass with `tutorsim run --config configs/local.example.yaml`
+# Copy to config.yaml or pass with `tutormoments run --config configs/local.example.yaml`
 # to override the packaged default config.
-# The default config can be found at src/tutorsim/default_config.yaml
+# The default config can be found at src/tutormoments/default_config.yaml
 
 # Released benchmark dataset (HF id + pinned revision); null until published.
-# Or bypass with `tutorsim run --data_path <local release dir>`.
+# Or bypass with `tutormoments run --data_path <local release dir>`.
 dataset:
   id: null
   revision: null

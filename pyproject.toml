@@ -3,7 +3,7 @@ requires = ["setuptools>=77"]
 build-backend = "setuptools.build_meta"
 
 [project]
-name = "tutorsim"
+name = "tutormoments"
 version = "0.1.0"
 description = "A benchmark for measuring how well language models tutor."
 readme = "README.md"
@@ -37,18 +37,18 @@ build = ["boto3", "jsonschema"]
 analysis = ["pandas", "matplotlib", "seaborn"]
 # dev alone runs the runtime tests; add build-dev (+analysis) for the full suite
 dev = ["pytest", "ruff"]
-build-dev = ["tutorsim[build]", "moto[s3]"]
+build-dev = ["tutormoments[build]", "moto[s3]"]
 
 [project.scripts]
-tutorsim = "tutorsim.cli:main"
-tutorsim-build = "tutorsim_build.cli:main"
+tutormoments = "tutormoments.cli:main"
+tutormoments-build = "tutormoments_build.cli:main"
 
 [tool.setuptools.packages.find]
 where = ["src", "."]
-include = ["tutorsim*", "tutorsim_build*", "analysis*"]
+include = ["tutormoments*", "tutormoments_build*", "analysis*"]
 
 [tool.setuptools.package-data]
-tutorsim = [
+tutormoments = [
     "default_config.yaml",
     "prompts/tutor/*.txt",
     "prompts/student/*.txt",
@@ -57,7 +57,7 @@ tutorsim = [
     "prompts/scorer/structure/*.md",
     "prompts/taxonomy/*.md",
 ]
-tutorsim_build = [
+tutormoments_build = [
     "moments.schema.json",
     "prompts/classify/labeller/*.txt",
     "prompts/classify/situation_labeller/*.md",
