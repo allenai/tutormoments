@@ -109,9 +109,9 @@ def test_load_moments_hf_path_normalizes_datetimes(monkeypatch):
     JSON-serializable for records_content_hash and hash identically to the
     equivalent jsonl (string) form.
     """
-    import datasets
-
     from datetime import datetime
+
+    import datasets
 
     trait = {
         "persona": "curious",
@@ -146,9 +146,7 @@ def test_load_moments_hf_path_normalizes_datetimes(monkeypatch):
     # Hash parity: the HF (datetime) form hashes identically to the jsonl form
     # that carries the same timestamp as an ISO string.
     string_trait = dict(trait, generated_at="2026-06-18T06:28:40")
-    string_row = dict(
-        row, student=dict(row["student"], trait=string_trait)
-    )
+    string_row = dict(row, student=dict(row["student"], trait=string_trait))
     expected = records_content_hash([Moment.from_dict(string_row).to_dict()])
     assert source["content_hash"] == expected
 
