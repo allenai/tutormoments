@@ -27,9 +27,8 @@ benchmark runtime. Everything a run depends on ships inside the package:
 
 ## Running
 
-TODO: Update the dataset path
-Point the runner at the released Hugging Face dataset and provide an API key to
-run the benchmark.
+Provide an API key and run the benchmark; the dataset source defaults to the
+released Hugging Face dataset (see `--dataset` below).
 
 ```bash
 export ANTHROPIC_API_KEY=...   # or the provider's key
@@ -37,8 +36,7 @@ export ANTHROPIC_API_KEY=...   # or the provider's key
 tutormoments run \
   --tutors claude-opus-4-8 \
   --modes plain scaffolding_rigor \
-  --sample 10 \
-  --dataset <org>/tutormoments-transcripts-preview
+  --sample 10
 ```
 
 Useful run options:
@@ -47,7 +45,7 @@ Useful run options:
 |---|---|
 | `--tutors MODEL_ID ...` | Tutor model IDs or registered custom tutor names to evaluate. |
 | `--modes MODE ...` | Tutor prompt modes. Defaults to `plain scaffolding_rigor`. |
-| `--dataset HF_ID` | Hugging Face dataset id (default: `dataset.id` from config). |
+| `--dataset HF_ID` | Hugging Face dataset id. Defaults to [`allenai/tutormoments-preview`](https://huggingface.co/datasets/allenai/tutormoments-preview) (`dataset.id` in config). |
 | `--data_path DIR` | Run from a local data dir; wins over `--dataset`. |
 | `--dataset-revision REV` | Pin a HF dataset revision for reproducibility. |
 | `--sample N` | Use the first `N` moments from the dataset. |
