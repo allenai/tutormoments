@@ -1,0 +1,8 @@
+# Keep the build context to the published site. nginx.conf, index.html, and
+# static/ are the only things the Dockerfile copies.
+Dockerfile
+.dockerignore
+README.md
+.gitignore
+.nojekyll
+scripts/
