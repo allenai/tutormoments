@@ -1,6 +1,6 @@
-# Tutormoments
+# TutorMoments
 
-Tutormoments is a benchmark for measuring how well language models tutor. It runs a
+TutorMoments is a benchmark for measuring how well language models tutor. It runs a
 model-under-test against a simulated student on frozen tutoring **moments**
 (expert teacher-annotated key moments cut from real tutoring transcripts), then scores
 the generated continuation. 
@@ -13,7 +13,7 @@ The implemented metrics are:
 
 ## Installation
 
-Tutormoments requires Python 3.11 or newer. Install from a checkout:
+TutorMoments requires Python 3.11 or newer. Install from a checkout:
 
 ```bash
 python -m pip install --upgrade pip
@@ -208,7 +208,7 @@ paths), a file-level `file_sha256`, creation date, and provenance.
 
 ## Scoring
 
-Tutormoments scores generated continuations with model-backed annotation passes and
+TutorMoments scores generated continuations with model-backed annotation passes and
 then aggregates per-moment scores into leaderboard metrics:
 
 | Metric | summary.json source | Interpretation |
@@ -288,7 +288,7 @@ analysis code may import the runtime; the runtime never imports them.
 
 ## Configuration
 
-Tutormoments loads config in this order:
+TutorMoments loads config in this order:
 
 1. `tutormoments run --config path/to/config.yaml`
 2. `TUTORMOMENTS_CONFIG`
