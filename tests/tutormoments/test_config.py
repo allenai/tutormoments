@@ -121,9 +121,9 @@ def test_scorer_and_student_specs():
 def test_build_run_config_defaults():
     rc = cfgmod.build_run_config(tutors=["claude-opus-4-8"])
     assert rc.modes == ["plain", "scaffolding_rigor"]
-    # No dataset is pinned in the default config until the release is published;
-    # the runnable set defaults to the "moments" config within a dataset.
-    assert rc.dataset is None
+    # The default config pins the released HF dataset; the runnable set defaults
+    # to the "moments" config within it.
+    assert rc.dataset == "allenai/tutormoments-preview"
     assert rc.data_path is None
     assert rc.dataset_config == "moments"
     assert rc.max_turns == 5 and rc.trials == 1

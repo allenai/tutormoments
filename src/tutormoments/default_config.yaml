@@ -1,9 +1,9 @@
-# Released benchmark dataset. `id` is the Hugging Face dataset id (null until
-# the release is published — pass --dataset or --data_path meanwhile);
-# `revision` pins a dataset commit/tag for reproducibility; `config` names the
-# dataset config that holds the runnable moments set.
+# Released benchmark dataset. `id` is the Hugging Face dataset id (override with
+# --dataset, or --data_path for a local release dir); `revision` pins a dataset
+# commit/tag for reproducibility; `config` names the dataset config that holds
+# the runnable moments set.
 dataset:
-  id: null
+  id: allenai/tutormoments-preview
   revision: null
   config: moments
 
