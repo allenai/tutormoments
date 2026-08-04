@@ -12,6 +12,7 @@ import hashlib
 import json
 import logging
 from dataclasses import asdict, dataclass
+from datetime import date, datetime
 from pathlib import Path
 from typing import Any
 
@@ -143,6 +144,28 @@ def _read_moments_jsonl(path: str | Path) -> list[Moment]:
     return moments
 
 
+def _normalize_hf_row(value: Any) -> Any:
+    """Recursively convert Arrow-deserialized datetimes to ISO strings.
+
+    The released dataset stores timestamp fields (e.g.
+    student.trait.generated_at) as Arrow ``timestamp`` columns, so
+    ``datasets.load_dataset`` hands them back as Python ``datetime`` objects.
+    The released jsonl carries the same fields as ISO strings, so normalize the
+    HF rows here to keep both load paths byte-identical (this also keeps the
+    records JSON-serializable for records_content_hash). Mirrors the Arrow
+    round-trip handled for cut_votes in _normalize_cut_votes.
+    """
+    if isinstance(value, datetime):  # check before date: datetime is a date
+        return value.isoformat()
+    if isinstance(value, date):
+        return value.isoformat()
+    if isinstance(value, dict):
+        return {k: _normalize_hf_row(v) for k, v in value.items()}
+    if isinstance(value, list):
+        return [_normalize_hf_row(v) for v in value]
+    return value
+
+
 def load_manifest(release_dir: str | Path) -> dict | None:
     """Load a release directory's moments.manifest.json if present."""
     path = Path(release_dir) / MANIFEST_FILENAME
@@ -190,7 +213,7 @@ def load_moments(
         from datasets import load_dataset  # heavy import; only on the HF path
 
         ds = load_dataset(dataset, name=config, revision=revision, split="train")
-        moments = [Moment.from_dict(dict(row)) for row in ds]
+        moments = [Moment.from_dict(_normalize_hf_row(dict(row))) for row in ds]
         source_meta = {
             "dataset_id": dataset,
             "revision": revision,

@@ -101,6 +101,58 @@ def test_load_moments_no_source_raises():
         load_moments()
 
 
+def test_load_moments_hf_path_normalizes_datetimes(monkeypatch):
+    """HF loading normalizes Arrow datetime fields to ISO strings.
+
+    datasets.load_dataset returns timestamp columns (student.trait.generated_at)
+    as datetime objects. The runtime must normalize them so records stay
+    JSON-serializable for records_content_hash and hash identically to the
+    equivalent jsonl (string) form.
+    """
+    import datasets
+
+    from datetime import datetime
+
+    trait = {
+        "persona": "curious",
+        "trait_mode": "frozen",
+        "generator_model": "claude-opus-4-6",
+        "generated_at": datetime(2026, 6, 18, 6, 28, 40),
+    }
+    row = {
+        "id": "s:c__hum_1_2",
+        "context": [{"turn_number": 1, "role": "tutor", "text": "Q"}],
+        "dimension": "rigor",
+        "student": {"mode": "oracle", "reference": "", "context": "", "trait": trait},
+        "rubric": {"gold": "rigor", "hint": ""},
+        "provenance": {"conv_id": "c", "cut_turn": 27},
+    }
+
+    def fake_load_dataset(dataset, name=None, revision=None, split=None):
+        assert dataset == "org/ds"
+        assert name == "moments"
+        assert split == "train"
+        return [row]
+
+    monkeypatch.setattr(datasets, "load_dataset", fake_load_dataset)
+
+    moments, source = load_moments(dataset="org/ds")
+
+    assert len(moments) == 1
+    gen = moments[0].to_dict()["student"]["trait"]["generated_at"]
+    assert gen == "2026-06-18T06:28:40"  # datetime -> ISO string, not a datetime
+    assert source["dataset_id"] == "org/ds"
+
+    # Hash parity: the HF (datetime) form hashes identically to the jsonl form
+    # that carries the same timestamp as an ISO string.
+    string_trait = dict(trait, generated_at="2026-06-18T06:28:40")
+    string_row = dict(
+        row, student=dict(row["student"], trait=string_trait)
+    )
+    expected = records_content_hash([Moment.from_dict(string_row).to_dict()])
+    assert source["content_hash"] == expected
+
+
 def test_validate_dataset_reads_manifest_and_hashes_fixture():
     report = validate_dataset(_FIXTURE_RELEASE)
     assert report["record_count"] == 2
