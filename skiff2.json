@@ -4,9 +4,7 @@
         {
             "name": "web",
             "cwd": "./website",
-            "isRootService": true,
-            "allowUnauthenticated": true,
-            "deploy": false
+            "isRootService": true
         }
     ]
 }
