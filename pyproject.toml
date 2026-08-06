@@ -59,6 +59,7 @@ tutormoments = [
 ]
 tutormoments_build = [
     "moments.schema.json",
+    "annotation_viewer/template.html",
     "prompts/classify/labeller/*.txt",
     "prompts/classify/situation_labeller/*.md",
     "prompts/trait_generator/*.txt",

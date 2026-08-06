@@ -4,6 +4,7 @@ Subcommands:
   dataset build-ground-truth  raw human annotations -> per-conversation GT JSON
   dataset build               GT + transcripts + ids -> release dir with moments.jsonl
   dataset validate            check a release dir's moments.jsonl against its manifest
+  viewer                      annotation review site (maintainer-local, never committed)
 
 These create or package the benchmark; the runtime `tutormoments` CLI only
 consumes released datasets.
@@ -32,6 +33,53 @@ def _build_parser() -> argparse.ArgumentParser:
     )
     subs = parser.add_subparsers(dest="command")
     log_parent = logging_args_parent()
+
+    # -- viewer ----------------------------------------------------------------
+    viewer_p = subs.add_parser(
+        "viewer",
+        help="Build the annotation review site (contains real names; keep it out of git)",
+        parents=[log_parent],
+    )
+    viewer_p.add_argument(
+        "--annotations",
+        default="data/v2_annotations/source/step_up_annotations.jsonl",
+        metavar="FILE",
+        help="Raw annotations JSONL (default: %(default)s)",
+    )
+    viewer_p.add_argument(
+        "--transcripts",
+        default="data/v2_annotations/source/step_up_v2_transcripts.jsonl",
+        metavar="FILE",
+        help="v2 transcripts JSONL, whose rows carry the index moments are numbered "
+        "against (default: %(default)s)",
+    )
+    viewer_p.add_argument(
+        "--out",
+        default="data/annotation_viewer/index.html",
+        metavar="FILE",
+        help="Where to write the page; must stay under data/ (default: %(default)s)",
+    )
+    viewer_p.add_argument(
+        "--max-turns",
+        type=int,
+        default=None,
+        dest="max_turns",
+        metavar="N",
+        help="Cap the rows shown per moment, windowed on the cut row (default: no cap)",
+    )
+    viewer_p.add_argument(
+        "--pairs-only",
+        action="store_true",
+        dest="pairs_only",
+        help="Only moments reviewed twice; omit the majority that had a single pass",
+    )
+    viewer_p.add_argument(
+        "--exclude",
+        nargs="*",
+        default=[],
+        metavar="ANNOTATOR",
+        help="Annotator ids whose annotations are dropped",
+    )
 
     dataset_p = subs.add_parser(
         "dataset",
@@ -258,12 +306,39 @@ def _cmd_build_ground_truth(args, command_line: str) -> None:
         )
 
 
+def _cmd_viewer(args) -> None:
+    """Build the annotation review site.
+
+    The page embeds real annotator names and student transcript text, so it is written
+    under data/ (gitignored) and must never be committed or shared outside the team.
+    """
+    from tutormoments_build.annotation_viewer import build_site
+
+    payload = build_site(
+        args.annotations,
+        args.transcripts,
+        args.out,
+        max_turns=args.max_turns,
+        excluded=set(args.exclude),
+        include_single_pass=not args.pairs_only,
+    )
+    logger.info(
+        "Wrote %s: %d cases over %d moments, %d annotators",
+        args.out,
+        len(payload["cases"]),
+        len(payload["moments"]),
+        len(payload["annotators"]),
+    )
+
+
 def main(argv=None) -> None:
     """Parse args and dispatch subcommand."""
     parser = _build_parser()
     args = parser.parse_args(argv)
 
-    if args.command != "dataset" or not getattr(args, "dataset_command", None):
+    if args.command is None or (
+        args.command == "dataset" and not getattr(args, "dataset_command", None)
+    ):
         parser.print_help()
         sys.exit(0 if args.command is None else 1)
 
@@ -272,6 +347,10 @@ def main(argv=None) -> None:
         argv if argv is not None else sys.argv[1:]
     )
     logger.info("%s", command_line)
+
+    if args.command == "viewer":
+        _cmd_viewer(args)
+        return
 
     from tutormoments_build.moments_build import (
         _cli_build,

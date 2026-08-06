@@ -1,0 +1,342 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Annotation review</title>
+<style>
+  :root {
+    --bg: #fbfbfa; --fg: #1c1c1a; --muted: #6b6b66; --line: #dcdcd6;
+    --card: #ffffff; --agree: #2f7d4f; --differ: #b3541e; --none: #6b6b66;
+    --mark: #f0efe9;
+  }
+  @media (prefers-color-scheme: dark) {
+    :root {
+      --bg: #16171a; --fg: #e6e6e3; --muted: #9a9a94; --line: #33343a;
+      --card: #1d1e22; --agree: #6cc08b; --differ: #e39264; --none: #9a9a94;
+      --mark: #26272c;
+    }
+  }
+  * { box-sizing: border-box; }
+  body {
+    margin: 0; background: var(--bg); color: var(--fg);
+    font: 15px/1.55 ui-sans-serif, -apple-system, "Segoe UI", system-ui, sans-serif;
+  }
+  header { padding: 22px 24px 0; max-width: 1180px; margin: 0 auto; }
+  h1 { font-size: 20px; margin: 0 0 4px; font-weight: 600; }
+  .sub { color: var(--muted); font-size: 13px; margin-bottom: 14px; }
+  .warn {
+    border: 1px solid var(--line); border-left: 3px solid var(--differ);
+    background: var(--card); padding: 9px 13px; border-radius: 5px;
+    font-size: 13px; color: var(--muted); margin-bottom: 16px;
+  }
+  .controls {
+    display: flex; flex-wrap: wrap; gap: 14px; align-items: flex-end;
+    padding-bottom: 14px; border-bottom: 1px solid var(--line);
+  }
+  .control { display: flex; flex-direction: column; gap: 4px; }
+  label { font-size: 11px; text-transform: uppercase; letter-spacing: .06em; color: var(--muted); }
+  select {
+    font: inherit; font-size: 14px; padding: 5px 9px; border-radius: 5px;
+    border: 1px solid var(--line); background: var(--card); color: var(--fg); min-width: 168px;
+  }
+  main { max-width: 1180px; margin: 0 auto; padding: 0 24px 60px; }
+  .count { color: var(--muted); font-size: 13px; padding: 16px 0 4px; }
+  .case { border: 1px solid var(--line); border-radius: 7px; background: var(--card);
+          margin: 16px 0; overflow: hidden; }
+  .case > h2 {
+    margin: 0; padding: 11px 15px; font-size: 13px; font-weight: 600;
+    border-bottom: 1px solid var(--line); display: flex; flex-wrap: wrap;
+    gap: 10px; align-items: baseline;
+  }
+  .tag { font-size: 11px; letter-spacing: .05em; text-transform: uppercase; font-weight: 600; }
+  .tag.agreement { color: var(--agree); }
+  .tag.disagreement { color: var(--differ); }
+  .tag.none { color: var(--none); }
+  code { font-family: ui-monospace, SFMono-Regular, Menlo, monospace; font-size: 12px; }
+  .meta { color: var(--muted); font-weight: 400; }
+  details { border-bottom: 1px solid var(--line); }
+  summary { padding: 9px 15px; cursor: pointer; font-size: 13px; color: var(--muted); }
+  .turns { max-height: 21em; overflow-y: auto; padding: 4px 15px 12px; }
+  .turn { display: flex; gap: 10px; padding: 2px 0; font-size: 14px; }
+  .turn .n { color: var(--muted); min-width: 3.2em; text-align: right;
+             font-family: ui-monospace, Menlo, monospace; font-size: 12px; padding-top: 2px; }
+  .turn .role { min-width: 4.6em; color: var(--muted); }
+  .turn.cut { background: var(--mark); font-weight: 600; margin: 0 -15px; padding: 2px 15px; }
+  .turn.enrichment { color: var(--muted); font-style: italic; }
+  .elided { color: var(--muted); font-style: italic; font-size: 13px; padding: 3px 0 3px 4.2em; }
+  .sides { display: grid; grid-template-columns: 1fr 1fr; gap: 1px; background: var(--line); }
+  .sides.single { grid-template-columns: 1fr; }
+  @media (max-width: 760px) { .sides { grid-template-columns: 1fr; } }
+  .side { background: var(--card); padding: 13px 15px; }
+  .who { font-weight: 600; margin-bottom: 9px; }
+  .who .role { color: var(--muted); font-weight: 400; font-size: 13px; }
+  .field { display: flex; gap: 8px; font-size: 14px; padding: 1px 0; }
+  .field .k { color: var(--muted); min-width: 12.5em; }
+  .field .v.differ { color: var(--differ); font-weight: 600; }
+  .group { margin-top: 8px; font-size: 13.5px; }
+  .group .caption { color: var(--muted); font-size: 12px; }
+  .box.only { color: var(--differ); }
+  .text { margin-top: 10px; font-size: 14px; white-space: pre-wrap; }
+  .empty { color: var(--muted); font-style: italic; }
+  .empty-state { color: var(--muted); padding: 30px 2px; font-size: 14px; }
+  .pager { display: flex; gap: 10px; align-items: center; justify-content: center;
+           padding: 26px 0 0; }
+  button {
+    font: inherit; font-size: 14px; padding: 6px 14px; border-radius: 5px;
+    border: 1px solid var(--line); background: var(--card); color: var(--fg); cursor: pointer;
+  }
+  button:disabled { opacity: .4; cursor: default; }
+</style>
+</head>
+<body>
+<header>
+  <h1>Annotation review</h1>
+  <div class="sub" id="sub"></div>
+  <div class="warn">
+    Contains real annotator names and student transcript text. Keep it out of git and do not
+    share it outside the annotation team.
+  </div>
+  <div class="controls">
+    <div class="control">
+      <label for="annotator">Annotator</label>
+      <select id="annotator"></select>
+    </div>
+    <div class="control">
+      <label for="construct">Construct</label>
+      <select id="construct">
+        <option value="">All three</option>
+        <option value="situation">Situation</option>
+        <option value="action">Action</option>
+        <option value="result">Result</option>
+      </select>
+    </div>
+    <div class="control">
+      <label for="action">Action recorded</label>
+      <select id="action"></select>
+    </div>
+    <div class="control">
+      <label for="outcome">Outcome</label>
+      <select id="outcome">
+        <option value="all">Everything</option>
+        <option value="reviewed">Reviewed twice</option>
+        <option value="agreement">Agreements only</option>
+        <option value="disagreement">Disagreements only</option>
+        <option value="no second judgment">No second judgment</option>
+        <option value="single pass">Single pass (never reviewed)</option>
+      </select>
+    </div>
+  </div>
+</header>
+<main>
+  <div class="count" id="count"></div>
+  <div id="cases"></div>
+  <div class="pager">
+    <button id="prev">Previous</button>
+    <span id="page"></span>
+    <button id="next">Next</button>
+  </div>
+</main>
+
+<script id="data" type="application/json">__VIEWER_DATA__</script>
+<script>
+const DATA = JSON.parse(document.getElementById("data").textContent);
+const PAGE = DATA.page_size;
+const $ = (id) => document.getElementById(id);
+let page = 0;
+
+const pretty = (v) => v === null || v === undefined || v === ""
+  ? "—" : String(v).replace(/_/g, " ");
+
+const annotatorSelect = $("annotator");
+annotatorSelect.append(new Option("Everyone", ""));
+for (const name of DATA.annotators) annotatorSelect.append(new Option(name, name));
+
+// Action values, grouped by the field they came from: "unclear" means different things under
+// scaffolding and rigor, so the group heading is what tells them apart.
+const actionSelect = $("action");
+actionSelect.append(new Option("Any", ""));
+for (const group of DATA.action_filters) {
+  const optgroup = document.createElement("optgroup");
+  optgroup.label = group.caption;
+  for (const o of group.options) {
+    optgroup.append(new Option(`${o.label} (${o.count})`, o.tag));
+  }
+  actionSelect.append(optgroup);
+}
+
+function matchesOutcome(c, outcome) {
+  if (outcome === "all") return true;
+  // "Reviewed twice" is every case that had a second pass at all, including the ones the
+  // reviewer threw out -- the moment was still looked at twice.
+  if (outcome === "reviewed") return c.outcome !== "single pass";
+  return c.outcome === outcome;
+}
+
+function filtered(ignoreOutcome) {
+  const who = annotatorSelect.value;
+  const construct = $("construct").value;
+  const outcome = $("outcome").value;
+  const tag = actionSelect.value;
+  return DATA.cases.filter((c) =>
+    (!who || c.first.annotator === who || (c.second && c.second.annotator === who)) &&
+    (!construct || c.construct === construct) &&
+    // Tags sit on the moment, so an action filter keeps that moment's situation and result
+    // panels too unless the construct filter narrows them away.
+    (!tag || DATA.moments[c.moment_id].tags.includes(tag)) &&
+    (ignoreOutcome || matchesOutcome(c, outcome)));
+}
+
+function el(tag, cls, text) {
+  const node = document.createElement(tag);
+  if (cls) node.className = cls;
+  if (text !== undefined) node.textContent = text;
+  return node;
+}
+
+function transcript(moment) {
+  const box = el("details");
+  box.open = true;
+  const span = `rows ${moment.start_turn}–${moment.end_turn}, cut at ${moment.cut_turn}`;
+  box.append(el("summary", null, `Transcript · ${span}`));
+  const turns = el("div", "turns");
+  if (!moment.found) {
+    turns.append(el("div", "elided", "This transcript is not in the transcripts file."));
+  }
+  if (moment.elided_before) {
+    turns.append(el("div", "elided", `… ${moment.elided_before} earlier rows`));
+  }
+  for (const t of moment.turns) {
+    const row = el("div", "turn" + (t.cut ? " cut" : "") + (t.enrichment ? " enrichment" : ""));
+    row.append(el("span", "n", String(t.n)));
+    row.append(el("span", "role", t.role));
+    row.append(el("span", "t", t.text + (t.cut ? "   ← cut" : "")));
+    turns.append(row);
+  }
+  if (moment.elided_after) {
+    turns.append(el("div", "elided", `… ${moment.elided_after} later rows`));
+  }
+  if (moment.missing) {
+    turns.append(el("div", "elided",
+      `… ${moment.missing} rows of this span are not in the transcript`));
+  }
+  box.append(turns);
+  return box;
+}
+
+function side(data, roleName) {
+  const box = el("div", "side");
+  const who = el("div", "who", data.annotator + " ");
+  who.append(el("span", "role", roleName));
+  box.append(who);
+  if (!data.judged) {
+    box.append(el("div", "text empty",
+      "Recorded no judgment for this construct — this pass threw the moment out."));
+    return box;
+  }
+  for (const f of data.fields) {
+    const row = el("div", "field");
+    row.append(el("span", "k", f.name.replace(/_/g, " ")));
+    row.append(el("span", f.agrees ? "v" : "v differ", pretty(f.value)));
+    box.append(row);
+  }
+  for (const g of data.multi) {
+    const group = el("div", "group");
+    group.append(el("div", "caption", g.caption));
+    for (const b of g.boxes) {
+      const line = el("div", b.shared ? "box" : "box only",
+        (b.shared ? "= " : "+ ") + b.box.replace(/_/g, " "));
+      group.append(line);
+    }
+    box.append(group);
+  }
+  box.append(data.text
+    ? el("div", "text", data.text)
+    : el("div", "text empty", "no comment"));
+  return box;
+}
+
+// Spans run to 143 rows, so an uncapped excerpt opens far from the cut unless it is scrolled
+// there. Scrolling the container directly rather than scrollIntoView, which would drag the
+// whole page along with it.
+function focusCutRows() {
+  for (const container of document.querySelectorAll(".turns")) {
+    const cut = container.querySelector(".turn.cut");
+    if (!cut) continue;
+    const box = container.getBoundingClientRect();
+    const row = cut.getBoundingClientRect();
+    container.scrollTop += (row.top - box.top) - (box.height - row.height) / 2;
+  }
+}
+
+function render() {
+  const cases = filtered();
+  const pages = Math.max(1, Math.ceil(cases.length / PAGE));
+  page = Math.min(page, pages - 1);
+
+  const tally = (o) => cases.filter((c) => c.outcome === o).length;
+  const parts = [];
+  if (tally("agreement")) parts.push(`${tally("agreement")} agree`);
+  if (tally("disagreement")) parts.push(`${tally("disagreement")} disagree`);
+  if (tally("no second judgment")) parts.push(`${tally("no second judgment")} thrown out on review`);
+  if (tally("single pass")) parts.push(`${tally("single pass")} never reviewed`);
+  $("count").textContent = `${cases.length} case${cases.length === 1 ? "" : "s"}`
+    + (parts.length ? " — " + parts.join(", ") : "");
+
+  const list = $("cases");
+  list.textContent = "";
+  if (!cases.length) {
+    const wider = filtered(true);
+    const note = el("div", "empty-state");
+    if (wider.length) {
+      const kinds = [...new Set(wider.map((c) => c.outcome))].sort().join(", ");
+      const who = annotatorSelect.value;
+      note.textContent =
+        `Nothing here with this outcome. ${who || "These filters"}` +
+        `${who ? " has" : " cover"} ${wider.length} case${wider.length === 1 ? "" : "s"} ` +
+        `(${kinds}) — change the Outcome filter to see ${wider.length === 1 ? "it" : "them"}.`;
+    } else {
+      note.textContent = "No cases match these filters.";
+    }
+    list.append(note);
+  }
+  for (const c of cases.slice(page * PAGE, page * PAGE + PAGE)) {
+    const moment = DATA.moments[c.moment_id];
+    const card = el("div", "case");
+    const head = el("h2");
+    const tone = { agreement: "agreement", disagreement: "disagreement" }[c.outcome] || "none";
+    head.append(el("span", "tag " + tone, c.construct + " · " + c.outcome));
+    head.append(el("code", null, c.moment_id.slice(0, 8)));
+    head.append(el("span", "meta", `cut by ${moment.created_by}`));
+    card.append(head);
+    card.append(transcript(moment));
+    const sides = el("div", c.second ? "sides" : "sides single");
+    sides.append(side(c.first, c.second ? "first pass" : "only pass"));
+    if (c.second) sides.append(side(c.second, "second pass"));
+    card.append(sides);
+    list.append(card);
+  }
+
+  focusCutRows();
+  $("page").textContent = `Page ${page + 1} of ${pages}`;
+  $("prev").disabled = page === 0;
+  $("next").disabled = page >= pages - 1;
+  window.scrollTo({ top: 0 });
+}
+
+for (const id of ["annotator", "construct", "action", "outcome"]) {
+  $(id).addEventListener("change", () => { page = 0; render(); });
+}
+$("prev").addEventListener("click", () => { page--; render(); });
+$("next").addEventListener("click", () => { page++; render(); });
+
+const reviewedMoments = new Set(
+  DATA.cases.filter((c) => c.outcome !== "single pass").map((c) => c.moment_id)).size;
+$("sub").textContent =
+  `${Object.keys(DATA.moments).length} moments (${reviewedMoments} reviewed twice) · ` +
+  `${DATA.cases.length} cases across situation, action and result · ` +
+  `${DATA.annotators.length} annotators · ${PAGE} per page`;
+render();
+</script>
+</body>
+</html>
