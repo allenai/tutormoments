@@ -61,6 +61,4 @@ new models to the `MODELS` list in the script (plus `ACTION_CSV_MODELS`, and `MO
 
 ## TODOs when things go live
 
-- Dataset pill in `index.html` — link when TutorMoments-Transcripts-Preview is published
-- Blog pill in `index.html` — link when the Ai2 blog post is live
 - `static/data/latency.json` — latencies are currently read off the paper's Figure 7 (±0.2s); the refresh script replaces them with exact values from a checkout with results
