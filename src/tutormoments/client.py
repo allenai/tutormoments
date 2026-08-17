@@ -90,10 +90,156 @@ class ModelResponse:
     # Wall-clock seconds from the start of the successful generate() attempt
     # to the response landing. Stamped by ModelClient.generate(). Retries
     # are not included (they're bookkeeping, not model reasoning time).
+    # Unaffected by streaming, so runs before and after the streaming work
+    # remain comparable -- the streaming metrics are additive, on `timing`.
     latency_seconds: float | None = None
+    # Populated only on streamed calls (generate(stream=True)). Shape:
+    #   {ttfc_seconds, ttft_seconds, ttlt_seconds, output_tokens,
+    #    cache_read_input_tokens, output_tps}
+    # See _StreamTimer for what each anchor means.
+    timing: dict | None = None
 
 
 TOGETHER_BASE_URL = "https://api.together.xyz/v1"
+
+
+# ===================================================================
+# Streaming latency instrumentation
+# ===================================================================
+
+
+class _StreamTimer:
+    """Stamps TTFC / TTFT / TTLT as stream deltas arrive.
+
+    The three anchors answer different questions:
+
+    - ``ttfc`` -- first chunk of *any* kind, reasoning included. Diagnostic:
+      the gap between ttfc and ttft is how long the model spent thinking.
+    - ``ttft`` -- first *visible answer* token. This is what a student
+      actually sees appear, and the reason we don't use the Artificial
+      Analysis definition (first token of any kind): on the OpenAI path
+      reasoning is never streamed, so first-token-of-any-kind is not
+      computable uniformly across our providers.
+    - ``ttlt`` -- last *visible* delta, i.e. when the student can reply. It is
+      deliberately not iterator exhaustion: the trailing usage-only chunk and
+      connection teardown are not part of anyone's wait.
+
+    Call exactly one of chunk()/visible() per stream event: each reads the
+    clock, so calling both would attribute two timestamps to one arrival.
+
+    The clock is injectable so tests can assert exact values. It is resolved
+    at construction rather than bound as a default argument so that patching
+    ``tutormoments.client.time.monotonic`` reaches it.
+    """
+
+    def __init__(self, clock=None):
+        self._clock = clock or time.monotonic
+        self.t0 = self._clock()
+        self._ttfc: float | None = None
+        self._ttft: float | None = None
+        self._ttlt: float | None = None
+
+    def chunk(self) -> None:
+        """Record that some chunk arrived (thinking, usage, or content)."""
+        if self._ttfc is None:
+            self._ttfc = self._clock() - self.t0
+
+    def visible(self) -> None:
+        """Record that a visible answer delta arrived."""
+        elapsed = self._clock() - self.t0
+        if self._ttfc is None:
+            self._ttfc = elapsed
+        if self._ttft is None:
+            self._ttft = elapsed
+        self._ttlt = elapsed
+
+    def as_dict(
+        self,
+        *,
+        output_tokens: int | None = None,
+        cache_read_input_tokens: int | None = None,
+    ) -> dict:
+        """Build the timing block recorded on ModelResponse.timing.
+
+        output_tps spans ttfc -> ttlt, not ttft -> ttlt. `output_tokens`
+        counts everything the model generated, thinking included, so the
+        window has to start when generation started rather than when visible
+        text did. Measuring thinking-inclusive tokens over a text-only window
+        overstates throughput several-fold on thinking models (a live Haiku
+        call reported 870 tok/s that way). For non-thinking models the two
+        anchors nearly coincide, so this changes little.
+        """
+        tps = None
+        if (
+            output_tokens
+            and self._ttfc is not None
+            and self._ttlt is not None
+            and self._ttlt > self._ttfc
+        ):
+            tps = output_tokens / (self._ttlt - self._ttfc)
+        return {
+            "ttfc_seconds": self._ttfc,
+            "ttft_seconds": self._ttft,
+            "ttlt_seconds": self._ttlt,
+            "output_tokens": output_tokens,
+            "cache_read_input_tokens": cache_read_input_tokens,
+            "output_tps": tps,
+        }
+
+
+class _InlineThinkGate:
+    """Defer TTFT past an inline ``<think>...</think>`` block.
+
+    Together-hosted open-weight reasoners (DeepSeek-V4-Pro, Kimi) emit their
+    chain of thought inside the ordinary content stream rather than in a
+    separate block the way Anthropic and Gemini do. Without this gate the
+    first content delta would be counted as the first visible token, making
+    those models look far faster to first token than a student would ever
+    experience.
+
+    Feed every content delta to :meth:`visible`; it returns True from the
+    first delta that is genuinely visible answer text.
+    """
+
+    _OPEN = "<think>"
+    _CLOSE = "</think>"
+
+    def __init__(self):
+        self._buf = ""
+        self._in_think: bool | None = None  # None until the stream reveals it
+        self._done = False
+
+    def visible(self, piece: str) -> bool:
+        if self._done:
+            return True
+        self._buf += piece
+
+        if self._in_think is None:
+            stripped = self._buf.lstrip()
+            if not stripped:
+                return False
+            head = stripped[: len(self._OPEN)]
+            if self._OPEN.startswith(head):
+                # Still consistent with an opening tag -- wait for enough
+                # characters to decide rather than guessing either way.
+                if len(head) < len(self._OPEN):
+                    return False
+                self._in_think = True
+            else:
+                self._in_think = False
+
+        if not self._in_think:
+            self._done = True
+            return True
+
+        idx = self._buf.find(self._CLOSE)
+        if idx == -1:
+            return False
+        # Closing tag seen; the first non-blank text after it is visible.
+        if self._buf[idx + len(self._CLOSE) :].strip():
+            self._done = True
+            return True
+        return False
 
 
 # Adaptive thinking ({"type": "adaptive"}) is the modern default and the shape
@@ -198,12 +344,20 @@ class ModelClient:
         *,
         output_schema: dict | None = None,
         cacheable_prefix: str | None = None,
+        stream: bool = False,
     ) -> "ModelResponse":
         """Generate a response from the model with retry logic.
 
         output_schema: optional JSON Schema for structured output. When set,
         the Anthropic path constrains the response via output_config.format
         (json_schema). Only supported on the anthropic provider today.
+
+        stream: when True, consume the response as a token stream and record
+        per-call TTFT/TTLT on ModelResponse.timing. Text and usage are
+        identical to the non-streamed path -- streaming changes how the
+        response is transported, not how it is sampled. Only the conversation
+        path (tutor/student turns) streams; the scorer, taxonomy and
+        ground-truth paths stay non-streamed so their behaviour is unchanged.
         """
         from tutormoments.config import get_retry_config
 
@@ -233,6 +387,7 @@ class ModelClient:
                         thinking_budget,
                         images,
                         cacheable_prefix=cacheable_prefix,
+                        stream=stream,
                     )
                 elif self.provider == "openai":
                     resp = self._generate_openai(
@@ -245,6 +400,7 @@ class ModelClient:
                         reasoning_effort=reasoning_effort,
                         images=images,
                         cacheable_prefix=cacheable_prefix,
+                        stream=stream,
                     )
                 elif self.provider == "anthropic":
                     resp = self._generate_anthropic(
@@ -260,6 +416,7 @@ class ModelClient:
                         enable_cache=enable_cache,
                         output_schema=output_schema,
                         cacheable_prefix=cacheable_prefix,
+                        stream=stream,
                     )
                 elif self.provider == "together":
                     resp = self._generate_together(
@@ -268,11 +425,18 @@ class ModelClient:
                         max_tokens,
                         timeout,
                         cacheable_prefix=cacheable_prefix,
+                        stream=stream,
                     )
                 else:
                     raise RuntimeError(f"unknown provider {self.provider}")
                 # Stamp wall-clock latency for the successful attempt only
                 # (retries are bookkeeping, not the model's reasoning time).
+                # Deliberately unchanged by streaming: this field predates the
+                # streaming work and feeds the paper's latency figure, so it
+                # keeps meaning exactly what it always did -- end-to-end
+                # seconds for the call. The streaming metrics are additive and
+                # live on `timing`; overriding this one with TTLT would
+                # silently redefine a published field.
                 resp.latency_seconds = time.monotonic() - call_t0
                 return resp
             except Exception as e:
@@ -304,6 +468,7 @@ class ModelClient:
         thinking_budget=0,
         images=None,
         cacheable_prefix: str | None = None,
+        stream: bool = False,
     ):
         """Gemini API call via google-genai SDK."""
         config = {
@@ -339,6 +504,9 @@ class ModelClient:
         else:
             contents = effective_prompt
 
+        if stream:
+            return self._stream_gemini(contents, config)
+
         response = self._client.models.generate_content(
             model=f"models/{self.model}",
             contents=contents,
@@ -354,6 +522,48 @@ class ModelClient:
         }
         return ModelResponse(text=text, usage=usage)
 
+    def _stream_gemini(self, contents, config):
+        """Stream a Gemini response, timing first-visible and last deltas.
+
+        Gemini marks reasoning parts with ``part.thought`` -- those advance
+        ttfc but never ttft, so TTFT reflects the first token a student sees.
+        """
+        timer = _StreamTimer()
+        pieces: list[str] = []
+        usage_meta = None
+
+        for chunk in self._client.models.generate_content_stream(
+            model=f"models/{self.model}",
+            contents=contents,
+            config=config,
+        ):
+            if getattr(chunk, "usage_metadata", None) is not None:
+                usage_meta = chunk.usage_metadata
+            saw_visible = False
+            for part in _gemini_stream_parts(chunk):
+                if getattr(part, "thought", False):
+                    continue
+                text = getattr(part, "text", None)
+                if text:
+                    timer.visible()
+                    pieces.append(text)
+                    saw_visible = True
+            if not saw_visible:
+                timer.chunk()
+
+        usage = {
+            "input_tokens": getattr(usage_meta, "prompt_token_count", 0) or 0,
+            "output_tokens": getattr(usage_meta, "candidates_token_count", 0) or 0,
+            "total_tokens": getattr(usage_meta, "total_token_count", 0) or 0,
+        }
+        return ModelResponse(
+            text="".join(pieces),
+            usage=usage,
+            # Gemini has no explicit cache wired here (the prefix is
+            # concatenated into the prompt), so cache state is unknowable.
+            timing=timer.as_dict(output_tokens=usage["output_tokens"]),
+        )
+
     def _generate_openai(
         self,
         prompt,
@@ -365,6 +575,7 @@ class ModelClient:
         reasoning_effort: str = "",
         images=None,
         cacheable_prefix: str | None = None,
+        stream: bool = False,
     ):
         """OpenAI API call via openai SDK."""
         if images:
@@ -393,6 +604,9 @@ class ModelClient:
         if reasoning_effort:
             kwargs["reasoning_effort"] = reasoning_effort
 
+        if stream:
+            return self._stream_openai_compatible(kwargs, inline_think=False)
+
         response = self._client.chat.completions.create(**kwargs)
 
         text = response.choices[0].message.content or ""
@@ -415,6 +629,7 @@ class ModelClient:
         max_tokens,
         timeout,
         cacheable_prefix: str | None = None,
+        stream: bool = False,
     ):
         """Together (open-weight) call via OpenAI-compatible chat completions.
 
@@ -434,6 +649,12 @@ class ModelClient:
         if json_mode:
             kwargs["response_format"] = {"type": "json_object"}
 
+        if stream:
+            resp = self._stream_openai_compatible(kwargs, inline_think=True)
+            if json_mode:
+                resp.text = _strip_json_fences(resp.text)
+            return resp
+
         response = self._client.chat.completions.create(**kwargs)
 
         text = response.choices[0].message.content or ""
@@ -446,6 +667,65 @@ class ModelClient:
             "total_tokens": getattr(u, "total_tokens", 0) or 0,
         }
         return ModelResponse(text=text, usage=usage)
+
+    def _stream_openai_compatible(self, kwargs: dict, *, inline_think: bool):
+        """Stream an OpenAI-compatible chat completion, timing the deltas.
+
+        Shared by the OpenAI and Together paths -- same wire protocol, one
+        difference that matters for TTFT:
+
+        - OpenAI (chat.completions) never streams reasoning tokens, so the
+          first content delta is both ttfc and ttft.
+        - Together's open-weight reasoners emit ``<think>...</think>`` inline
+          in the content stream, so `inline_think=True` gates ttft past the
+          closing tag (see _InlineThinkGate).
+
+        `include_usage` support is inconsistent on Together; when the final
+        usage chunk never arrives we record zeros rather than guessing, and
+        output_tps is simply omitted.
+        """
+        kwargs = {
+            **kwargs,
+            "stream": True,
+            "stream_options": {"include_usage": True},
+        }
+        timer = _StreamTimer()
+        gate = _InlineThinkGate() if inline_think else None
+        pieces: list[str] = []
+        usage_obj = None
+
+        for chunk in self._client.chat.completions.create(**kwargs):
+            if getattr(chunk, "usage", None) is not None:
+                usage_obj = chunk.usage
+            # The final usage-only chunk carries no choices.
+            choices = getattr(chunk, "choices", None)
+            delta = getattr(choices[0], "delta", None) if choices else None
+            piece = getattr(delta, "content", None) if delta is not None else None
+            if piece and (gate is None or gate.visible(piece)):
+                timer.visible()
+            else:
+                timer.chunk()
+            if piece:
+                pieces.append(piece)
+
+        cached = 0
+        details = getattr(usage_obj, "prompt_tokens_details", None)
+        if details is not None:
+            cached = getattr(details, "cached_tokens", 0) or 0
+        usage = {
+            "input_tokens": getattr(usage_obj, "prompt_tokens", 0) or 0,
+            "output_tokens": getattr(usage_obj, "completion_tokens", 0) or 0,
+            "total_tokens": getattr(usage_obj, "total_tokens", 0) or 0,
+            "cached_tokens": cached,
+        }
+        return ModelResponse(
+            text="".join(pieces),
+            usage=usage,
+            timing=timer.as_dict(
+                output_tokens=usage["output_tokens"] or None,
+                cache_read_input_tokens=cached,
+            ),
+        )
 
     def _generate_anthropic(
         self,
@@ -461,6 +741,7 @@ class ModelClient:
         enable_cache=False,
         output_schema: dict | None = None,
         cacheable_prefix: str | None = None,
+        stream: bool = False,
     ):
         """Anthropic API call via anthropic SDK."""
         system_parts = []
@@ -540,6 +821,9 @@ class ModelClient:
         if output_config:
             kwargs["extra_body"] = {"output_config": output_config}
 
+        if stream:
+            return self._stream_anthropic(kwargs, json_mode=json_mode)
+
         response = self._client.messages.create(**kwargs)
 
         # Extract text from content blocks (skip thinking blocks)
@@ -548,24 +832,109 @@ class ModelClient:
         if json_mode:
             text = _strip_json_fences(text)
 
-        usage = {
-            "input_tokens": response.usage.input_tokens or 0,
-            "output_tokens": response.usage.output_tokens or 0,
-            "total_tokens": (response.usage.input_tokens or 0)
-            + (response.usage.output_tokens or 0),
-            "cache_creation_input_tokens": getattr(
-                response.usage, "cache_creation_input_tokens", 0
-            )
-            or 0,
-            "cache_read_input_tokens": getattr(
-                response.usage, "cache_read_input_tokens", 0
-            )
-            or 0,
-        }
+        usage = _anthropic_usage(response.usage)
         return ModelResponse(text=text, usage=usage)
+
+    def _stream_anthropic(self, kwargs: dict, *, json_mode: bool):
+        """Stream an Anthropic message, timing first-visible and last deltas.
+
+        Anthropic streams thinking and text as separate content blocks, so we
+        track each block's type from its ``content_block_start`` and count a
+        delta as visible only inside a ``text`` block. Thinking deltas advance
+        ttfc but never ttft -- the student sees nothing while the model thinks.
+
+        Text and usage come from ``get_final_message()``, which accumulates
+        exactly what the non-streamed path would have returned.
+        """
+        timer = _StreamTimer()
+        block_types: dict[int, str] = {}
+
+        with self._client.messages.stream(**kwargs) as stream:
+            for event in stream:
+                etype = getattr(event, "type", None)
+                if etype == "content_block_start":
+                    block_types[event.index] = getattr(event.content_block, "type", "")
+                    timer.chunk()
+                elif (
+                    etype == "content_block_delta"
+                    and block_types.get(event.index) == "text"
+                ):
+                    timer.visible()
+                else:
+                    timer.chunk()
+            message = stream.get_final_message()
+
+        text = _extract_anthropic_text(message.content)
+        if json_mode:
+            text = _strip_json_fences(text)
+
+        usage = _anthropic_usage(message.usage)
+        return ModelResponse(
+            text=text,
+            usage=usage,
+            timing=timer.as_dict(
+                output_tokens=usage["output_tokens"] or None,
+                cache_read_input_tokens=usage["cache_read_input_tokens"],
+            ),
+        )
 
     def __repr__(self):
         return f"ModelClient(model='{self.model}', provider='{self.provider}')"
+
+
+# ===================================================================
+# Shared client cache (conversation path)
+# ===================================================================
+
+_CLIENT_CACHE: dict[str, "ModelClient"] = {}
+
+
+def get_client(model: str) -> "ModelClient":
+    """Return a shared ModelClient for `model`, constructing it once.
+
+    Conversations previously built a fresh client per moment, so each moment's
+    first request paid a fresh TLS handshake. That cost lands squarely on the
+    conversation's *first* turn -- the cold-cache turn -- systematically
+    inflating exactly the latency figure the probe reports, by an amount that
+    has nothing to do with the model. Reusing one client per model keeps the
+    SDK's HTTP connection pool warm across moments.
+
+    Results are unaffected: a ModelClient holds no per-call state, and the
+    underlying SDK clients are thread-safe, so the replay pool can share one.
+    Scoring and taxonomy still construct their own -- they are one-shot per
+    run and not latency-measured.
+    """
+    client = _CLIENT_CACHE.get(model)
+    if client is None:
+        client = ModelClient(model)
+        _CLIENT_CACHE[model] = client
+    return client
+
+
+def _reset_client_cache() -> None:
+    """Clear the shared client cache (for testing)."""
+    _CLIENT_CACHE.clear()
+
+
+def resolve_max_tokens(client: "ModelClient", max_tokens: int) -> int:
+    """Resolve ``max_tokens <= 0`` to the model's maximum output.
+
+    Zero means "no limit we impose" -- the benchmark must not cap tutor
+    output. A cap that a thinking model can exhaust before emitting any
+    visible text turns that turn into an empty response, which
+    run_conversation then records as "..." and the scorer grades as if the
+    tutor said it. That penalises thinking models for a harness setting.
+
+    Takes the client rather than a model string so it reuses the provider the
+    client already resolved at construction, instead of re-parsing the name.
+    """
+    if max_tokens <= 0:
+        max_tokens = MAX_OUTPUT_TOKENS.get(client.provider, 8192)
+    model = getattr(client, "model", "") or ""
+    for prefix, cap in _ANTHROPIC_MAX_OUTPUT_CAP.items():
+        if model.startswith(prefix):
+            return min(max_tokens, cap)
+    return max_tokens
 
 
 # Provider-specific max output token limits
@@ -577,11 +946,14 @@ MAX_OUTPUT_TOKENS = {
 }
 
 
-# Per-model max output token caps (from the model catalog).
-# Requests above the cap are rejected by the API. Keys are matched by startswith().
+# Per-model max output token caps. Requests above the cap are rejected by the
+# API, so this clamps rather than lets the call fail. Keys match by startswith().
+# Verified against the Models API (`client.models.retrieve(id).max_tokens`) on
+# 2026-08-17; re-check there rather than trusting this table if a model 400s on
+# max_tokens. Sonnet 4.6 was previously listed at 64000 and is now 128000, i.e.
+# the provider table's default -- no entry needed.
 _ANTHROPIC_MAX_OUTPUT_CAP = {
     "claude-haiku-4-5": 64000,
-    "claude-sonnet-4-6": 64000,
 }
 
 
@@ -612,6 +984,38 @@ def _strip_json_fences(text: str) -> str:
         stripped = re.sub(r"^```(?:json)?\s*\n?", "", stripped)
         stripped = re.sub(r"\n?```\s*$", "", stripped)
     return stripped.strip()
+
+
+def _anthropic_usage(usage) -> dict:
+    """Normalize an Anthropic usage object into the shared usage dict.
+
+    Shared by the streamed and non-streamed paths so both report identically.
+    """
+    input_tokens = usage.input_tokens or 0
+    output_tokens = usage.output_tokens or 0
+    return {
+        "input_tokens": input_tokens,
+        "output_tokens": output_tokens,
+        "total_tokens": input_tokens + output_tokens,
+        "cache_creation_input_tokens": getattr(usage, "cache_creation_input_tokens", 0)
+        or 0,
+        "cache_read_input_tokens": getattr(usage, "cache_read_input_tokens", 0) or 0,
+    }
+
+
+def _gemini_stream_parts(chunk):
+    """Yield content parts from a Gemini stream chunk.
+
+    Chunks late in a stream can carry usage metadata with no candidates, so
+    every level is guarded rather than indexed.
+    """
+    candidates = getattr(chunk, "candidates", None) or []
+    if not candidates:
+        return []
+    content = getattr(candidates[0], "content", None)
+    if content is None:
+        return []
+    return getattr(content, "parts", None) or []
 
 
 def _extract_anthropic_text(content) -> str:

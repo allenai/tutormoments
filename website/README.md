@@ -62,3 +62,4 @@ new models to the `MODELS` list in the script (plus `ACTION_CSV_MODELS`, and `MO
 ## TODOs when things go live
 
 - `static/data/latency.json` — latencies are currently read off the paper's Figure 7 (±0.2s); the refresh script replaces them with exact values from a checkout with results
+- `latency_s` is end-to-end seconds per tutor turn, taken from benchmark runs. `ttft_s` (time to first visible token) is separate: it appears only for models that have a `tutormoments latency` probe run, because benchmark runs measure latency under `--concurrency` and are not comparable across models. Models without a probe run — and models on providers with no real prompt cache — simply have no `ttft_s` key. See `docs/latency.md` in the main repo.

@@ -99,7 +99,10 @@ def perf(bench: Path, model: str, prompt: str) -> dict | None:
 def latency(bench: Path, model: str, prompt: str, ids: set[str]) -> float | None:
     """Mean tutor latency per turn, mirroring summarize_exchanges in the repo's
     analysis/working-paper-20260630/benchmark_perf_cost.py (filter to the
-    balanced-520 ids, de-dupe by scenario_id, first wins)."""
+    balanced-520 ids, de-dupe by scenario_id, first wins).
+
+    End-to-end seconds per turn. On streamed runs this equals time-to-last-token;
+    on pre-streaming runs it is wall clock including server-side buffering."""
     needle = f"{model}_v10_{prompt}_tutor_oracle_student"
     seen: set[str] = set()
     lats: list[float] = []
@@ -117,6 +120,36 @@ def latency(bench: Path, model: str, prompt: str, ids: set[str]) -> float | None
             seen.add(sid)
             lats.extend(ex.get("tutor_latencies") or [])
     return round(statistics.mean(lats), 2) if lats else None
+
+
+def ttft(bench: Path, model: str, prompt: str) -> float | None:
+    """Warm-cache TTFT p50 from a `tutormoments latency` probe run.
+
+    Only probe runs are read. A benchmark run also records TTFT, but under
+    --concurrency, which distorts it by a model-dependent amount and makes it
+    incomparable across models -- exactly the comparison this chart invites.
+    Returns None when no probe run exists, or when the model's cache hit rate
+    is too low for a "warm" figure to mean anything (Gemini and Together have
+    no real prompt cache wired). See docs/latency.md.
+    """
+    needle = f"{model}_{prompt}_latency"
+    for run in sorted(bench.iterdir(), reverse=True):  # newest run id first
+        if not (run.is_dir() and run.name.startswith(needle)):
+            continue
+        fp = run / "latency.json"
+        if not fp.exists():
+            continue
+        try:
+            block = json.loads(fp.read_text("utf-8")).get("tutor") or {}
+        except (json.JSONDecodeError, OSError):
+            continue
+        rate = block.get("cache_hit_rate")
+        if rate is None or rate < 0.5:
+            continue
+        p50 = ((block.get("ttft") or {}).get("hit") or {}).get("p50_seconds")
+        if p50 is not None:
+            return round(p50, 2)
+    return None
 
 
 def build_benchmark_json(repo: Path) -> None:
@@ -146,15 +179,20 @@ def build_benchmark_json(repo: Path) -> None:
         lat = latency(bench, model, "scaffolding_rigor", ids)
         ea = scores["eval_aware"]
         if lat is not None:
-            lat_models.append(
-                {
-                    "id": model,
-                    "name": label,
-                    "latency_s": lat,
-                    "latency_estimated": False,
-                    "score": round((ea["scaffolding"] + ea["rigor"]) / 2, 4),
-                }
-            )
+            row = {
+                "id": model,
+                "name": label,
+                "latency_s": lat,
+                "latency_estimated": False,
+                "score": round((ea["scaffolding"] + ea["rigor"]) / 2, 4),
+            }
+            # Only present for models with a probe run; omitted rather than
+            # zero-filled so the chart can distinguish "not measured" from
+            # "fast". See docs/latency.md.
+            first_token = ttft(bench, model, "scaffolding_rigor")
+            if first_token is not None:
+                row["ttft_s"] = first_token
+            lat_models.append(row)
 
     if lb_models:
         write_json(

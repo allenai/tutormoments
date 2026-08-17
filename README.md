@@ -86,6 +86,20 @@ the dataset manifest when running from a local release dir. A run is
 reproducible from: pinned dataset revision + content hash and the resolved
 config (up to LLM sampling nondeterminism).
 
+## Latency
+
+`run` records time-to-first-token and time-to-last-token on every transcript, but those
+figures are gathered under `--concurrency` and are not comparable across models. For the
+reportable number, run the serial probe:
+
+```bash
+tutormoments latency --tutor claude-sonnet-5 --mode scaffolding_rigor
+```
+
+This writes `results/<run_id>/latency.json`. See [docs/latency.md](docs/latency.md) for what
+the metrics mean, why warm and cold cache states are reported separately, and the caveats
+that apply before quoting a number.
+
 ## Reports And Viewers
 
 Aggregate completed run summaries into leaderboard files:
@@ -274,6 +288,7 @@ tutormoments taxonomy headline --human ./human/classified.csv --lm ./lm/classifi
 ├── src/tutormoments/            installable benchmark runtime
 ├── tutormoments_build/           maintainer-only dataset construction + release tooling
 ├── analysis/                paper notebooks, plots, taxonomy figures
+├── docs/                    methodology docs (latency.md)
 ├── data/                    local datasets and release dirs, gitignored
 ├── results/                 run outputs, gitignored
 └── tests/                   tutormoments/ (runtime), tutormoments_build/, analysis/

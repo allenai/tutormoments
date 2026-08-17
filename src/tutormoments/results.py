@@ -134,6 +134,16 @@ def read_summary(run_id: str, results_root: str = "results") -> Optional[dict]:
     return _read_json(_run_dir(run_id, results_root) / "summary.json")
 
 
+def write_latency(run_id: str, block: dict, results_root: str = "results") -> None:
+    """Write ``latency.json`` for *run_id* (output of `tutormoments latency`)."""
+    _write_json(_run_dir(run_id, results_root) / "latency.json", block)
+
+
+def read_latency(run_id: str, results_root: str = "results") -> Optional[dict]:
+    """Read ``latency.json`` for *run_id*; returns ``None`` if missing."""
+    return _read_json(_run_dir(run_id, results_root) / "latency.json")
+
+
 # ---------------------------------------------------------------------------
 # Resume guard
 # ---------------------------------------------------------------------------

@@ -30,6 +30,57 @@ DEFAULT_DATASET_CONFIG = "moments"
 # release download is itself a valid --data_path directory.
 MOMENTS_FILENAME = "moments.jsonl"
 MANIFEST_FILENAME = "moments.manifest.json"
+# Frozen subsample the `tutormoments latency` probe measures over. Defined
+# here rather than in tutormoments_build so the runtime can read it without
+# importing build code (the runtime never imports build or analysis).
+PROBE_IDS_FILENAME = "latency_probe_ids.json"
+
+
+def subsample_id(ids: list[str]) -> str:
+    """Short stable hash of a latency-probe subsample.
+
+    Stamped into every latency.json. Any change to the id list yields a
+    different hash, so two measurements taken over different prompt sets are
+    visibly incomparable rather than quietly drifting.
+    """
+    canonical = json.dumps(sorted(ids), ensure_ascii=False, separators=(",", ":"))
+    return hashlib.sha256(canonical.encode("utf-8")).hexdigest()[:16]
+
+
+def read_probe_ids(release_dir: str | Path) -> list[str] | None:
+    """Read a release's frozen latency-probe id list, or None if absent.
+
+    Absent on releases predating the probe; callers fall back to the packaged
+    list (see `packaged_probe_ids`) and record which source they used rather
+    than silently substituting a different sample.
+    """
+    path = Path(release_dir) / PROBE_IDS_FILENAME
+    if not path.exists():
+        return None
+    return json.loads(path.read_text(encoding="utf-8"))
+
+
+def packaged_probe_ids() -> list[str] | None:
+    """Read the latency-probe id list shipped inside the runtime package.
+
+    The list lives here rather than in ``tutormoments_build/`` because of what
+    it *is*. ``balanced_520_ids.json`` is an input to the build -- it tells the
+    builder which moments to include, and the runtime never needs it. This
+    list is the opposite: an output the runtime reads at measurement time,
+    which the build merely relays into releases. Shipping it in the package is
+    also what makes the probe work on the default path, where moments come
+    from the published Hugging Face dataset and there is no local release
+    directory to read from.
+
+    A release that carries its own list wins over this one -- a dataset's own
+    statement about itself outranks the shipped default.
+    """
+    from tutormoments.resources import resource_text
+
+    try:
+        return json.loads(resource_text(PROBE_IDS_FILENAME))
+    except (FileNotFoundError, ModuleNotFoundError):
+        return None
 
 
 class DatasetNotFoundError(FileNotFoundError):
