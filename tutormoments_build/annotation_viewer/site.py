@@ -1,97 +1,99 @@
-"""Assemble the viewer payload and write the self-contained page."""
+"""Assemble the viewer payload and write the self-contained page.
+
+Everything the page needs is embedded in it: the transcripts of the annotated
+conversations, every pass on every moment, and the coarse axes those passes reduce to.
+Filtering, the agreement table and the distribution bars are all recomputed in the
+browser as the filters change, so the file can be opened straight off disk with no
+server behind it.
+"""
 
 import json
-from collections import Counter
+from datetime import datetime, timezone
 from pathlib import Path
 
-from tutormoments_build.annotation_viewer.cases import (
-    ACTION_FILTERS,
-    action_tags,
-    annotated_moments,
-    build_cases,
+from tutormoments_build.annotation_viewer import axes as axes_mod
+from tutormoments_build.annotation_viewer.records import (
+    annotator_roster,
+    build_moments,
+    no_key_moment_verdicts,
+    read_records,
 )
 from tutormoments_build.annotation_viewer.transcripts import (
     TranscriptIndex,
-    moment_turns,
+    locate_span,
 )
 
 TEMPLATE = Path(__file__).with_name("template.html")
 PLACEHOLDER = "__VIEWER_DATA__"
-DEFAULT_MAX_TURNS = None  # no cap; the transcript box scrolls
-PAGE_SIZE = 20
 
 
-def _read_records(path):
-    return [json.loads(line) for line in Path(path).read_text().splitlines() if line.strip()]
+def build_payload(annotations_path, transcripts_path, excluded=()):
+    """Moments, transcripts and rosters for one annotations export."""
+    records = read_records(annotations_path)
+    moments = build_moments(records, excluded)
+    verdicts = no_key_moment_verdicts(records, excluded)
 
+    wanted = {m["transcript_id"] for m in moments} | {
+        v["transcript_id"] for v in verdicts
+    }
+    index = TranscriptIndex(transcripts_path, wanted)
+    _locate(moments, index)
 
-def build_payload(annotations_path, transcripts_path, max_turns=DEFAULT_MAX_TURNS, excluded=(),
-                  include_single_pass=True):
-    """Cases plus the transcript excerpt each one is about."""
-    records = _read_records(annotations_path)
-    paired = annotated_moments(records, excluded, include_single_pass=include_single_pass)
+    transcripts = {}
+    for source in (moments, verdicts):
+        for item in source:
+            tid = item["transcript_id"]
+            entry = transcripts.get(tid)
+            if entry is None:
+                found = tid in index
+                # Only the transcripts file carries the id the annotation tool showed;
+                # the export keys moments and verdicts by transcript alone.
+                entry = transcripts[tid] = {
+                    "transcript_id": tid,
+                    "conversation_id": (index.conversation_id(tid) if found else "")
+                    or tid,
+                    "found": found,
+                    "turns": index.rows(tid) if found else [],
+                    "n_moments": 0,
+                    "n_no_key_moments": 0,
+                }
+            entry["n_moments" if source is moments else "n_no_key_moments"] += 1
 
-    index = TranscriptIndex(transcripts_path, {r["transcript_id"] for r in paired})
-
-    moments = {}
-    for r in paired:
-        moment = r["moment"]
-        turns = index.turns(r["transcript_id"]) if r["transcript_id"] in index else {}
-        shown, before, after, missing = moment_turns(turns, moment, max_turns)
-        moments[moment["id"]] = {
-            "start_turn": moment["start_turn"],
-            "end_turn": moment["end_turn"],
-            "cut_turn": moment["cut_turn"],
-            "created_by": moment["created_by"],
-            "found": bool(turns),
-            "elided_before": before,
-            "elided_after": after,
-            "missing": missing,
-            "tags": action_tags(r),
-            "turns": [
-                {**turns[n], "cut": n == moment["cut_turn"]} for n in shown
-            ],
-        }
-
-    cases = build_cases(paired)
-    annotators = sorted(
-        {c["first"]["annotator"] for c in cases}
-        | {c["second"]["annotator"] for c in cases if c["second"]}
-    )
     return {
+        "generated_at": datetime.now(timezone.utc).strftime("%Y-%m-%d %H:%M UTC"),
+        "source": {
+            "annotations": str(annotations_path),
+            "transcripts": str(transcripts_path),
+        },
+        "axes": list(axes_mod.AXES),
         "moments": moments,
-        "cases": cases,
-        "annotators": annotators,
-        "action_filters": _action_filter_options(moments),
-        "page_size": PAGE_SIZE,
-        "source": str(annotations_path),
+        "no_key_moments": verdicts,
+        "annotators": annotator_roster(moments, verdicts),
+        "transcripts": sorted(transcripts.values(), key=lambda t: t["conversation_id"]),
+        "transcripts_total": index.total,
     }
 
 
-def _action_filter_options(moments):
-    """The action values actually present, grouped for the filter, with moment counts."""
-    counts = Counter(tag for m in moments.values() for tag in m["tags"])
-    groups = []
-    for caption, field, _ in ACTION_FILTERS:
-        options = sorted(
-            (
-                {"tag": tag, "label": tag.split(":", 1)[1].replace("_", " "), "count": n}
-                for tag, n in counts.items()
-                if tag.startswith(f"{field}:")
-            ),
-            key=lambda o: (-o["count"], o["label"]),
-        )
-        if options:
-            groups.append({"caption": caption, "options": options})
-    return groups
+def _locate(moments, index):
+    """Give every span the row positions the transcript pane highlights on.
+
+    The export numbers a moment in dialogue turns; the pane draws dialogue and
+    enrichments together, so where a turn number lands is a fact about the transcript
+    and can only be resolved once it has been read. A moment whose transcript is
+    missing keeps its turn numbers and gets no row positions -- there is nothing to
+    draw it against.
+    """
+    for moment in moments:
+        transcript_id = moment["transcript_id"]
+        turn_rows = index.turn_rows(transcript_id) if transcript_id in index else {}
+        for span in (moment["boundaries"], moment["original_boundaries"]):
+            if span is not None:
+                span.update(locate_span(turn_rows, span))
 
 
-def build_site(annotations_path, transcripts_path, out_path,
-               max_turns=DEFAULT_MAX_TURNS, excluded=(), include_single_pass=True):
+def build_site(annotations_path, transcripts_path, out_path, excluded=()):
     """Write the viewer to out_path and return the payload it embeds."""
-    payload = build_payload(
-        annotations_path, transcripts_path, max_turns, excluded, include_single_pass
-    )
+    payload = build_payload(annotations_path, transcripts_path, excluded)
     # Embedded in a <script type="application/json"> block: escaping "<" keeps a stray
     # "</script>" inside transcript text from ending the block early.
     data = json.dumps(payload, ensure_ascii=False).replace("<", "\\u003c")

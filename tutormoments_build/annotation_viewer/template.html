@@ -5,337 +5,1179 @@
 <meta name="viewport" content="width=device-width, initial-scale=1">
 <title>Annotation review</title>
 <style>
+  /* Visual language carried over from the annotation platform the raters used:
+     #1890ff primary, green/blue speaker labels, yellow moment highlight, white
+     rounded cards on a grey page. */
   :root {
-    --bg: #fbfbfa; --fg: #1c1c1a; --muted: #6b6b66; --line: #dcdcd6;
-    --card: #ffffff; --agree: #2f7d4f; --differ: #b3541e; --none: #6b6b66;
-    --mark: #f0efe9;
-  }
-  @media (prefers-color-scheme: dark) {
-    :root {
-      --bg: #16171a; --fg: #e6e6e3; --muted: #9a9a94; --line: #33343a;
-      --card: #1d1e22; --agree: #6cc08b; --differ: #e39264; --none: #9a9a94;
-      --mark: #26272c;
-    }
+    --primary: #1890ff;
+    --success: #52c41a;
+    --danger: #ff4d4f;
+    --warn-text: #d97706;
+    --warn-border: #ffc107;
+    --warn-bg: #fff3cd;
+    --ink: #333;
+    --text: #222;
+    --muted: #666;
+    --faint: #999;
+    --line: #d9d9d9;
+    --line-soft: #e0e0e0;
+    /* The two analytics series. Blue/orange rather than the semantic good/warn colours:
+       on these bars the colour says *which pass*, not whether the judgment was a good
+       one. Checked for colour-vision separation against the white card (ΔE 30 protan,
+       35 normal, both ≥ 3:1 contrast). */
+    --pass1: #1890ff;
+    --pass2: #d46b08;
   }
   * { box-sizing: border-box; }
   body {
-    margin: 0; background: var(--bg); color: var(--fg);
-    font: 15px/1.55 ui-sans-serif, -apple-system, "Segoe UI", system-ui, sans-serif;
+    margin: 0; background: #f0f2f5; color: var(--ink); font-size: 14px; line-height: 1.6;
+    font-family: 'Inter', 'Segoe UI', system-ui, Arial, sans-serif;
   }
-  header { padding: 22px 24px 0; max-width: 1180px; margin: 0 auto; }
-  h1 { font-size: 20px; margin: 0 0 4px; font-weight: 600; }
-  .sub { color: var(--muted); font-size: 13px; margin-bottom: 14px; }
-  .warn {
-    border: 1px solid var(--line); border-left: 3px solid var(--differ);
-    background: var(--card); padding: 9px 13px; border-radius: 5px;
-    font-size: 13px; color: var(--muted); margin-bottom: 16px;
+  button { font: inherit; }
+  code { font-family: ui-monospace, SFMono-Regular, Menlo, monospace; }
+  .hint { color: var(--faint); font-size: 13px; margin: 0; }
+
+  /* ── Header ─────────────────────────────────────────────────────────────── */
+  .app-header {
+    display: flex; align-items: baseline; flex-wrap: wrap; gap: 14px; padding: 12px 20px;
+    background: var(--primary); color: #fff; border-radius: 0 0 12px 12px;
+    box-shadow: 0 2px 8px rgba(24, 144, 255, .25);
   }
-  .controls {
-    display: flex; flex-wrap: wrap; gap: 14px; align-items: flex-end;
-    padding-bottom: 14px; border-bottom: 1px solid var(--line);
+  .app-header .title { font-weight: 600; font-size: 17px; }
+  .app-header .sub { color: rgba(255, 255, 255, .88); font-size: 12.5px; }
+  .app-header .grow { margin-left: auto; }
+  .privacy {
+    background: var(--warn-bg); border-bottom: 1px solid var(--warn-border);
+    color: var(--warn-text); font-size: 12.5px; font-weight: 500; padding: 8px 20px;
   }
-  .control { display: flex; flex-direction: column; gap: 4px; }
-  label { font-size: 11px; text-transform: uppercase; letter-spacing: .06em; color: var(--muted); }
-  select {
-    font: inherit; font-size: 14px; padding: 5px 9px; border-radius: 5px;
-    border: 1px solid var(--line); background: var(--card); color: var(--fg); min-width: 168px;
+
+  /* ── Toolbar ────────────────────────────────────────────────────────────── */
+  .toolbar {
+    display: flex; flex-wrap: wrap; align-items: flex-end; gap: 16px; padding: 12px 16px 14px;
   }
-  main { max-width: 1180px; margin: 0 auto; padding: 0 24px 60px; }
-  .count { color: var(--muted); font-size: 13px; padding: 16px 0 4px; }
-  .case { border: 1px solid var(--line); border-radius: 7px; background: var(--card);
-          margin: 16px 0; overflow: hidden; }
-  .case > h2 {
-    margin: 0; padding: 11px 15px; font-size: 13px; font-weight: 600;
-    border-bottom: 1px solid var(--line); display: flex; flex-wrap: wrap;
-    gap: 10px; align-items: baseline;
+  .ctl { display: flex; flex-direction: column; gap: 5px; }
+  .ctl label { letter-spacing: .05em; text-transform: uppercase; color: var(--muted); font-size: 10.5px; }
+  .ctl select, .ctl input {
+    font: inherit; border: 1px solid var(--line); color: var(--ink); background: #fff;
+    border-radius: 7px; min-width: 140px; padding: 6px 10px; font-size: 13px;
   }
-  .tag { font-size: 11px; letter-spacing: .05em; text-transform: uppercase; font-weight: 600; }
-  .tag.agreement { color: var(--agree); }
-  .tag.disagreement { color: var(--differ); }
-  .tag.none { color: var(--none); }
-  code { font-family: ui-monospace, SFMono-Regular, Menlo, monospace; font-size: 12px; }
-  .meta { color: var(--muted); font-weight: 400; }
-  details { border-bottom: 1px solid var(--line); }
-  summary { padding: 9px 15px; cursor: pointer; font-size: 13px; color: var(--muted); }
-  .turns { max-height: 21em; overflow-y: auto; padding: 4px 15px 12px; }
-  .turn { display: flex; gap: 10px; padding: 2px 0; font-size: 14px; }
-  .turn .n { color: var(--muted); min-width: 3.2em; text-align: right;
-             font-family: ui-monospace, Menlo, monospace; font-size: 12px; padding-top: 2px; }
-  .turn .role { min-width: 4.6em; color: var(--muted); }
-  .turn.cut { background: var(--mark); font-weight: 600; margin: 0 -15px; padding: 2px 15px; }
-  .turn.enrichment { color: var(--muted); font-style: italic; }
-  .elided { color: var(--muted); font-style: italic; font-size: 13px; padding: 3px 0 3px 4.2em; }
-  .sides { display: grid; grid-template-columns: 1fr 1fr; gap: 1px; background: var(--line); }
-  .sides.single { grid-template-columns: 1fr; }
-  @media (max-width: 760px) { .sides { grid-template-columns: 1fr; } }
-  .side { background: var(--card); padding: 13px 15px; }
-  .who { font-weight: 600; margin-bottom: 9px; }
-  .who .role { color: var(--muted); font-weight: 400; font-size: 13px; }
-  .field { display: flex; gap: 8px; font-size: 14px; padding: 1px 0; }
-  .field .k { color: var(--muted); min-width: 12.5em; }
-  .field .v.differ { color: var(--differ); font-weight: 600; }
-  .group { margin-top: 8px; font-size: 13.5px; }
-  .group .caption { color: var(--muted); font-size: 12px; }
-  .box.only { color: var(--differ); }
-  .text { margin-top: 10px; font-size: 14px; white-space: pre-wrap; }
-  .empty { color: var(--muted); font-style: italic; }
-  .empty-state { color: var(--muted); padding: 30px 2px; font-size: 14px; }
-  .pager { display: flex; gap: 10px; align-items: center; justify-content: center;
-           padding: 26px 0 0; }
-  button {
-    font: inherit; font-size: 14px; padding: 6px 14px; border-radius: 5px;
-    border: 1px solid var(--line); background: var(--card); color: var(--fg); cursor: pointer;
+  .grow { margin-left: auto; }
+  .checkline { color: var(--muted); display: flex; align-items: center; gap: 7px; font-size: 12.5px; }
+  .btn {
+    padding: 6px 12px; border-radius: 6px; border: 1px solid var(--line); background: #f5f5f5;
+    color: #595959; cursor: pointer; font-size: 13px; font-weight: 600;
   }
-  button:disabled { opacity: .4; cursor: default; }
+  .btn:hover { background: #e6e6e6; border-color: #b3b3b3; }
+  .btn.small { padding: 4px 10px; font-size: 12px; }
+
+  /* ── Analytics ──────────────────────────────────────────────────────────── */
+  details.analytics {
+    background: #fff; border-radius: 10px; margin: 0 16px 14px; padding: 4px 18px 6px;
+    box-shadow: 0 1px 4px rgba(0, 0, 0, .06);
+  }
+  details.analytics > summary {
+    cursor: pointer; color: var(--primary); user-select: none; padding: 10px 0;
+    font-size: 13px; font-weight: 600; list-style: none;
+  }
+  details.analytics > summary::-webkit-details-marker { display: none; }
+  details.analytics > summary::before { content: "▾ "; }
+  details.analytics:not([open]) > summary::before { content: "▸ "; }
+  .an-grid { display: grid; grid-template-columns: repeat(4, minmax(0, 1fr)); gap: 26px; padding: 6px 2px 16px; }
+  .an-col h4 {
+    letter-spacing: .06em; text-transform: uppercase; color: var(--muted); margin: 0 0 8px; font-size: 11px;
+  }
+  .an-col h4.spaced { margin-top: 14px; }
+  .kv {
+    border-bottom: 1px dashed rgba(0, 0, 0, .06); display: flex; justify-content: space-between;
+    padding: 2px 0; font-size: 12.5px;
+  }
+  .kv b { font-variant-numeric: tabular-nums; }
+  /* One category, two bars: the first pass over it above the second pass over it. */
+  .bar { display: flex; align-items: center; gap: 8px; margin: 5px 0; font-size: 12px; }
+  .bar .lbl { color: var(--ink); flex: 0 0 116px; }
+  .bar .series { display: flex; flex-direction: column; gap: 2px; flex: 1; min-width: 0; }
+  .bar .srow { display: flex; align-items: center; gap: 8px; }
+  .bar .track { background: #f2f3f5; border-radius: 4px; flex: 1; height: 7px; overflow: hidden; display: block; }
+  .bar .fill { height: 100%; display: block; border-radius: 4px; }
+  .bar .n {
+    text-align: right; color: var(--muted); font-variant-numeric: tabular-nums;
+    flex: 0 0 62px; white-space: nowrap;
+  }
+  .fill.pass1, .sw.pass1 { background: var(--pass1); }
+  .fill.pass2, .sw.pass2 { background: var(--pass2); }
+  .an-legend {
+    display: flex; flex-wrap: wrap; gap: 20px; color: var(--muted);
+    padding: 2px 2px 12px; font-size: 11.5px;
+  }
+  .an-legend .key { display: inline-flex; align-items: center; gap: 6px; }
+  .an-legend .sw { border-radius: 3px; width: 10px; height: 10px; display: inline-block; }
+  table.agree { border-collapse: collapse; width: 100%; font-size: 12px; }
+  table.agree th, table.agree td {
+    text-align: left; border-bottom: 1px solid rgba(0, 0, 0, .06); padding: 4px 6px;
+  }
+  table.agree th {
+    color: var(--muted); text-transform: uppercase; letter-spacing: .04em; font-size: 10.5px; font-weight: 600;
+  }
+  table.agree td.num { text-align: right; font-variant-numeric: tabular-nums; }
+  table.agree td.num.undef { color: var(--faint); cursor: help; }
+  .table-scroll { overflow-x: auto; }
+  .an-legend-note { color: var(--faint); margin: 8px 0 0; font-size: 11px; }
+  .kappa { font-weight: 600; }
+  .kappa.mid { color: var(--warn-text); }
+  .kappa.low { color: var(--danger); }
+  .kappa.ok { color: color-mix(in srgb, var(--success) 70%, #000); }
+  .kappa.undef { color: var(--faint); font-weight: 400; cursor: help; }
+
+  /* ── Panes ──────────────────────────────────────────────────────────────── */
+  .mode { padding: 0 16px 40px; }
+  .pane { background: #fff; border-radius: 10px; padding: 16px 18px; box-shadow: 0 1px 4px rgba(0, 0, 0, .06); }
+  .topbar { display: flex; align-items: flex-end; flex-wrap: wrap; gap: 16px; padding-bottom: 12px; }
+  .transcript-select {
+    font: inherit; border: 1px solid var(--line); color: var(--ink); background: #fff;
+    border-radius: 7px; min-width: 320px; max-width: 620px; padding: 6px 10px; font-size: 13px;
+  }
+  .detail-split {
+    display: grid; grid-template-columns: minmax(340px, 42%) minmax(0, 58%); align-items: start; gap: 16px;
+  }
+  .detail-split[hidden] { display: none; }
+  .detail-split .transcript-pane, .detail-split .moments-pane { max-height: 76vh; overflow-y: auto; }
+
+  /* ── Transcript ─────────────────────────────────────────────────────────── */
+  .transcript .turn {
+    display: grid; grid-template-columns: 28px 60px 1fr; gap: 8px; padding: 3px 8px;
+    border-left: 3px solid transparent; border-radius: 4px; font-size: 13px;
+  }
+  .transcript .turn.tutor { border-left-color: #bae7ff; background: #f6fbff; }
+  .transcript .turn.student { border-left-color: #e6f7ff; background: #fff; }
+  .transcript .turn-num { color: var(--faint); font-size: 11px; text-align: right; }
+  .transcript .turn-role { font-size: 11px; font-weight: 600; white-space: nowrap; }
+  .transcript .turn.tutor .turn-role { color: var(--primary); }
+  .transcript .turn.student .turn-role { color: var(--success); }
+  .transcript .turn-text { white-space: pre-wrap; color: var(--text); font-size: 13px; }
+  .transcript .turn.in-moment { background: rgba(255, 235, 59, .22); border-left-color: var(--warn-border); }
+  .transcript .turn.screen-event .turn-text { color: var(--muted); }
+  .screen-tag {
+    display: inline-block; font-size: 10.5px; font-weight: 700; text-transform: uppercase;
+    letter-spacing: .03em; color: var(--muted); background: #eceff1; border-radius: 4px;
+    padding: 0 6px; margin: 0 3px 0 0; vertical-align: 1px; white-space: nowrap;
+  }
+  .cut-marker {
+    border-top: 2px dashed var(--danger); color: var(--danger); font-size: 12.5px; padding: 2px 8px 6px;
+  }
+  .boundary-hint { color: var(--primary); padding: 2px 8px 4px; font-size: 11px; font-weight: 600; }
+  .elision { color: var(--muted); padding: 3px 0 3px 40px; font-size: 11.5px; font-style: italic; }
+
+  /* ── Moment cards ───────────────────────────────────────────────────────── */
+  .moment { border-top: 1px solid var(--line-soft); padding: 16px 2px 4px; }
+  .moment:first-child { border-top: 0; padding-top: 2px; }
+  .moments-pane .moment.moment-card {
+    border: 1px solid var(--line); background: #fff; border-radius: 8px; margin-bottom: 16px; padding: 14px 16px;
+  }
+  .moments-pane .moment.moment-card:first-child { border-top: 1px solid var(--line); padding-top: 14px; }
+  .moments-pane .moment.moment-card.active { border-color: var(--primary); box-shadow: 0 0 0 1px rgba(24, 144, 255, .35); }
+  .moment.selectable { cursor: pointer; }
+  .m-head { display: flex; flex-wrap: wrap; align-items: center; gap: 9px; }
+  .m-loc { font-size: 13.5px; font-weight: 600; }
+  .m-loc code { color: var(--muted); font-size: 12px; font-weight: 500; }
+  .m-head-divider { border: 0; border-top: 1px solid rgba(0, 0, 0, .06); margin: 8px 0 10px; }
+  .len { color: var(--muted); font-size: 11.5px; }
+  .status {
+    text-transform: uppercase; letter-spacing: .04em; color: var(--muted); background: #f2f3f5;
+    border-radius: 20px; padding: 1px 7px; font-size: 10px; font-weight: 600;
+  }
+  .status.done { color: var(--primary); background: rgba(24, 144, 255, .1); }
+  .outcome { margin-left: auto; font-size: 12px; font-weight: 600; }
+  .outcome.agree { color: color-mix(in srgb, var(--success) 70%, #000); }
+  .outcome.differ { color: var(--danger); }
+  .outcome.single, .outcome.dropped { color: var(--muted); font-weight: 500; }
+  .m-note {
+    width: 100%; color: var(--warn-text); background: rgba(217, 119, 6, .1); border-radius: 6px;
+    margin-top: 3px; padding: 5px 10px; font-size: 11.5px;
+  }
+  .cmp { margin-top: 12px; }
+  .colhead {
+    display: grid; border-bottom: 1px solid rgba(0, 0, 0, .06); align-items: end; gap: 14px; padding: 0 0 7px;
+  }
+  .ch { display: flex; flex-direction: column; gap: 2px; font-size: 12px; }
+  .ch .pass { font-weight: 600; }
+  .ch .pass.final { color: var(--primary); }
+  .ch .meta { color: var(--muted); font-size: 11px; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+  .row { display: grid; border-bottom: 1px solid rgba(0, 0, 0, .06); align-items: start; gap: 14px; padding: 8px 0; }
+  .row .k { letter-spacing: .06em; color: var(--muted); padding-top: 3px; font-size: 10px; font-weight: 700; }
+  .cell { display: flex; flex-wrap: wrap; align-items: center; gap: 5px; }
+  .cell .none { color: var(--faint); font-size: 11.5px; font-style: italic; }
+  .chip {
+    color: var(--muted); background: #f2f3f5; border-radius: 20px; align-items: center; gap: 4px;
+    padding: 2px 9px; font-size: 11.5px; font-weight: 500; display: inline-flex;
+  }
+  .moments-pane .chip { white-space: normal; }
+  .chip.good { color: color-mix(in srgb, var(--success) 70%, #000); background: rgba(82, 196, 26, .12); }
+  .chip.warn { color: var(--warn-text); background: rgba(217, 119, 6, .14); }
+  .chip.info { color: var(--primary); background: rgba(24, 144, 255, .1); }
+  .chip.muted { color: var(--muted); background: #f2f3f5; }
+  .chip.diff { box-shadow: 0 0 0 1.5px rgba(255, 77, 79, .55); font-weight: 700; }
+  .chip.hollow { border: 1px solid var(--line-soft); color: var(--muted); background: #fff; font-weight: 400; }
+  .chip.tag {
+    border: 1px solid var(--line-soft); color: #8a8a8a; background: #fff; padding: 1px 7px;
+    font-size: 10.5px; font-weight: 400;
+  }
+  .secondary-tags { display: flex; flex-wrap: wrap; gap: 4px; width: 100%; margin-top: 3px; }
+  details.why-more { margin-top: 8px; }
+  details.why-more > summary {
+    cursor: pointer; color: var(--muted); user-select: none; font-size: 11.5px; list-style: none;
+  }
+  details.why-more > summary::-webkit-details-marker { display: none; }
+  details.why-more > summary::before { content: "▸ " attr(data-label); }
+  details.why-more[open] > summary::before { content: "▾ " attr(data-label); }
+  details.why-more.disagree {
+    border-left: 3px solid var(--danger); background: rgba(255, 77, 79, .07);
+    border-radius: 0 6px 6px 0; margin-top: 8px; padding: 6px 10px;
+  }
+  details.why-more.disagree > summary::before { color: var(--danger); font-weight: 700; }
+  .why-cols { display: grid; gap: 14px; margin-top: 6px; }
+  .why-col { color: var(--text); white-space: pre-wrap; font-size: 12px; }
+  .why-none { color: var(--faint); }
+  .no-key { color: var(--muted); font-size: 12.5px; margin: 6px 0 10px; }
+  .no-key .who { color: var(--ink); font-weight: 600; }
+
+  @media (max-width: 1500px) {
+    .an-grid { grid-template-columns: repeat(2, minmax(0, 1fr)); }
+  }
+  @media (max-width: 980px) {
+    .an-grid, .detail-split { grid-template-columns: 1fr; }
+    .detail-split .transcript-pane, .detail-split .moments-pane { max-height: none; overflow-y: visible; }
+  }
 </style>
 </head>
 <body>
-<header>
-  <h1>Annotation review</h1>
-  <div class="sub" id="sub"></div>
-  <div class="warn">
-    Contains real annotator names and student transcript text. Keep it out of git and do not
-    share it outside the annotation team.
-  </div>
-  <div class="controls">
-    <div class="control">
-      <label for="annotator">Annotator</label>
-      <select id="annotator"></select>
-    </div>
-    <div class="control">
-      <label for="construct">Construct</label>
-      <select id="construct">
-        <option value="">All three</option>
-        <option value="situation">Situation</option>
-        <option value="action">Action</option>
-        <option value="result">Result</option>
-      </select>
-    </div>
-    <div class="control">
-      <label for="action">Action recorded</label>
-      <select id="action"></select>
-    </div>
-    <div class="control">
-      <label for="outcome">Outcome</label>
-      <select id="outcome">
-        <option value="all">Everything</option>
-        <option value="reviewed">Reviewed twice</option>
-        <option value="agreement">Agreements only</option>
-        <option value="disagreement">Disagreements only</option>
-        <option value="no second judgment">No second judgment</option>
-        <option value="single pass">Single pass (never reviewed)</option>
-      </select>
-    </div>
-  </div>
+<header class="app-header">
+  <span class="title">Annotation review</span>
+  <span class="sub" id="header-sub"></span>
+  <span class="sub grow" id="header-source"></span>
 </header>
-<main>
-  <div class="count" id="count"></div>
-  <div id="cases"></div>
-  <div class="pager">
-    <button id="prev">Previous</button>
-    <span id="page"></span>
-    <button id="next">Next</button>
+<div class="privacy">
+  Contains real annotator names and student transcript text. Keep it out of git and do not share it
+  outside the annotation team.
+</div>
+
+<div class="toolbar">
+  <div class="ctl">
+    <label for="f-annotator">Annotator</label>
+    <select id="f-annotator"></select>
   </div>
-</main>
+  <div class="ctl">
+    <label for="f-axis">Agreement on</label>
+    <select id="f-axis"></select>
+  </div>
+  <div class="ctl">
+    <label for="f-from">Annotated from</label>
+    <input type="date" id="f-from" aria-label="From date">
+  </div>
+  <div class="ctl">
+    <label for="f-to">To</label>
+    <input type="date" id="f-to" aria-label="To date">
+  </div>
+  <button class="btn small" id="clear-dates" hidden>Clear dates</button>
+  <div class="grow">
+    <label class="checkline"><input type="checkbox" id="f-testers" checked> Exclude testers</label>
+  </div>
+</div>
+
+<details class="analytics" id="analytics">
+  <summary id="analytics-summary">Analytics</summary>
+  <div class="an-legend" id="analytics-legend"></div>
+  <div class="an-grid" id="analytics-body"></div>
+</details>
+
+<div class="mode" id="mode-transcript">
+  <div class="topbar">
+    <div class="ctl">
+      <label for="transcript-select">Transcript</label>
+      <select id="transcript-select" class="transcript-select"></select>
+    </div>
+    <p class="hint" id="transcript-hint"></p>
+  </div>
+  <div class="detail-split" id="transcript-detail" hidden>
+    <div class="pane transcript-pane" id="transcript-turns"></div>
+    <div class="pane moments-pane" id="transcript-moments"></div>
+  </div>
+</div>
 
 <script id="data" type="application/json">__VIEWER_DATA__</script>
 <script>
+"use strict";
 const DATA = JSON.parse(document.getElementById("data").textContent);
-const PAGE = DATA.page_size;
 const $ = (id) => document.getElementById(id);
-let page = 0;
 
-const pretty = (v) => v === null || v === undefined || v === ""
-  ? "—" : String(v).replace(/_/g, " ");
+const AXES = DATA.axes;
+// The axes the agreement table reports. Every axis still counts towards a moment's
+// disagreements on its card; these are the ones a kappa is quoted for.
+const REPORTED_AXES = AXES.filter((a) => a.reported);
+const CONSTRUCTS = ["sit", "act", "res"];
+const CONSTRUCT_LABEL = { sit: "SIT", act: "ACT", res: "RES" };
+const PASS_LABEL = { selector: "Selector", reannotator: "Reannotator", adjudicator: "Adjudicator (final)" };
+const SINGLE_PASS = "single pass";
 
-const annotatorSelect = $("annotator");
-annotatorSelect.append(new Option("Everyone", ""));
-for (const name of DATA.annotators) annotatorSelect.append(new Option(name, name));
+const TRANSCRIPTS = new Map(DATA.transcripts.map((t) => [t.transcript_id, t]));
+const MOMENTS_BY_TRANSCRIPT = new Map();
+for (const m of DATA.moments) {
+  const list = MOMENTS_BY_TRANSCRIPT.get(m.transcript_id);
+  if (list) list.push(m); else MOMENTS_BY_TRANSCRIPT.set(m.transcript_id, [m]);
+}
+for (const list of MOMENTS_BY_TRANSCRIPT.values()) {
+  list.sort((a, b) => a.start_turn - b.start_turn || a.cut_turn - b.cut_turn);
+}
 
-// Action values, grouped by the field they came from: "unclear" means different things under
-// scaffolding and rigor, so the group heading is what tells them apart.
-const actionSelect = $("action");
-actionSelect.append(new Option("Any", ""));
-for (const group of DATA.action_filters) {
-  const optgroup = document.createElement("optgroup");
-  optgroup.label = group.caption;
-  for (const o of group.options) {
-    optgroup.append(new Option(`${o.label} (${o.count})`, o.tag));
+const state = {
+  annotator: "",
+  // "agree:<axis>" / "differ:<axis>", or "" for every moment.
+  axis: "",
+  from: "",
+  to: "",
+  excludeTesters: true,
+  transcriptId: "",
+  activeMomentId: null,
+};
+
+// ── Filtering ───────────────────────────────────────────────────────────────
+// The filters decide which moments appear; a moment that passes keeps all of its
+// passes, so a moment whose reannotation landed inside the date range still shows
+// the original selection it was reviewing.
+
+const humanize = (s) => String(s).replace(/_/g, " ");
+
+/** One moment under the current tester setting: dropping a rater can leave a
+ *  moment that was reviewed twice with a single standing pass, so the outcome,
+ *  the axis disagreements and the agreement pairs all fall away with them. */
+function view(moment) {
+  const passes = state.excludeTesters ? moment.passes.filter((p) => !p.is_test) : moment.passes;
+  if (state.excludeTesters && moment.is_test) return null;
+  if (!passes.length) return null;
+  const byRole = {};
+  for (const p of passes) byRole[p.role] = p;
+  const bothPasses = !!byRole.selector && !!byRole.reannotator;
+  return {
+    moment,
+    passes,
+    byRole,
+    bothPasses,
+    outcome: bothPasses ? moment.outcome : SINGLE_PASS,
+    diff: new Set(bothPasses ? moment.diff : []),
+    pairs: bothPasses ? moment.pairs : {},
+  };
+}
+
+function matchesAnnotator(v) {
+  return !state.annotator || v.passes.some((p) => p.annotator_id === state.annotator);
+}
+
+function matchesDates(v) {
+  if (!state.from && !state.to) return true;
+  return v.passes.some((p) => (!state.from || p.date >= state.from) && (!state.to || p.date <= state.to));
+}
+
+/** Whether the two passes landed the same way on one axis.
+ *
+ *  The first pass anchors it: an axis is only in play when the selector judged it, and
+ *  agreement means the reannotator came back with the selector's value. Axes only one
+ *  of them was ever asked about -- over-scaffolding when the other saw no scaffolding
+ *  at all, anything on a moment the reannotator threw out -- are neither, so those
+ *  moments drop out under either half of the filter rather than counting as agreement. */
+function matchesAxis(v) {
+  if (!state.axis) return true;
+  const [want, key] = state.axis.split(":");
+  const pair = v.pairs[key];
+  if (!pair) return false;
+  return (pair[0] === pair[1]) === (want === "agree");
+}
+
+/** Moments passing the filters that select which work is in view. */
+function selectedViews() {
+  const out = [];
+  for (const moment of DATA.moments) {
+    const v = view(moment);
+    if (v && matchesAnnotator(v) && matchesDates(v) && matchesAxis(v)) out.push(v);
   }
-  actionSelect.append(optgroup);
+  return out;
 }
 
-function matchesOutcome(c, outcome) {
-  if (outcome === "all") return true;
-  // "Reviewed twice" is every case that had a second pass at all, including the ones the
-  // reviewer threw out -- the moment was still looked at twice.
-  if (outcome === "reviewed") return c.outcome !== "single pass";
-  return c.outcome === outcome;
+/** Moments the agreement table is computed over: everything in the export, narrowed
+ *  only by the date range. Kappa is a property of the annotation effort as a whole, so
+ *  the annotator and axis filters deliberately leave it alone -- a κ over one rater's
+ *  moments, or over the moments already known to disagree on an axis, is not a
+ *  reliability estimate and should not move as someone browses. Testers are still
+ *  dropped: their passes are not annotation work. */
+function agreementViews() {
+  const out = [];
+  for (const moment of DATA.moments) {
+    const v = view(moment);
+    if (v && matchesDates(v)) out.push(v);
+  }
+  return out;
 }
 
-function filtered(ignoreOutcome) {
-  const who = annotatorSelect.value;
-  const construct = $("construct").value;
-  const outcome = $("outcome").value;
-  const tag = actionSelect.value;
-  return DATA.cases.filter((c) =>
-    (!who || c.first.annotator === who || (c.second && c.second.annotator === who)) &&
-    (!construct || c.construct === construct) &&
-    // Tags sit on the moment, so an action filter keeps that moment's situation and result
-    // panels too unless the construct filter narrows them away.
-    (!tag || DATA.moments[c.moment_id].tags.includes(tag)) &&
-    (ignoreOutcome || matchesOutcome(c, outcome)));
+function selectedVerdicts() {
+  return DATA.no_key_moments.filter((r) =>
+    (!state.excludeTesters || !r.is_test)
+    && (!state.annotator || r.annotator_id === state.annotator)
+    && (!state.from || r.date >= state.from)
+    && (!state.to || r.date <= state.to));
 }
 
+// ── Small DOM helpers ───────────────────────────────────────────────────────
 function el(tag, cls, text) {
   const node = document.createElement(tag);
   if (cls) node.className = cls;
-  if (text !== undefined) node.textContent = text;
+  if (text !== undefined && text !== null) node.textContent = String(text);
   return node;
 }
-
-function transcript(moment) {
-  const box = el("details");
-  box.open = true;
-  const span = `rows ${moment.start_turn}–${moment.end_turn}, cut at ${moment.cut_turn}`;
-  box.append(el("summary", null, `Transcript · ${span}`));
-  const turns = el("div", "turns");
-  if (!moment.found) {
-    turns.append(el("div", "elided", "This transcript is not in the transcripts file."));
-  }
-  if (moment.elided_before) {
-    turns.append(el("div", "elided", `… ${moment.elided_before} earlier rows`));
-  }
-  for (const t of moment.turns) {
-    const row = el("div", "turn" + (t.cut ? " cut" : "") + (t.enrichment ? " enrichment" : ""));
-    row.append(el("span", "n", String(t.n)));
-    row.append(el("span", "role", t.role));
-    row.append(el("span", "t", t.text + (t.cut ? "   ← cut" : "")));
-    turns.append(row);
-  }
-  if (moment.elided_after) {
-    turns.append(el("div", "elided", `… ${moment.elided_after} later rows`));
-  }
-  if (moment.missing) {
-    turns.append(el("div", "elided",
-      `… ${moment.missing} rows of this span are not in the transcript`));
-  }
-  box.append(turns);
-  return box;
+function clear(node) { node.textContent = ""; return node; }
+function fmtDate(iso) {
+  if (!iso) return "";
+  const d = new Date(iso);
+  return isNaN(d) ? iso : d.toLocaleDateString("en-US", { month: "short", day: "numeric" });
 }
 
-function side(data, roleName) {
-  const box = el("div", "side");
-  const who = el("div", "who", data.annotator + " ");
-  who.append(el("span", "role", roleName));
-  box.append(who);
-  if (!data.judged) {
-    box.append(el("div", "text empty",
-      "Recorded no judgment for this construct — this pass threw the moment out."));
-    return box;
+/** An annotator id as their name. Filters carry the id; only names get printed. */
+function annotatorName(id) {
+  const a = DATA.annotators.find((x) => x.id === id);
+  return a ? a.name : id;
+}
+
+// ── Transcript ──────────────────────────────────────────────────────────────
+// The stored text repeats the speaker as a leading [STUDENT]/[TUTOR] tag -- already
+// shown by the role column -- and marks screen events with bracketed tags like
+// [BOARD UPDATE]. Drop the redundant speaker tag and render the remaining tags as
+// small chips, so spoken dialogue in an enrichment turn is never demoted to a label.
+function turnText(text) {
+  const cleaned = text.replace(/\[(?:STUDENT|TUTOR)\]:?/g, " ").replace(/\s{2,}/g, " ").trim();
+  const out = document.createDocumentFragment();
+  for (const part of cleaned.split(/(\[[^\]]+\])/g)) {
+    if (!part) continue;
+    const tag = /^\[([^\]]+)\]$/.exec(part);
+    out.append(tag ? el("span", "screen-tag", tag[1]) : el("span", null, part));
   }
-  for (const f of data.fields) {
-    const row = el("div", "field");
-    row.append(el("span", "k", f.name.replace(/_/g, " ")));
-    row.append(el("span", f.agrees ? "v" : "v differ", pretty(f.value)));
+  return out;
+}
+
+/**
+ * Draw a transcript with a moment's span highlighted.
+ *  bounds  the span to highlight (already carrying any reannotator redraw)
+ *  prev    the span before that redraw, for the "was N" hint
+ *  window  clamp to [start-2, end+2] and elide the rest, for the compact excerpts
+ *
+ * Rows are addressed by `turn_index` -- their position in the rendered row list, which
+ * is what bounds.*_row means: the build resolved the moment's dialogue turn numbers to
+ * those positions. The numbers drawn in the margin are `turn_number`, the dialogue turn
+ * the annotator saw; enrichment rows have none and get a blank margin. A moment whose
+ * transcript is missing has no row positions, so nothing is highlighted.
+ */
+function renderTranscript(turns, bounds, prev, windowed) {
+  const box = el("div", "transcript");
+  const placed = bounds && bounds.start_row != null && bounds.end_row != null;
+  const lo = windowed && placed ? bounds.start_row - 2 : -Infinity;
+  const hi = windowed && placed ? bounds.end_row + 2 : Infinity;
+  const endMoved = prev && bounds && prev.end_row !== bounds.end_row;
+  let elideFrom = null, elideTo = null;
+  const flush = () => {
+    if (elideFrom !== null) {
+      const span = elideFrom === elideTo ? `${elideFrom}` : `${elideFrom}–${elideTo}`;
+      box.append(el("div", "elision", `…turns ${span}`));
+      elideFrom = elideTo = null;
+    }
+  };
+  for (const t of turns) {
+    const i = t.turn_index;
+    if (i < lo || i > hi) {
+      // Elisions are labelled in turn numbers like everything else, so an enrichment
+      // row extends the run without putting a number on it.
+      if (t.turn_number != null) {
+        if (elideFrom === null) elideFrom = t.turn_number;
+        elideTo = t.turn_number;
+      }
+      continue;
+    }
+    flush();
+    const inMoment = placed && i >= bounds.start_row && i <= bounds.end_row;
+    const row = el("div", [
+      "turn",
+      t.role === "STUDENT" ? "student" : "tutor",
+      t.type.startsWith("[") ? "screen-event" : "",
+      inMoment ? "in-moment" : "",
+    ].filter(Boolean).join(" "));
+    row.dataset.turn = i;
+    row.append(el("span", "turn-num", t.turn_number == null ? "" : t.turn_number));
+    row.append(el("span", "turn-role", t.role));
+    const text = el("span", "turn-text");
+    text.append(turnText(t.text));
+    row.append(text);
     box.append(row);
-  }
-  for (const g of data.multi) {
-    const group = el("div", "group");
-    group.append(el("div", "caption", g.caption));
-    for (const b of g.boxes) {
-      const line = el("div", b.shared ? "box" : "box only",
-        (b.shared ? "= " : "+ ") + b.box.replace(/_/g, " "));
-      group.append(line);
+    if (bounds && i === bounds.cut_row) {
+      box.append(el("div", "cut-marker", "✂ cut point — the tutor's decision happens after this turn"));
     }
-    box.append(group);
+    if (bounds && i === bounds.end_row && endMoved) {
+      box.append(el("div", "boundary-hint", `▼ END (was turn ${prev.end_turn})`));
+    }
   }
-  box.append(data.text
-    ? el("div", "text", data.text)
-    : el("div", "text empty", "no comment"));
+  flush();
+  if (!turns.length) box.append(el("p", "hint", "This transcript is not in the transcripts file."));
   return box;
 }
 
-// Spans run to 143 rows, so an uncapped excerpt opens far from the cut unless it is scrolled
-// there. Scrolling the container directly rather than scrollIntoView, which would drag the
-// whole page along with it.
-function focusCutRows() {
-  for (const container of document.querySelectorAll(".turns")) {
-    const cut = container.querySelector(".turn.cut");
-    if (!cut) continue;
-    const box = container.getBoundingClientRect();
-    const row = cut.getBoundingClientRect();
-    container.scrollTop += (row.top - box.top) - (box.height - row.height) / 2;
+// ── Moment cards ────────────────────────────────────────────────────────────
+function chip(label, tone, isDiff) {
+  return el("span", ["chip", tone, isDiff ? "diff" : ""].filter(Boolean).join(" "), label);
+}
+
+function situationChips(cell, axes, diff) {
+  for (const [key, name] of [["scaffolding_appropriate", "scaffolding"], ["rigor_appropriate", "rigor"]]) {
+    const differs = diff.has(key);
+    if (axes[key]) cell.append(chip(`${name} appropriate`, "good", differs));
+    else if (differs) cell.append(chip(`${name} not appropriate`, "warn", true));
+    else cell.append(chip(`${name} not appropriate`, "hollow", false));
   }
 }
 
-function render() {
-  const cases = filtered();
-  const pages = Math.max(1, Math.ceil(cases.length / PAGE));
-  page = Math.min(page, pages - 1);
+const SCAFFOLD_AMOUNT = {
+  over_scaffolding: ["scaffolding: over-scaffolding", "warn"],
+  appropriate: ["scaffolding: appropriate", "good"],
+  under_scaffolding: ["scaffolding: under-scaffolding", "warn"],
+  unclear: ["scaffolding: unclear", "muted"],
+};
+const RIGOR_AMOUNT = {
+  strong: ["rigor: strong", "good"],
+  weak: ["rigor: weak", "warn"],
+  unclear: ["rigor: unclear", "muted"],
+};
 
-  const tally = (o) => cases.filter((c) => c.outcome === o).length;
-  const parts = [];
-  if (tally("agreement")) parts.push(`${tally("agreement")} agree`);
-  if (tally("disagreement")) parts.push(`${tally("disagreement")} disagree`);
-  if (tally("no second judgment")) parts.push(`${tally("no second judgment")} thrown out on review`);
-  if (tally("single pass")) parts.push(`${tally("single pass")} never reviewed`);
-  $("count").textContent = `${cases.length} case${cases.length === 1 ? "" : "s"}`
-    + (parts.length ? " — " + parts.join(", ") : "");
+function actionChips(cell, payload, diff) {
+  const act = payload.action || {};
+  const scaff = act.scaffolding_present
+    ? SCAFFOLD_AMOUNT[act.scaffolding_amount] || ["scaffolding present", "muted"]
+    : ["no scaffolding", "muted"];
+  const rigor = act.rigor_present
+    ? RIGOR_AMOUNT[act.rigor_amount] || ["rigor present", "muted"]
+    : ["no rigor", "muted"];
+  cell.append(chip(scaff[0], scaff[1], diff.has("over_scaffolding") || diff.has("scaffolding_present")));
+  cell.append(chip(rigor[0], rigor[1], diff.has("rigor_present")));
 
-  const list = $("cases");
-  list.textContent = "";
-  if (!cases.length) {
-    const wider = filtered(true);
-    const note = el("div", "empty-state");
-    if (wider.length) {
-      const kinds = [...new Set(wider.map((c) => c.outcome))].sort().join(", ");
-      const who = annotatorSelect.value;
-      note.textContent =
-        `Nothing here with this outcome. ${who || "These filters"}` +
-        `${who ? " has" : " cover"} ${wider.length} case${wider.length === 1 ? "" : "s"} ` +
-        `(${kinds}) — change the Outcome filter to see ${wider.length === 1 ? "it" : "them"}.`;
-    } else {
-      note.textContent = "No cases match these filters.";
+  const tags = [
+    ...(act.scaffolding_strategies || []),
+    ...(act.scaffolding_amount === "over_scaffolding" ? act.over_scaffolding_reasons || [] : []),
+    ...(act.rigor_strategies || []),
+  ].map(humanize);
+  for (const other of [act.scaffolding_strategy_other, act.rigor_strategy_other]) {
+    if (other) tags.push(`other: ${other}`);
+  }
+  if (tags.length) {
+    const strip = el("div", "secondary-tags");
+    for (const t of tags) strip.append(el("span", "chip tag", t));
+    cell.append(strip);
+  }
+}
+
+const ENGAGEMENT = {
+  high_or_good: ["engagement: high", "good"],
+  low: ["engagement: low", "warn"],
+  not_enough_evidence: ["engagement: no evidence", "muted"],
+};
+const SUCCESS = {
+  meaningful_success: ["success: meaningful", "good"],
+  not_meaningful: ["success: not meaningful", "warn"],
+  no_success: ["success: no success", "warn"],
+  not_enough_evidence: ["success: no evidence", "muted"],
+};
+
+function resultChips(cell, payload, diff) {
+  const res = payload.result || {};
+  const eng = ENGAGEMENT[res.cognitive_engagement] || ["engagement: —", "muted"];
+  const suc = SUCCESS[res.problem_success] || ["success: —", "muted"];
+  cell.append(chip(eng[0], eng[1], diff.has("high_engagement")));
+  cell.append(chip(suc[0], suc[1], diff.has("meaningful_success")));
+}
+
+function whyText(construct, payload) {
+  if (construct === "sit") return (payload.situation || {}).why || "";
+  if (construct === "act") return (payload.action || {}).explanation || "";
+  return (payload.result || {}).explanation || "";
+}
+
+const CONSTRUCT_AXES = {
+  sit: ["scaffolding_appropriate", "rigor_appropriate"],
+  act: ["scaffolding_present", "over_scaffolding", "rigor_present"],
+  res: ["meaningful_success", "high_engagement"],
+};
+
+/** Reannotator/adjudicator flags: throw-out, redrawn cut point, moved boundaries. */
+function metaNote(pass) {
+  const meta = (pass.payload || {}).meta;
+  if (!meta) return null;
+  const notes = [];
+  if (meta.throw_out) {
+    notes.push("Marked for throw-out" + (meta.throw_out_reason ? `: ${meta.throw_out_reason}` : ""));
+  }
+  if (meta.redrew_cut_point && meta.new_cut_turn != null) {
+    notes.push(`Redrew cut point → turn ${meta.new_cut_turn}`);
+  }
+  if (meta.changed_boundaries) {
+    const moved = [
+      meta.new_start_turn == null ? "" : `start → ${meta.new_start_turn}`,
+      meta.new_end_turn == null ? "" : `end → ${meta.new_end_turn}`,
+    ].filter(Boolean).join(", ");
+    notes.push(`Changed boundaries: ${moved}`);
+  }
+  return notes.length ? el("div", "m-note", "✎ " + notes.join(" · ")) : null;
+}
+
+/** One moment as its passes side by side, one row per construct, disagreements marked. */
+function momentCard(v) {
+  const m = v.moment;
+  const b = m.boundaries;
+  const card = el("div", "moment moment-card");
+  card.dataset.momentId = m.id;
+
+  const head = el("div", "m-head");
+  const loc = el("span", "m-loc");
+  loc.append(el("code", null, `turns ${b.start_turn}–${b.end_turn} · cut@${b.cut_turn}`));
+  head.append(loc);
+  head.append(el("span", "len", `${b.end_turn - b.start_turn + 1} turns`));
+  const done = m.status === "reannotated" || m.status === "adjudicated";
+  head.append(el("span", "status" + (done ? " done" : ""), m.status || "—"));
+  head.append(el("span", "len", `cut by ${m.created_by}`));
+  const tone = { agreement: "agree", disagreement: "differ" }[v.outcome] || "single";
+  head.append(el("span", "outcome " + tone, v.outcome === "agreement" ? "✓ agreement"
+    : v.outcome === "disagreement" ? "⚠ disagreement"
+    : v.outcome));
+  card.append(head);
+  card.append(el("hr", "m-head-divider"));
+  for (const role of ["reannotator", "adjudicator"]) {
+    const note = v.byRole[role] && metaNote(v.byRole[role]);
+    if (note) card.append(note);
+  }
+
+  const cmp = el("div", "cmp");
+  const grid = `46px ${v.passes.map(() => "1fr").join(" ")}`;
+  const colhead = el("div", "colhead");
+  colhead.style.gridTemplateColumns = grid;
+  colhead.append(el("div", "k"));
+  for (const p of v.passes) {
+    const col = el("div", "ch");
+    col.append(el("div", "pass" + (p.role === "adjudicator" ? " final" : ""), PASS_LABEL[p.role]));
+    col.append(el("div", "meta", `${p.annotator_name} · rev${p.revision} · ${fmtDate(p.created_at)}`));
+    colhead.append(col);
+  }
+  cmp.append(colhead);
+
+  for (const c of CONSTRUCTS) {
+    const rowDiff = CONSTRUCT_AXES[c].some((k) => v.diff.has(k));
+    const row = el("div", "row");
+    row.style.gridTemplateColumns = grid;
+    row.append(el("div", "k", CONSTRUCT_LABEL[c]));
+    for (const p of v.passes) {
+      const cell = el("div", "cell");
+      if (!p.axes) cell.append(el("span", "none", "no judgment — threw the moment out"));
+      else if (c === "sit") situationChips(cell, p.axes, v.diff);
+      else if (c === "act") actionChips(cell, p.payload, v.diff);
+      else resultChips(cell, p.payload, v.diff);
+      row.append(cell);
     }
+    const block = el("div");
+    block.append(row);
+    const whys = v.passes.map((p) => (p.axes ? whyText(c, p.payload) : ""));
+    if (whys.some(Boolean)) {
+      const more = el("details", "why-more" + (rowDiff ? " disagree" : ""));
+      more.open = rowDiff;
+      const summary = el("summary");
+      summary.dataset.label = "reasoning";
+      more.append(summary);
+      const cols = el("div", "why-cols");
+      cols.style.gridTemplateColumns = grid;
+      cols.append(el("div"));
+      for (const w of whys) {
+        cols.append(w ? el("div", "why-col", w) : el("div", "why-col why-none", "—"));
+      }
+      more.append(cols);
+      block.append(more);
+    }
+    cmp.append(block);
+  }
+
+  const observations = v.passes.map((p) => (p.payload || {}).other_observations || "");
+  if (observations.some(Boolean)) {
+    const row = el("div", "row");
+    row.style.gridTemplateColumns = grid;
+    row.append(el("div", "k", "OBS"));
+    for (const text of observations) {
+      row.append(text ? el("div", "why-col", text) : el("div", "why-col why-none", "—"));
+    }
+    cmp.append(row);
+  }
+  card.append(cmp);
+  return card;
+}
+
+// ── Analytics ───────────────────────────────────────────────────────────────
+const SERIES = [
+  ["pass1", "First pass", "selector"],
+  ["pass2", "Second pass", "reannotator"],
+];
+
+/** One category as two bars: what the first pass made of it above what the second pass
+ *  made of it. Each bar is a share of its own pass's denominator -- far fewer moments
+ *  were ever judged twice, so a raw second-pass count read against the first pass's
+ *  total would understate every category. */
+function bar(label, shares) {
+  const row = el("div", "bar");
+  row.append(el("span", "lbl", label));
+  const series = el("span", "series");
+  shares.forEach(({ count, total }, i) => {
+    const [tone, name] = SERIES[i];
+    const srow = el("span", "srow");
+    const track = el("span", "track");
+    const fill = el("span", "fill " + tone);
+    const share = total > 0 ? (count / total) * 100 : 0;
+    fill.style.width = share.toFixed(1) + "%";
+    track.append(fill);
+    srow.append(track);
+    srow.append(el("span", "n", total ? `${count} · ${Math.round(share)}%` : "—"));
+    srow.title = `${name}: ${count} of ${total} — ${label}`;
+    series.append(srow);
+  });
+  row.append(series);
+  return row;
+}
+
+// Cohen's kappa over the pairs the filters selected. Written out rather than pulled
+// from a library because the page is one offline file with no build step and nothing
+// running behind it -- the numbers below were checked against scikit-learn's
+// cohen_kappa_score on the full export.
+//
+// kappa is null, not zero, when both raters used a single category: chance agreement
+// is already total and the formula divides by zero, so "0.00" would read as "no better
+// than chance" for raters who in fact never disagreed.
+//
+// Precision, recall and F1 read the first pass as the ground truth and the second as
+// the prediction, counting "the axis is true" as the positive class. They are null, not
+// zero, where the denominator is empty -- a second pass that never said yes has no
+// precision to report, and "0.00" would read as a rater who was always wrong rather
+// than one who was never asked. F1 is 0 rather than null when both raters called
+// positives and never called the same one: that is a real score of zero.
+function axisScores(pairs) {
+  const n = pairs.length;
+  if (!n) return { n: 0, raw: 0, kappa: null, precision: null, recall: null, f1: null };
+  const pO = pairs.filter(([a, b]) => a === b).length / n;
+  const aTrue = pairs.filter(([a]) => a).length / n;
+  const bTrue = pairs.filter(([, b]) => b).length / n;
+  const pE = aTrue * bTrue + (1 - aTrue) * (1 - bTrue);
+  const tp = pairs.filter(([a, b]) => a && b).length;
+  const fp = pairs.filter(([a, b]) => !a && b).length;
+  const fn = pairs.filter(([a, b]) => a && !b).length;
+  const precision = tp + fp ? tp / (tp + fp) : null;
+  const recall = tp + fn ? tp / (tp + fn) : null;
+  const scored = precision !== null && recall !== null;
+  return {
+    n,
+    raw: pO,
+    kappa: pE >= 1 ? null : (pO - pE) / (1 - pE),
+    precision,
+    recall,
+    f1: !scored ? null
+      : precision + recall ? (2 * precision * recall) / (precision + recall) : 0,
+  };
+}
+
+function emptyDist() {
+  return {
+    n: 0,
+    sit: { scaffolding_appropriate: 0, rigor_appropriate: 0, both: 0 },
+    act: {
+      scaffolding_present: 0, rigor_present: 0,
+      amount: { over_scaffolding: 0, appropriate: 0, under_scaffolding: 0, unclear: 0 },
+      rigor_amount: { strong: 0, weak: 0, unclear: 0 },
+    },
+    res: {
+      problem_success: { meaningful_success: 0, not_meaningful: 0, no_success: 0, not_enough_evidence: 0 },
+      cognitive_engagement: { high_or_good: 0, low: 0, not_enough_evidence: 0 },
+    },
+  };
+}
+
+/** Fold one pass's judgment into that pass's distribution. `n` counts the judgments
+ *  folded in, which is the denominator every bar of that series is a share of. */
+function tally(dist, payload) {
+  const sit = payload.situation || {};
+  const act = payload.action || {};
+  const res = payload.result || {};
+  dist.n++;
+  if (sit.scaffolding_appropriate) dist.sit.scaffolding_appropriate++;
+  if (sit.rigor_appropriate) dist.sit.rigor_appropriate++;
+  if (sit.scaffolding_appropriate && sit.rigor_appropriate) dist.sit.both++;
+  if (act.scaffolding_present) {
+    dist.act.scaffolding_present++;
+    if (act.scaffolding_amount in dist.act.amount) dist.act.amount[act.scaffolding_amount]++;
+  }
+  if (act.rigor_present) {
+    dist.act.rigor_present++;
+    if (act.rigor_amount in dist.act.rigor_amount) dist.act.rigor_amount[act.rigor_amount]++;
+  }
+  if (res.problem_success in dist.res.problem_success) dist.res.problem_success[res.problem_success]++;
+  if (res.cognitive_engagement in dist.res.cognitive_engagement) {
+    dist.res.cognitive_engagement[res.cognitive_engagement]++;
+  }
+}
+
+function analytics(views) {
+  // One distribution per pass. A reannotator who threw the moment out recorded no
+  // judgment, so they contribute nothing to the second-pass series -- not a zero.
+  const first = emptyDist();
+  const second = emptyDist();
+  // With an annotator selected the two series are their own work, split by which pass
+  // they were doing: the moments they cut and judged first, and the moments someone
+  // else cut that they came back to. Their moments are in view either way, but tallying
+  // whoever happened to sit on the other side of them would put other people's
+  // judgments under a heading naming this one.
+  const theirs = (p) => !state.annotator || p.annotator_id === state.annotator;
+  const lengths = [];
+  const transcripts = new Set();
+  let twoPasses = 0, thrownOut = 0;
+
+  for (const v of views) {
+    const m = v.moment;
+    transcripts.add(m.transcript_id);
+    lengths.push(m.boundaries.end_turn - m.boundaries.start_turn + 1);
+    if (m.thrown_out) thrownOut++;
+    const sel = v.byRole.selector;
+    const re = v.byRole.reannotator;
+    if (sel && sel.axes && theirs(sel)) tally(first, sel.payload);
+    if (re && re.axes && theirs(re)) tally(second, re.payload);
+    // A thrown-out review left no judgment, so the moment has nothing to agree about.
+    if (Object.keys(v.pairs).length) twoPasses++;
+  }
+
+  const sorted = [...lengths].sort((a, b) => a - b);
+  const median = sorted.length ? sorted[Math.floor(sorted.length / 2)] : 0;
+  const mean = sorted.length ? sorted.reduce((a, b) => a + b, 0) / sorted.length : 0;
+  return {
+    n: views.length,
+    twoPasses,
+    thrownOut,
+    lenAvg: Math.round(mean * 10) / 10,
+    lenMedian: median,
+    lenRange: sorted.length ? [sorted[0], sorted[sorted.length - 1]] : [0, 0],
+    transcriptsWith: transcripts.size,
+    transcriptsNone: Math.max(0, DATA.transcripts_total - transcripts.size),
+    perTranscript: transcripts.size ? Math.round((views.length / transcripts.size) * 100) / 100 : 0,
+    first,
+    second,
+  };
+}
+
+/** Agreement scores per reported axis, pooled over every moment judged twice in the
+ *  date range. See agreementViews for why only the dates narrow it. */
+function agreement() {
+  const pairs = Object.fromEntries(REPORTED_AXES.map((a) => [a.key, []]));
+  let n = 0;
+  for (const v of agreementViews()) {
+    if (!Object.keys(v.pairs).length) continue;
+    n++;
+    for (const [axis, pair] of Object.entries(v.pairs)) {
+      if (pairs[axis]) pairs[axis].push(pair);
+    }
+  }
+  return {
+    n,
+    scores: Object.fromEntries(Object.entries(pairs).map(([k, p]) => [k, axisScores(p)])),
+  };
+}
+
+function kv(parent, label, value) {
+  const row = el("div", "kv");
+  row.append(el("span", null, label));
+  row.append(el("b", null, value));
+  parent.append(row);
+}
+
+function renderAnalytics(views) {
+  const a = analytics(views);
+  const iaa = agreement();
+  const n = a.n;
+  $("analytics-summary").textContent =
+    `Analytics — ${n} moment${n === 1 ? "" : "s"} (${a.twoPasses} judged twice) · current filter`;
+
+  const legend = clear($("analytics-legend"));
+  for (const [tone, name, role] of SERIES) {
+    const key = el("span", "key");
+    key.append(el("i", "sw " + tone));
+    const who = state.annotator ? `${annotatorName(state.annotator)} as ${role}` : role;
+    key.append(el("span", null,
+      `${name} · ${who} (n=${tone === "pass1" ? a.first.n : a.second.n} judgments)`));
+    legend.append(key);
+  }
+
+  const body = clear($("analytics-body"));
+  /** A bar comparing one category across the two passes. `count` reads it out of a
+   *  pass's distribution; `total` is the denominator to read it against, which for the
+   *  indented sub-bars is that pass's own "present" count, not its moment count. */
+  const both = (label, count, total = (d) => d.n) =>
+    bar(label, [a.first, a.second].map((d) => ({ count: count(d), total: total(d) })));
+
+  const left = el("div", "an-col");
+  left.append(el("h4", null, "Overview"));
+  kv(left, "Moments · 1+ pass", n);
+  kv(left, "Moments · 2 judgments", a.twoPasses);
+  kv(left, "Thrown out (2nd pass)", a.thrownOut);
+  kv(left, "Avg length (turns)", a.lenAvg);
+  kv(left, "Median · range", `${a.lenMedian} · ${a.lenRange[0]}–${a.lenRange[1]}`);
+  kv(left, "Moments / transcript", a.perTranscript);
+  kv(left, "Transcripts (w/ · none)", `${a.transcriptsWith} · ${a.transcriptsNone}`);
+  kv(left, "“No key moments” verdicts", selectedVerdicts().length);
+  left.append(el("h4", "spaced", "Situation"));
+  left.append(both("scaffolding appropriate", (d) => d.sit.scaffolding_appropriate));
+  left.append(both("rigor appropriate", (d) => d.sit.rigor_appropriate));
+  left.append(both("both", (d) => d.sit.both));
+  body.append(left);
+
+  const scaffN = (d) => d.act.scaffolding_present;
+  const rigorN = (d) => d.act.rigor_present;
+  const act = el("div", "an-col");
+  act.append(el("h4", null, "Action"));
+  act.append(both("scaffolding present", scaffN));
+  act.append(both("· appropriate", (d) => d.act.amount.appropriate, scaffN));
+  act.append(both("· over-scaffold", (d) => d.act.amount.over_scaffolding, scaffN));
+  act.append(both("· under-scaffold", (d) => d.act.amount.under_scaffolding, scaffN));
+  act.append(both("· unclear", (d) => d.act.amount.unclear, scaffN));
+  act.append(both("rigor present", rigorN));
+  act.append(both("· strong", (d) => d.act.rigor_amount.strong, rigorN));
+  act.append(both("· weak", (d) => d.act.rigor_amount.weak, rigorN));
+  act.append(both("· unclear", (d) => d.act.rigor_amount.unclear, rigorN));
+  body.append(act);
+
+  const res = el("div", "an-col");
+  res.append(el("h4", null, "Result"));
+  res.append(both("engage: low", (d) => d.res.cognitive_engagement.low));
+  res.append(both("engage: high", (d) => d.res.cognitive_engagement.high_or_good));
+  res.append(both("engage: no evidence", (d) => d.res.cognitive_engagement.not_enough_evidence));
+  res.append(both("success: meaningful", (d) => d.res.problem_success.meaningful_success));
+  res.append(both("success: not meaningful", (d) => d.res.problem_success.not_meaningful));
+  res.append(both("success: none", (d) => d.res.problem_success.no_success));
+  res.append(both("success: no evidence", (d) => d.res.problem_success.not_enough_evidence));
+  body.append(res);
+
+  const right = el("div", "an-col");
+  right.append(el("h4", null,
+    `Inter-annotator agreement · judged twice (n=${iaa.n}, date filter only)`));
+  const table = el("table", "agree");
+  const thead = el("thead");
+  const hrow = el("tr");
+  hrow.append(el("th", null, "Axis"));
+  hrow.append(el("th", "num", "n"));
+  hrow.append(el("th", "num", "Raw"));
+  hrow.append(el("th", "num", "κ"));
+  for (const [label, title] of [
+    ["P", "Precision: of the moments the second pass judged true on this axis, the share "
+      + "the first pass judged true too."],
+    ["R", "Recall: of the moments the first pass judged true on this axis, the share the "
+      + "second pass judged true too."],
+    ["F1", "Harmonic mean of precision and recall."],
+  ]) {
+    const cell = el("th", "num", label);
+    cell.title = title + " The first pass is the ground truth.";
+    hrow.append(cell);
+  }
+  thead.append(hrow);
+  table.append(thead);
+
+  /** A score, or an em dash carrying why there was none to compute. */
+  const scoreCell = (value, why) => {
+    if (value !== null) return el("td", "num", value.toFixed(2));
+    const cell = el("td", "num undef", "—");
+    cell.title = why;
+    return cell;
+  };
+
+  const tbody = el("tbody");
+  for (const axis of REPORTED_AXES) {
+    const s = iaa.scores[axis.key];
+    const tr = el("tr");
+    tr.append(el("td", null, axis.label));
+    tr.append(el("td", "num", s.n));
+    tr.append(el("td", "num", (s.raw * 100).toFixed(1) + "%"));
+    if (s.kappa === null) {
+      const cell = el("td", "num kappa undef", "—");
+      cell.title = s.n
+        ? "Undefined: both raters used a single category, so chance agreement is already total."
+        : "No moment was judged twice on this axis.";
+      tr.append(cell);
+    } else {
+      tr.append(el("td", "num kappa " + (s.kappa >= 0.4 ? "ok" : s.kappa >= 0.2 ? "mid" : "low"),
+        s.kappa.toFixed(2)));
+    }
+    const none = s.n ? "" : "No moment was judged twice on this axis.";
+    tr.append(scoreCell(s.precision,
+      none || "The second pass never judged this axis true, so there is nothing to be precise about."));
+    tr.append(scoreCell(s.recall,
+      none || "The first pass never judged this axis true, so there is nothing to recall."));
+    tr.append(scoreCell(s.f1, none || "Precision or recall is undefined on this axis."));
+    tbody.append(tr);
+  }
+  table.append(tbody);
+  const scroller = el("div", "table-scroll");
+  scroller.append(table);
+  right.append(scroller);
+  right.append(el("p", "an-legend-note",
+    "P · R · F1 score the second pass against the first as ground truth, with “axis true” "
+    + "as the positive class."));
+  body.append(right);
+}
+
+// ── By transcript ───────────────────────────────────────────────────────────
+function transcriptOptions(views, verdicts) {
+  const counts = new Map();
+  for (const v of views) {
+    const row = counts.get(v.moment.transcript_id) || { moments: 0, verdicts: 0 };
+    row.moments++;
+    counts.set(v.moment.transcript_id, row);
+  }
+  for (const r of verdicts) {
+    const row = counts.get(r.transcript_id) || { moments: 0, verdicts: 0 };
+    row.verdicts++;
+    counts.set(r.transcript_id, row);
+  }
+  return [...counts.entries()]
+    .map(([tid, c]) => ({ tid, ...c, cid: (TRANSCRIPTS.get(tid) || {}).conversation_id || tid }))
+    .sort((a, b) => a.cid.localeCompare(b.cid));
+}
+
+function renderTranscriptMode(views, verdicts) {
+  // The dropdown counts what the pane will actually show, so picking a transcript
+  // listed under "disagreed on rigor present" never opens an empty pane. A "no key
+  // moments" verdict has no axes to agree about, so those entries drop out of the list
+  // as soon as the axis filter asks for one.
+  const options = transcriptOptions(views, state.axis ? [] : verdicts);
+  const select = clear($("transcript-select"));
+  select.append(new Option("— select a transcript —", ""));
+  for (const o of options) {
+    const moments = `${o.moments} moment${o.moments === 1 ? "" : "s"}`;
+    const note = o.verdicts ? " · no key moments" : "";
+    select.append(new Option(`${o.cid} — ${moments}${note}`, o.tid));
+  }
+  if (!options.some((o) => o.tid === state.transcriptId)) state.transcriptId = "";
+  select.value = state.transcriptId;
+  $("transcript-hint").textContent = options.length
+    ? (state.transcriptId ? "" : "Select a transcript to read its moments.")
+    : "No transcripts match these filters.";
+  $("transcript-detail").hidden = !state.transcriptId;
+  if (!state.transcriptId) return;
+
+  const shown = views
+    .filter((v) => v.moment.transcript_id === state.transcriptId)
+    .sort((a, b) => a.moment.start_turn - b.moment.start_turn);
+  if (!shown.some((v) => v.moment.id === state.activeMomentId)) {
+    state.activeMomentId = shown.length ? shown[0].moment.id : null;
+  }
+  const active = shown.find((v) => v.moment.id === state.activeMomentId) || null;
+
+  const turns = (TRANSCRIPTS.get(state.transcriptId) || { turns: [] }).turns;
+  const pane = clear($("transcript-turns"));
+  pane.append(renderTranscript(
+    turns,
+    active ? active.moment.boundaries : null,
+    active ? active.moment.original_boundaries : null,
+    false));
+
+  const list = clear($("transcript-moments"));
+  for (const r of verdicts.filter((r) => r.transcript_id === state.transcriptId)) {
+    const note = el("p", "no-key");
+    note.append(el("span", "who", r.annotator_name));
+    note.append(el("span", null, ` marked this transcript “no key moments” on ${fmtDate(r.created_at)}`
+      + (r.note ? ` — ${r.note}` : "")));
     list.append(note);
   }
-  for (const c of cases.slice(page * PAGE, page * PAGE + PAGE)) {
-    const moment = DATA.moments[c.moment_id];
-    const card = el("div", "case");
-    const head = el("h2");
-    const tone = { agreement: "agreement", disagreement: "disagreement" }[c.outcome] || "none";
-    head.append(el("span", "tag " + tone, c.construct + " · " + c.outcome));
-    head.append(el("code", null, c.moment_id.slice(0, 8)));
-    head.append(el("span", "meta", `cut by ${moment.created_by}`));
-    card.append(head);
-    card.append(transcript(moment));
-    const sides = el("div", c.second ? "sides" : "sides single");
-    sides.append(side(c.first, c.second ? "first pass" : "only pass"));
-    if (c.second) sides.append(side(c.second, "second pass"));
-    card.append(sides);
+  if (!shown.length) list.append(el("p", "hint", "No moments here match the current filters."));
+  for (const v of shown) {
+    const card = momentCard(v);
+    card.classList.add("selectable");
+    if (v.moment.id === state.activeMomentId) card.classList.add("active");
+    // Selecting a card redraws the list, which would rebuild every <details> closed --
+    // so a click that was opening one of them must not also count as selecting the card,
+    // and re-selecting the card already showing is left alone rather than redrawn.
+    card.addEventListener("click", (event) => {
+      if (event.target.closest("summary")) return;
+      if (v.moment.id === state.activeMomentId) return;
+      state.activeMomentId = v.moment.id;
+      render();
+    });
     list.append(card);
   }
-
-  focusCutRows();
-  $("page").textContent = `Page ${page + 1} of ${pages}`;
-  $("prev").disabled = page === 0;
-  $("next").disabled = page >= pages - 1;
-  window.scrollTo({ top: 0 });
+  if (active) scrollToSpan(pane, active.moment.boundaries.start_row);
 }
 
-for (const id of ["annotator", "construct", "action", "outcome"]) {
-  $(id).addEventListener("change", () => { page = 0; render(); });
+/** Bring a moment's first turn into view inside the transcript pane only -- scrolling
+ *  the pane directly rather than scrollIntoView, which would drag the page with it. */
+function scrollToSpan(pane, turnIndex) {
+  const row = pane.querySelector(`.turn[data-turn="${turnIndex}"]`);
+  if (!row) return;
+  pane.scrollTop += row.getBoundingClientRect().top - pane.getBoundingClientRect().top - 60;
 }
-$("prev").addEventListener("click", () => { page--; render(); });
-$("next").addEventListener("click", () => { page++; render(); });
 
-const reviewedMoments = new Set(
-  DATA.cases.filter((c) => c.outcome !== "single pass").map((c) => c.moment_id)).size;
-$("sub").textContent =
-  `${Object.keys(DATA.moments).length} moments (${reviewedMoments} reviewed twice) · ` +
-  `${DATA.cases.length} cases across situation, action and result · ` +
-  `${DATA.annotators.length} annotators · ${PAGE} per page`;
+// ── Wiring ──────────────────────────────────────────────────────────────────
+function render() {
+  const views = selectedViews();
+  renderAnalytics(views);
+  $("clear-dates").hidden = !state.from && !state.to;
+  renderTranscriptMode(views, selectedVerdicts());
+}
+
+const annotatorSelect = $("f-annotator");
+annotatorSelect.append(new Option("All annotators", ""));
+for (const a of DATA.annotators) {
+  annotatorSelect.append(new Option(`${a.name} (${a.total})`, a.id));
+}
+
+// The axis filter offers exactly the axes the agreement table reports on: the result
+// axes are compared but not scored, so slicing the moments by them would invite reading
+// a number the team has decided not to quote.
+const axisSelect = $("f-axis");
+axisSelect.append(new Option("Everything", ""));
+for (const [want, label] of [["differ", "Disagreed on"], ["agree", "Agreed on"]]) {
+  const group = el("optgroup");
+  group.label = label;
+  for (const axis of REPORTED_AXES) {
+    group.append(new Option(axis.label, `${want}:${axis.key}`));
+  }
+  axisSelect.append(group);
+}
+
+const BINDINGS = [
+  ["f-annotator", "annotator"],
+  ["f-axis", "axis"],
+  ["f-from", "from"],
+  ["f-to", "to"],
+];
+for (const [id, key] of BINDINGS) {
+  $(id).addEventListener("change", () => {
+    state[key] = $(id).value;
+    render();
+  });
+}
+$("f-testers").addEventListener("change", () => {
+  state.excludeTesters = $("f-testers").checked;
+  render();
+});
+$("clear-dates").addEventListener("click", () => {
+  state.from = state.to = "";
+  $("f-from").value = $("f-to").value = "";
+  render();
+});
+$("transcript-select").addEventListener("change", () => {
+  state.transcriptId = $("transcript-select").value;
+  state.activeMomentId = null;
+  render();
+});
+$("header-sub").textContent =
+  `${DATA.moments.length} moments · ${DATA.transcripts.length} annotated transcripts of `
+  + `${DATA.transcripts_total} · ${DATA.annotators.length} annotators`;
+$("header-source").textContent = `${DATA.source.annotations} · built ${DATA.generated_at}`;
 render();
 </script>
 </body>

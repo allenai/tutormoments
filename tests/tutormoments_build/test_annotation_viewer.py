@@ -1,29 +1,55 @@
-"""Tests for the annotation review site's case building and transcript windowing."""
+"""Tests for the annotation review site's axes, moment building and payload assembly.
+
+The page recomputes filters and analytics in the browser, but only from what these
+modules put in the payload: the coarse axes each pass reduces to, the rater-vs-rater
+value pairs kappa is pooled from, and where a moment sits once a reannotator has moved
+it. Those are what is tested here.
+"""
 
 import json
 
 import pytest
 
 from tutormoments_build.annotation_viewer import (
-    action_tags,
-    annotated_moments,
-    build_cases,
+    AXIS_KEYS,
+    REPORTED_AXIS_KEYS,
+    TranscriptIndex,
+    annotator_roster,
+    axis_pairs,
+    build_moments,
+    build_payload,
     build_site,
-    latest_revisions,
-    moment_turns,
-    paired_moments,
+    coarse_axes,
+    diff_axes,
+    latest_by_role,
+    locate_span,
+    no_key_moment_verdicts,
+    sar_of,
 )
-from tutormoments_build.annotation_viewer.transcripts import TranscriptIndex
 
 
-def annotation(annotator, role, *, revision=1, created_at="2026-08-01T00:00:00Z", **payload):
-    return {
+def annotation(
+    annotator,
+    role,
+    *,
+    revision=1,
+    created_at="2026-08-01T00:00:00Z",
+    name=None,
+    **payload,
+):
+    """One saved pass. `name` is left off unless asked for: exports predating the
+    name field are the case worth having as the default."""
+    row = {
         "annotator_id": annotator,
         "role": role,
         "revision": revision,
         "created_at": created_at,
+        "is_test": 0,
         "payload": payload,
     }
+    if name is not None:
+        row["annotator_name"] = name
+    return row
 
 
 def situation(scaffolding=True, rigor=False, why="because"):
@@ -58,8 +84,17 @@ def result(success="meaningful_success", engagement="high_or_good"):
     }
 
 
-def row(index, text="hello", *, role="TUTOR", kind="dialogue"):
-    """One rendered transcript row, shaped like the v2 transcripts export."""
+def judged(**over):
+    """A complete pass: all three constructs recorded."""
+    return {"situation": situation(), "action": action(), "result": result(), **over}
+
+
+def row(index, text="hello", *, role="TUTOR", kind="dialogue", turn_number=None):
+    """One rendered transcript row, shaped like the v2 transcripts export.
+
+    Enrichment rows carry no turn number: they sit between turns, which is exactly why
+    row positions and turn numbers cannot be read as each other.
+    """
     prefix = kind if kind != "dialogue" else f"[{role}]"
     return {
         "index": index,
@@ -67,223 +102,715 @@ def row(index, text="hello", *, role="TUTOR", kind="dialogue"):
         "text": f"{prefix} {text}",
         "type": kind,
         "timestamp": "00:01-00:02",
-        "turn_number": index + 1 if kind == "dialogue" else None,
+        "turn_number": turn_number if kind == "dialogue" else None,
     }
 
 
-def transcript(rows, transcript_id="t1"):
-    return {"transcript_id": transcript_id, "conversation_id": "c1", "turns": rows}
+#: Enrichment rows placed before the first dialogue turn, so every fixture's row
+#: positions run this far ahead of its turn numbers. Never zero: numberings that
+#: happened to coincide would hide every confusion between the two.
+ENRICHMENTS = 2
 
 
-def record(annotations, *, moment_id="m1", status="reannotated", start=10, cut=12, end=20):
+def rendered_rows(last_turn=30):
+    """A transcript's rows as the pane draws them: enrichments, then dialogue."""
+    rows = [row(i, "screen", kind="[SCREEN UPDATE]") for i in range(ENRICHMENTS)]
+    return rows + [
+        row(ENRICHMENTS + n - 1, f"turn {n}", turn_number=n)
+        for n in range(1, last_turn + 1)
+    ]
+
+
+def transcript(rows, transcript_id="t1", conversation_id="c1"):
     return {
-        "transcript_id": "t1",
+        "transcript_id": transcript_id,
+        "conversation_id": conversation_id,
+        "turns": rows,
+    }
+
+
+def record(
+    annotations,
+    *,
+    moment_id="m1",
+    status="reannotated",
+    start=10,
+    cut=12,
+    end=20,
+    transcript_id="t1",
+):
+    """One exported moment. `start`/`cut`/`end` are dialogue turn numbers, which is all
+    the export records -- where they land in the rendered rows is the transcript's to
+    say."""
+    return {
+        "transcript_id": transcript_id,
         "moment": {
-            "id": moment_id,
+            "moment_id": moment_id,
             "status": status,
             "start_turn": start,
             "cut_turn": cut,
             "end_turn": end,
             "created_by": "ann",
+            "created_by_name": "Jessica",
+            "created_at": "2026-08-01T00:00:00Z",
+            "is_test": 0,
         },
         "annotations": annotations,
     }
 
 
-class TestLatestRevisions:
-    def test_keeps_highest_revision_per_annotator(self):
-        anns = [
-            annotation("ann", "selector", revision=1, situation=situation(why="first")),
-            annotation("ann", "selector", revision=2, situation=situation(why="second")),
-        ]
-        kept = latest_revisions(anns)
-        assert len(kept) == 1
-        assert kept[0]["payload"]["situation"]["why"] == "second"
-
-    def test_breaks_ties_on_created_at(self):
-        anns = [
-            annotation("ann", "selector", created_at="2026-08-01T00:00:00Z",
-                       situation=situation(why="early")),
-            annotation("ann", "selector", created_at="2026-08-02T00:00:00Z",
-                       situation=situation(why="late")),
-        ]
-        assert latest_revisions(anns)[0]["payload"]["situation"]["why"] == "late"
-
-    def test_keeps_both_annotators(self):
-        anns = [annotation("a", "selector"), annotation("b", "reannotator")]
-        assert len(latest_revisions(anns)) == 2
+def no_key_moments(
+    annotator="ann", *, note="nothing to see", transcript_id="t9", name=None
+):
+    record = {
+        "transcript_id": transcript_id,
+        "no_key_moments_record": {
+            "annotator_id": annotator,
+            "role": "selector",
+            "revision": 1,
+            "created_at": "2026-08-02T00:00:00Z",
+            "is_test": 0,
+            "payload": {"no_key_moments": True, "note": note},
+        },
+    }
+    if name is not None:
+        record["no_key_moments_record"]["annotator_name"] = name
+    return record
 
 
-class TestPairedMoments:
-    def test_requires_both_passes(self):
-        only_first = record([annotation("a", "selector", situation=situation())])
-        assert paired_moments([only_first]) == []
+class TestSarOf:
+    def test_a_thrown_out_review_recorded_no_judgment(self):
+        assert sar_of("reannotator", {"meta": {"throw_out": True}}) is None
 
-    def test_pairs_first_and_second(self):
-        r = record([
-            annotation("a", "selector", situation=situation()),
-            annotation("b", "reannotator", situation=situation()),
-        ])
-        [paired] = paired_moments([r])
-        assert paired["first"]["annotator_id"] == "a"
-        assert paired["second"]["annotator_id"] == "b"
-
-    def test_drops_retracted_moments(self):
-        r = record([
-            annotation("a", "selector", situation=situation()),
-            annotation("b", "reannotator", situation=situation()),
-        ], status="retracted")
-        assert paired_moments([r]) == []
-
-    def test_excluded_annotator_can_break_a_pair(self):
-        r = record([
-            annotation("a", "selector", situation=situation()),
-            annotation("b", "reannotator", situation=situation()),
-        ])
-        assert paired_moments([r], excluded={"b"}) == []
-
-    def test_ignores_no_key_moment_reports(self):
-        assert paired_moments([{"no_key_moments_record": {"annotator_id": "a"}}]) == []
-
-
-class TestBuildCases:
-    def _cases(self, first_payload, second_payload):
-        r = record([
-            annotation("a", "selector", **first_payload),
-            annotation("b", "reannotator", **second_payload),
-        ])
-        return {c["construct"]: c for c in build_cases(paired_moments([r]))}
-
-    def test_identical_judgments_agree(self):
-        cases = self._cases(
-            {"situation": situation(), "action": action(), "result": result()},
-            {"situation": situation(why="different prose"), "action": action(),
-             "result": result()},
+    def test_an_adjudicator_judgment_lives_under_final(self):
+        payload = {"final": {"situation": situation()}, "meta": {}}
+        assert (
+            sar_of("adjudicator", payload)["situation"]["scaffolding_appropriate"]
+            is True
         )
-        assert {c["outcome"] for c in cases.values()} == {"agreement"}
 
-    def test_free_text_alone_does_not_make_a_disagreement(self):
-        cases = self._cases(
-            {"situation": situation(why="one")}, {"situation": situation(why="two")}
+    def test_a_partial_judgment_still_counts(self):
+        assert sar_of("selector", {"situation": situation()})["action"] is None
+
+
+class TestCoarseAxes:
+    def test_reduces_a_judgment_to_booleans(self):
+        axes = coarse_axes(judged())
+        assert axes["scaffolding_appropriate"] is True
+        assert axes["rigor_appropriate"] is False
+        assert axes["meaningful_success"] is True
+        assert axes["high_engagement"] is True
+
+    def test_over_scaffolding_is_unjudged_when_no_scaffolding_was_seen(self):
+        axes = coarse_axes(
+            judged(action=action(scaffolding_present=False, scaffolding_amount=None))
         )
-        assert cases["situation"]["outcome"] == "agreement"
+        assert axes["scaffolding_present"] is False
+        assert axes["over_scaffolding"] is None
 
-    def test_differing_field_is_a_disagreement(self):
-        cases = self._cases(
-            {"result": result(success="meaningful_success")},
-            {"result": result(success="no_success")},
+    def test_over_scaffolding_is_the_amount_the_rater_chose(self):
+        axes = coarse_axes(judged(action=action(scaffolding_amount="over_scaffolding")))
+        assert axes["over_scaffolding"] is True
+
+    def test_no_judgment_leaves_every_axis_unjudged(self):
+        assert coarse_axes(None) == dict.fromkeys(AXIS_KEYS)
+
+
+class TestDiffAxes:
+    def test_finds_the_axes_two_raters_judged_differently(self):
+        first = coarse_axes(judged())
+        second = coarse_axes(judged(situation=situation(rigor=True)))
+        assert diff_axes(first, second) == {"rigor_appropriate"}
+
+    def test_over_scaffolding_is_skipped_unless_both_saw_scaffolding(self):
+        saw = coarse_axes(judged(action=action(scaffolding_amount="over_scaffolding")))
+        did_not = coarse_axes(
+            judged(action=action(scaffolding_present=False, scaffolding_amount=None))
         )
-        assert cases["result"]["outcome"] == "disagreement"
-        flags = {f["name"]: f["agrees"] for f in cases["result"]["first"]["fields"]}
-        assert flags == {"problem_success": False, "cognitive_engagement": True}
+        # They differ about whether scaffolding happened at all, which is one disagreement --
+        # not two, with "was there too much of it" counted a second time.
+        assert diff_axes(saw, did_not) == {"scaffolding_present"}
 
-    def test_constructs_are_judged_independently(self):
-        cases = self._cases(
-            {"situation": situation(), "result": result()},
-            {"situation": situation(), "result": result(engagement="low")},
+    def test_an_unjudged_axis_is_not_a_disagreement(self):
+        assert diff_axes(coarse_axes(judged()), coarse_axes(None)) == set()
+
+    def test_an_unreported_axis_is_still_a_disagreement(self):
+        # The result axes get no row in the agreement table, but they are still compared:
+        # a card whose only split is on engagement must still read as a disagreement.
+        first = coarse_axes(judged())
+        second = coarse_axes(judged(result=result(engagement="low")))
+        assert diff_axes(first, second) == {"high_engagement"}
+        assert "high_engagement" not in REPORTED_AXIS_KEYS
+
+
+class TestAxisPairs:
+    def test_pairs_only_the_axes_both_raters_judged(self):
+        saw = coarse_axes(judged(action=action(scaffolding_amount="over_scaffolding")))
+        did_not = coarse_axes(
+            judged(action=action(scaffolding_present=False, scaffolding_amount=None))
         )
-        assert cases["situation"]["outcome"] == "agreement"
-        assert cases["result"]["outcome"] == "disagreement"
+        pairs = axis_pairs(saw, did_not)
+        assert "over_scaffolding" not in pairs
+        assert pairs["scaffolding_present"] == [True, False]
 
-    def test_thrown_out_second_pass_is_not_a_disagreement(self):
-        cases = self._cases({"situation": situation()}, {"situation": None})
-        case = cases["situation"]
-        assert case["outcome"] == "no second judgment"
-        # Nothing to differ from, so no field is flagged as differing.
-        assert all(f["agrees"] for f in case["first"]["fields"])
 
-    def test_thrown_out_pass_is_marked_unjudged_not_merely_silent(self):
-        # An empty panel would otherwise read as "reviewed it and had no comment".
-        cases = self._cases({"situation": situation()}, {"situation": None})
-        assert cases["situation"]["second"]["judged"] is False
-        assert cases["situation"]["first"]["judged"] is True
-
-    def test_a_judgment_without_prose_is_still_judged(self):
-        cases = self._cases({"situation": situation()}, {"situation": situation(why="")})
-        assert cases["situation"]["second"]["judged"] is True
-        assert cases["situation"]["second"]["text"] == ""
-
-    def test_first_pass_without_a_judgment_yields_no_case(self):
-        cases = self._cases({"situation": None}, {"situation": situation()})
-        assert "situation" not in cases
-
-    def test_multi_selects_mark_shared_and_unshared_boxes(self):
-        cases = self._cases(
-            {"action": action(scaffolding_strategies=["guiding_questions", "re_explain"])},
-            {"action": action(scaffolding_strategies=["guiding_questions"])},
+class TestLatestByRole:
+    def test_keeps_the_highest_revision_of_each_role(self):
+        passes = latest_by_role(
+            [
+                annotation(
+                    "a", "selector", revision=1, situation=situation(why="first")
+                ),
+                annotation(
+                    "a", "selector", revision=2, situation=situation(why="second")
+                ),
+                annotation("b", "reannotator", revision=1),
+            ]
         )
-        [group] = cases["action"]["first"]["multi"]
-        assert group["caption"] == "scaffolding strategies"
-        assert {b["box"]: b["shared"] for b in group["boxes"]} == {
-            "guiding_questions": True,
-            "re_explain": False,
+        assert passes["selector"]["payload"]["situation"]["why"] == "second"
+        assert set(passes) == {"selector", "reannotator"}
+
+    def test_breaks_ties_on_save_time(self):
+        passes = latest_by_role(
+            [
+                annotation(
+                    "a",
+                    "selector",
+                    created_at="2026-08-01T00:00:00Z",
+                    situation=situation(why="early"),
+                ),
+                annotation(
+                    "a",
+                    "selector",
+                    created_at="2026-08-02T00:00:00Z",
+                    situation=situation(why="late"),
+                ),
+            ]
+        )
+        assert passes["selector"]["payload"]["situation"]["why"] == "late"
+
+    def test_ignores_roles_the_viewer_does_not_render(self):
+        assert latest_by_role([annotation("a", "spectator")]) == {}
+
+
+class TestBuildMoments:
+    def test_pairs_the_passes_and_calls_the_outcome(self):
+        moments = build_moments(
+            [
+                record(
+                    [
+                        annotation("a", "selector", **judged()),
+                        annotation(
+                            "b",
+                            "reannotator",
+                            **judged(situation=situation(rigor=True)),
+                        ),
+                    ]
+                )
+            ]
+        )
+        assert len(moments) == 1
+        moment = moments[0]
+        assert [p["role"] for p in moment["passes"]] == ["selector", "reannotator"]
+        assert moment["outcome"] == "disagreement"
+        assert moment["diff"] == ["rigor_appropriate"]
+        assert moment["pairs"]["rigor_appropriate"] == [False, True]
+
+    def test_matching_judgments_agree(self):
+        moments = build_moments(
+            [
+                record(
+                    [
+                        annotation("a", "selector", **judged()),
+                        annotation("b", "reannotator", **judged()),
+                    ]
+                )
+            ]
+        )
+        assert moments[0]["outcome"] == "agreement"
+        assert moments[0]["diff"] == []
+
+    def test_a_single_pass_has_nothing_to_compare(self):
+        moments = build_moments(
+            [record([annotation("a", "selector", **judged())], status="selected")]
+        )
+        assert moments[0]["outcome"] == "single pass"
+        assert moments[0]["pairs"] == {}
+
+    def test_a_thrown_out_review_is_not_an_agreement(self):
+        # The reviewer left no judgment, so there is nothing to agree with -- counting it
+        # as agreement would inflate every rate on the analytics panel.
+        moments = build_moments(
+            [
+                record(
+                    [
+                        annotation("a", "selector", **judged()),
+                        annotation(
+                            "b",
+                            "reannotator",
+                            meta={"throw_out": True, "throw_out_reason": "off task"},
+                        ),
+                    ]
+                )
+            ]
+        )
+        assert moments[0]["outcome"] == "thrown out on review"
+        assert moments[0]["thrown_out"] is True
+        assert moments[0]["pairs"] == {}
+        assert moments[0]["passes"][1]["axes"] is None
+
+    def test_retracted_moments_are_dropped(self):
+        assert (
+            build_moments(
+                [record([annotation("a", "selector", **judged())], status="retracted")]
+            )
+            == []
+        )
+
+    def test_excluded_annotators_are_dropped_with_their_passes(self):
+        moments = build_moments(
+            [
+                record(
+                    [
+                        annotation("a", "selector", **judged()),
+                        annotation("b", "reannotator", **judged()),
+                    ]
+                )
+            ],
+            excluded={"b"},
+        )
+        assert [p["annotator_id"] for p in moments[0]["passes"]] == ["a"]
+        assert moments[0]["outcome"] == "single pass"
+
+    def test_a_moment_whose_every_pass_was_excluded_disappears(self):
+        assert (
+            build_moments(
+                [record([annotation("a", "selector", **judged())])], excluded={"a"}
+            )
+            == []
+        )
+
+    def test_a_redrawn_span_is_where_the_moment_now_sits(self):
+        moments = build_moments(
+            [
+                record(
+                    [
+                        annotation("a", "selector", **judged()),
+                        annotation(
+                            "b",
+                            "reannotator",
+                            **judged(
+                                meta={
+                                    "changed_boundaries": True,
+                                    "new_start_turn": 8,
+                                    "new_end_turn": 18,
+                                    "redrew_cut_point": True,
+                                    "new_cut_turn": 11,
+                                }
+                            ),
+                        ),
+                    ]
+                )
+            ]
+        )
+        assert moments[0]["boundaries"] == {
+            "start_turn": 8,
+            "end_turn": 18,
+            "cut_turn": 11,
+        }
+        assert moments[0]["original_boundaries"] == {
+            "start_turn": 10,
+            "end_turn": 20,
+            "cut_turn": 12,
         }
 
-    def test_multi_selects_do_not_decide_agreement(self):
-        cases = self._cases(
-            {"action": action(scaffolding_strategies=["guiding_questions"])},
-            {"action": action(scaffolding_strategies=["co_solve"])},
+    def test_an_untouched_span_has_no_earlier_version(self):
+        moments = build_moments([record([annotation("a", "selector", **judged())])])
+        assert moments[0]["boundaries"] == {
+            "start_turn": 10,
+            "end_turn": 20,
+            "cut_turn": 12,
+        }
+        assert moments[0]["original_boundaries"] is None
+
+    def test_an_edge_the_reannotator_left_alone_keeps_its_own_number(self):
+        moments = build_moments(
+            [
+                record(
+                    [
+                        annotation(
+                            "b",
+                            "reannotator",
+                            **judged(
+                                meta={"redrew_cut_point": True, "new_cut_turn": 11}
+                            ),
+                        )
+                    ]
+                )
+            ]
         )
-        assert cases["action"]["outcome"] == "agreement"
+        b = moments[0]["boundaries"]
+        assert (b["start_turn"], b["cut_turn"], b["end_turn"]) == (10, 11, 20)
 
-    def test_other_free_text_joins_its_checkbox_group(self):
-        cases = self._cases(
-            {"action": action(scaffolding_strategy_other="improvised")}, {"action": action()}
+    def test_carries_the_dates_the_filters_run_on(self):
+        moments = build_moments(
+            [
+                record(
+                    [
+                        annotation(
+                            "a",
+                            "selector",
+                            created_at="2026-08-03T18:28:56Z",
+                            **judged(),
+                        ),
+                    ]
+                )
+            ]
         )
-        boxes = [b["box"] for b in cases["action"]["first"]["multi"][0]["boxes"]]
-        assert 'other: "improvised"' in boxes
+        assert moments[0]["passes"][0]["date"] == "2026-08-03"
+
+    def test_the_moment_is_credited_to_the_cutter_by_name(self):
+        moments = build_moments([record([annotation("a", "selector", **judged())])])
+        assert moments[0]["created_by"] == "Jessica"
+
+    def test_falls_back_to_the_id_when_the_export_carries_no_name(self):
+        row = record([annotation("a", "selector", **judged())])
+        del row["moment"]["created_by_name"]
+        assert build_moments([row])[0]["created_by"] == "ann"
+
+    def test_a_pass_is_bylined_with_the_raters_name(self):
+        moments = build_moments(
+            [record([annotation("a", "selector", name="Ada", **judged())])]
+        )
+        assert moments[0]["passes"][0]["annotator_name"] == "Ada"
+
+    def test_an_unnamed_rater_is_bylined_with_their_id(self):
+        moments = build_moments([record([annotation("a", "selector", **judged())])])
+        assert moments[0]["passes"][0]["annotator_name"] == "a"
 
 
-class TestMomentTurns:
-    def _turns(self, count):
-        return {n: {"turn_number": n, "role": "Tutor", "text": f"turn {n}"}
-                for n in range(1, count + 1)}
+class TestNoKeyMomentVerdicts:
+    def test_reads_the_verdict_and_its_note(self):
+        verdicts = no_key_moment_verdicts(
+            [no_key_moments("erika", note="no math here", name="Erika")]
+        )
+        assert verdicts == [
+            {
+                "transcript_id": "t9",
+                "annotator_id": "erika",
+                "annotator_name": "Erika",
+                "created_at": "2026-08-02T00:00:00Z",
+                "date": "2026-08-02",
+                "is_test": 0,
+                "note": "no math here",
+            }
+        ]
 
-    def test_uncapped_by_default(self):
-        moment = {"start_turn": 1, "cut_turn": 50, "end_turn": 100}
-        shown, before, after, missing = moment_turns(self._turns(100), moment)
-        assert len(shown) == 100
-        assert (before, after, missing) == (0, 0, 0)
+    def test_excluded_annotators_are_dropped(self):
+        assert (
+            no_key_moment_verdicts([no_key_moments("erika")], excluded={"erika"}) == []
+        )
 
-    def test_short_span_is_shown_whole(self):
-        moment = {"start_turn": 3, "cut_turn": 4, "end_turn": 7}
-        shown, before, after, missing = moment_turns(self._turns(20), moment, max_turns=24)
-        assert shown == [3, 4, 5, 6, 7]
-        assert (before, after, missing) == (0, 0, 0)
 
-    def test_long_span_is_windowed_on_the_cut_turn(self):
-        moment = {"start_turn": 1, "cut_turn": 50, "end_turn": 100}
-        shown, before, after, missing = moment_turns(self._turns(100), moment, max_turns=10)
-        assert len(shown) == 10
-        assert moment["cut_turn"] in shown
-        assert before + len(shown) + after == 100
-        assert missing == 0
+class TestAnnotatorRoster:
+    def test_counts_passes_by_role_and_verdicts(self):
+        moments = build_moments(
+            [
+                record(
+                    [
+                        annotation("a", "selector", **judged()),
+                        annotation("b", "reannotator", **judged()),
+                    ]
+                )
+            ]
+        )
+        roster = annotator_roster(
+            moments, no_key_moment_verdicts([no_key_moments("b")])
+        )
+        by_id = {r["id"]: r for r in roster}
+        assert by_id["a"]["selector"] == 1
+        assert by_id["b"]["reannotator"] == 1
+        assert by_id["b"]["no_key_moments"] == 1
+        assert by_id["b"]["total"] == 2
 
-    def test_turns_past_the_end_are_counted_not_hidden(self):
-        moment = {"start_turn": 8, "cut_turn": 9, "end_turn": 15}
-        shown, _, _, missing = moment_turns(self._turns(10), moment, max_turns=24)
-        assert shown == [8, 9, 10]
-        assert missing == 5
+    def test_carries_the_name_the_filter_menu_lists(self):
+        moments = build_moments(
+            [record([annotation("a", "selector", name="Ada", **judged())])]
+        )
+        roster = annotator_roster(moments, [])
+        assert roster == [
+            {
+                "id": "a",
+                "name": "Ada",
+                "selector": 1,
+                "reannotator": 0,
+                "adjudicator": 0,
+                "no_key_moments": 0,
+                "total": 1,
+                "is_test": 0,
+            }
+        ]
 
-    def test_span_entirely_past_the_end(self):
-        moment = {"start_turn": 30, "cut_turn": 31, "end_turn": 34}
-        shown, _, _, missing = moment_turns(self._turns(10), moment, max_turns=24)
-        assert shown == []
-        assert missing == 5
+    def test_lists_people_in_name_order(self):
+        moments = build_moments(
+            [
+                record(
+                    [
+                        annotation("z", "selector", name="Ada", **judged()),
+                        annotation("a", "reannotator", name="Zoe", **judged()),
+                    ]
+                )
+            ]
+        )
+        assert [r["name"] for r in annotator_roster(moments, [])] == ["Ada", "Zoe"]
+
+
+class TestTranscriptIndex:
+    @pytest.fixture
+    def path(self, tmp_path):
+        out = tmp_path / "t.jsonl"
+        out.write_text(
+            "\n".join(
+                json.dumps(
+                    transcript([row(1, f"hello {i}", turn_number=2)], f"t{i}", f"c{i}")
+                )
+                for i in range(5)
+            )
+            + "\n"
+        )
+        return out
+
+    def test_reads_only_the_wanted_lines(self, path):
+        index = TranscriptIndex(path, {"t1", "t3"})
+        assert len(index) == 2
+        assert "t1" in index and "t0" not in index
+        assert index.rows("t3")[0]["text"] == "[TUTOR] hello 3"
+
+    def test_counts_every_transcript_in_the_file(self, path):
+        # The overview says how many transcripts were never annotated, which only the
+        # whole file knows -- the wanted set is the annotated ones.
+        assert TranscriptIndex(path, {"t1"}).total == 5
+
+    def test_rows_keep_the_position_the_pane_draws_them_at(self, path):
+        assert TranscriptIndex(path, {"t2"}).rows("t2")[0]["turn_index"] == 1
+
+    def test_rows_also_keep_the_turn_number_the_annotator_saw(self, path):
+        assert TranscriptIndex(path, {"t2"}).rows("t2")[0]["turn_number"] == 2
+
+    def test_an_enrichment_row_has_no_turn_number(self, tmp_path):
+        path = tmp_path / "t.jsonl"
+        path.write_text(
+            json.dumps(transcript([row(3, "screen", kind="[SCREEN UPDATE]")])) + "\n"
+        )
+        assert TranscriptIndex(path, {"t1"}).rows("t1")[0]["turn_number"] is None
+
+    def test_turn_rows_span_every_row_a_turn_number_covers(self, tmp_path):
+        path = tmp_path / "t.jsonl"
+        path.write_text(json.dumps(transcript(rendered_rows(3))) + "\n")
+        # Turn 1 is the third row drawn: two enrichments precede it.
+        assert TranscriptIndex(path, {"t1"}).turn_rows("t1")[1] == (2, 2)
+
+    def test_an_export_without_index_is_refused(self, tmp_path):
+        path = tmp_path / "old.jsonl"
+        turn = {
+            "role": "TUTOR",
+            "text": "[TUTOR] hi",
+            "type": "dialogue",
+            "turn_number": 1,
+        }
+        path.write_text(json.dumps(transcript([turn])) + "\n")
+        index = TranscriptIndex(path, {"t1"})
+        with pytest.raises(ValueError, match="carry no 'index'"):
+            index.rows("t1")
+
+
+class TestLocateSpan:
+    """Turn numbers, which is all the export records, onto the rows the pane draws."""
+
+    def turn_rows(self, rows):
+        return {
+            r["turn_number"]: (r["index"], r["index"])
+            for r in rows
+            if r["turn_number"] is not None
+        }
+
+    def test_resolves_each_edge_past_the_enrichments_before_it(self):
+        span = {"start_turn": 10, "cut_turn": 12, "end_turn": 20}
+        located = locate_span(self.turn_rows(rendered_rows()), span)
+        assert located == {
+            "start_row": 10 + ENRICHMENTS - 1,
+            "cut_row": 12 + ENRICHMENTS - 1,
+            "end_row": 20 + ENRICHMENTS - 1,
+        }
+
+    def test_a_turn_drawn_over_two_rows_is_kept_whole(self):
+        # The v2 numbering sometimes gives two rows one number: the start opens on the
+        # first of them and the cut and the end close on the last, so neither edge
+        # slices a turn in half.
+        turn_rows = {5: (7, 9)}
+        span = {"start_turn": 5, "cut_turn": 5, "end_turn": 5}
+        assert locate_span(turn_rows, span) == {
+            "start_row": 7,
+            "cut_row": 9,
+            "end_row": 9,
+        }
+
+    def test_an_edge_naming_a_skipped_number_lands_inside_the_span(self):
+        # Wherever that numbering repeats a number it skips the next, so an edge can
+        # name a turn no row carries. It falls to the nearest row on its own side
+        # rather than being dropped.
+        turn_rows = {4: (4, 4), 5: (5, 6), 7: (7, 7)}
+        span = {"start_turn": 6, "cut_turn": 6, "end_turn": 6}
+        assert locate_span(turn_rows, span) == {
+            "start_row": 7,
+            "cut_row": 6,
+            "end_row": 6,
+        }
+
+    def test_a_transcript_with_no_dialogue_places_nothing(self):
+        span = {"start_turn": 10, "cut_turn": 12, "end_turn": 20}
+        assert locate_span({}, span) == {
+            "start_row": None,
+            "cut_row": None,
+            "end_row": None,
+        }
+
+
+class TestBuildPayload:
+    @pytest.fixture
+    def paths(self, tmp_path):
+        annotations = tmp_path / "annotations.jsonl"
+        annotations.write_text(
+            "\n".join(
+                [
+                    json.dumps(
+                        record(
+                            [
+                                annotation("a", "selector", **judged()),
+                                annotation(
+                                    "b",
+                                    "reannotator",
+                                    **judged(situation=situation(rigor=True)),
+                                ),
+                            ]
+                        )
+                    ),
+                    json.dumps(
+                        record(
+                            [annotation("a", "selector", **judged())],
+                            moment_id="m2",
+                            status="selected",
+                            start=2,
+                            cut=3,
+                            end=6,
+                        )
+                    ),
+                    json.dumps(no_key_moments("c")),
+                ]
+            )
+            + "\n"
+        )
+        transcripts = tmp_path / "transcripts.jsonl"
+        transcripts.write_text(
+            "\n".join(
+                [
+                    json.dumps(transcript(rendered_rows(23))),
+                    json.dumps(
+                        transcript([row(0, "elsewhere", turn_number=1)], "t9", "c9")
+                    ),
+                    json.dumps(
+                        transcript(
+                            [row(0, "unannotated", turn_number=1)],
+                            "t-other",
+                            "c-other",
+                        )
+                    ),
+                ]
+            )
+            + "\n"
+        )
+        return annotations, transcripts, tmp_path / "out" / "index.html"
+
+    def test_groups_moments_and_verdicts_under_their_transcripts(self, paths):
+        annotations, transcripts, _ = paths
+        payload = build_payload(annotations, transcripts)
+        by_id = {t["transcript_id"]: t for t in payload["transcripts"]}
+        assert by_id["t1"]["n_moments"] == 2
+        assert by_id["t1"]["found"] is True
+        # The annotations export keys everything by transcript; the id the annotation
+        # tool showed comes off the transcripts file.
+        assert by_id["t1"]["conversation_id"] == "c1"
+        assert by_id["t9"]["conversation_id"] == "c9"
+        assert len(by_id["t1"]["turns"]) == 25
+        assert by_id["t9"]["n_no_key_moments"] == 1
+        # The unannotated transcript is counted but not embedded: it has nothing to show
+        # and the file it comes from runs to tens of megabytes.
+        assert "t-other" not in by_id
+        assert payload["transcripts_total"] == 3
+
+    def test_a_missing_transcript_is_reported_not_crashed(self, tmp_path, paths):
+        annotations, _, _ = paths
+        transcripts = tmp_path / "other.jsonl"
+        transcripts.write_text(
+            json.dumps(transcript([], "somewhere-else", "c-else")) + "\n"
+        )
+        payload = build_payload(annotations, transcripts)
+        assert {t["found"] for t in payload["transcripts"]} == {False}
+        # With no transcript to name it, the transcript id stands in for the one the
+        # tool showed, so the picker still has something to sort and label by.
+        assert {t["conversation_id"] for t in payload["transcripts"]} == {"t1", "t9"}
+
+    def test_lists_everyone_who_annotated(self, paths):
+        annotations, transcripts, _ = paths
+        payload = build_payload(annotations, transcripts)
+        assert [a["id"] for a in payload["annotators"]] == ["a", "b", "c"]
+
+    def test_places_each_moment_in_the_rows_the_pane_draws(self, paths):
+        # The moment is recorded in turn numbers; the pane highlights row positions, and
+        # they run ENRICHMENTS apart. Reading one as the other draws the wrong stretch.
+        annotations, transcripts, _ = paths
+        payload = build_payload(annotations, transcripts)
+        moment = next(m for m in payload["moments"] if m["id"] == "m1")
+        assert moment["boundaries"] == {
+            "start_turn": 10,
+            "cut_turn": 12,
+            "end_turn": 20,
+            "start_row": 10 + ENRICHMENTS - 1,
+            "cut_row": 12 + ENRICHMENTS - 1,
+            "end_row": 20 + ENRICHMENTS - 1,
+        }
+
+    def test_a_moment_whose_transcript_is_missing_is_placed_nowhere(
+        self, tmp_path, paths
+    ):
+        annotations, _, _ = paths
+        transcripts = tmp_path / "other.jsonl"
+        transcripts.write_text(
+            json.dumps(transcript([], "somewhere-else", "c-else")) + "\n"
+        )
+        payload = build_payload(annotations, transcripts)
+        moment = next(m for m in payload["moments"] if m["id"] == "m1")
+        assert moment["boundaries"]["start_turn"] == 10
+        assert moment["boundaries"]["start_row"] is None
 
 
 class TestBuildSite:
     @pytest.fixture
     def paths(self, tmp_path):
         annotations = tmp_path / "annotations.jsonl"
-        annotations.write_text(json.dumps(record([
-            annotation("a", "selector", situation=situation(), action=action(), result=result()),
-            annotation("b", "reannotator", situation=situation(rigor=True), action=action(),
-                       result=result()),
-        ])) + "\n")
+        annotations.write_text(
+            json.dumps(
+                record(
+                    [
+                        annotation("a", "selector", **judged()),
+                        annotation("b", "reannotator", **judged()),
+                    ]
+                )
+            )
+            + "\n"
+        )
         transcripts = tmp_path / "transcripts.jsonl"
-        transcripts.write_text(
-            json.dumps(transcript([row(n, f"row {n}") for n in range(25)])) + "\n")
+        transcripts.write_text(json.dumps(transcript(rendered_rows(23))) + "\n")
         return annotations, transcripts, tmp_path / "out" / "index.html"
 
     def test_writes_a_self_contained_page(self, paths):
@@ -291,190 +818,23 @@ class TestBuildSite:
         payload = build_site(annotations, transcripts, out)
         html = out.read_text()
         assert "__VIEWER_DATA__" not in html
-        assert len(payload["cases"]) == 3
-        assert payload["annotators"] == ["a", "b"]
-        assert payload["moments"]["m1"]["found"] is True
+        assert len(payload["moments"]) == 1
+        assert '<script id="data" type="application/json">' in html
 
     def test_transcript_text_cannot_close_the_script_block(self, tmp_path, paths):
         annotations, _, out = paths
         transcripts = tmp_path / "hostile.jsonl"
-        # A row inside the moment's span (10-20) whose text would end the data block.
         transcripts.write_text(
-            json.dumps(transcript([row(12, "</script><b>pwned</b>")])) + "\n")
+            json.dumps(transcript([row(12, "</script><b>pwned</b>", turn_number=13)]))
+            + "\n"
+        )
         build_site(annotations, transcripts, out)
 
-        # The browser ends the block at the first "</script>", so parsing the same way it does
-        # must still yield the whole payload with the hostile text intact inside it.
+        # The browser ends the block at the first "</script>", so parsing the same way it
+        # does must still yield the whole payload with the hostile text intact inside it.
         block = out.read_text().split('<script id="data" type="application/json">')[1]
         data = json.loads(block.split("</script>")[0])
-        assert data["moments"]["m1"]["turns"][0]["text"] == "</script><b>pwned</b>"
-
-    def test_missing_transcript_is_reported_not_crashed(self, tmp_path, paths):
-        annotations, _, out = paths
-        transcripts = tmp_path / "other.jsonl"
-        transcripts.write_text(json.dumps(transcript([], "somewhere-else")) + "\n")
-        payload = build_site(annotations, transcripts, out)
-        assert payload["moments"]["m1"]["found"] is False
-
-
-class TestTranscriptIndex:
-    def test_reads_only_the_wanted_lines(self, tmp_path):
-        path = tmp_path / "t.jsonl"
-        path.write_text("\n".join(
-            json.dumps(transcript([row(1, f"hello {i}")], f"t{i}")) for i in range(5)
-        ) + "\n")
-        index = TranscriptIndex(path, {"t1", "t3"})
-        assert len(index) == 2
-        assert "t1" in index and "t0" not in index
-        assert index.turns("t3")[1]["text"] == "hello 3"
-
-
-class TestSinglePassMoments:
-    def _records(self):
-        paired = record([
-            annotation("a", "selector", situation=situation()),
-            annotation("b", "reannotator", situation=situation()),
-        ], moment_id="paired")
-        alone = record([annotation("c", "selector", situation=situation())],
-                       moment_id="alone", status="selected")
-        return [paired, alone]
-
-    def test_excluded_by_default(self):
-        assert {r["moment"]["id"] for r in annotated_moments(self._records())} == {"paired"}
-
-    def test_included_on_request(self):
-        kept = annotated_moments(self._records(), include_single_pass=True)
-        assert {r["moment"]["id"] for r in kept} == {"paired", "alone"}
-        assert next(r for r in kept if r["moment"]["id"] == "alone")["second"] is None
-
-    def test_single_pass_case_has_no_second_side(self):
-        kept = annotated_moments(self._records(), include_single_pass=True)
-        cases = {c["moment_id"]: c for c in build_cases(kept) if c["construct"] == "situation"}
-        assert cases["alone"]["outcome"] == "single pass"
-        assert cases["alone"]["second"] is None
-        # Nothing to compare against, so the only pass is never flagged as differing.
-        assert all(f["agrees"] for f in cases["alone"]["first"]["fields"])
-
-    def test_single_pass_is_distinct_from_a_thrown_out_review(self):
-        thrown_out = record([
-            annotation("a", "selector", situation=situation()),
-            annotation("b", "reannotator", situation=None),
-        ], moment_id="thrown")
-        kept = annotated_moments(self._records() + [thrown_out], include_single_pass=True)
-        outcomes = {c["moment_id"]: c["outcome"]
-                    for c in build_cases(kept) if c["construct"] == "situation"}
-        assert outcomes["alone"] == "single pass"
-        assert outcomes["thrown"] == "no second judgment"
-
-    def test_annotators_with_no_reviewed_work_still_appear(self, tmp_path):
-        annotations = tmp_path / "a.jsonl"
-        annotations.write_text("\n".join(json.dumps(r) for r in self._records()) + "\n")
-        transcripts = tmp_path / "t.jsonl"
-        transcripts.write_text(
-            json.dumps(transcript([row(n, f"row {n}") for n in range(25)])) + "\n")
-        out = tmp_path / "index.html"
-        assert build_site(annotations, transcripts, out)["annotators"] == ["a", "b", "c"]
-        pairs_only = build_site(annotations, transcripts, out, include_single_pass=False)
-        assert pairs_only["annotators"] == ["a", "b"]
-
-
-class TestRowSchema:
-    def _index(self, tmp_path, rows):
-        path = tmp_path / "t.jsonl"
-        path.write_text(json.dumps(transcript(rows)) + "\n")
-        return TranscriptIndex(path, {"t1"})
-
-    def test_rows_are_keyed_by_index_not_turn_number(self, tmp_path):
-        # Enrichments occupy indices too, so index and turn_number diverge -- keying on the
-        # wrong one is exactly what mis-locates a moment.
-        rows = [row(0), row(1, kind="[PAUSE]"), row(2, "after the pause")]
-        turns = self._index(tmp_path, rows).turns("t1")
-        assert sorted(turns) == [0, 1, 2]
-        assert turns[2]["text"] == "after the pause"
-
-    def test_speaker_prefix_is_stripped_from_text(self, tmp_path):
-        turns = self._index(tmp_path, [row(0, "Hi there", role="STUDENT")]).turns("t1")
-        assert turns[0]["text"] == "Hi there"
-        assert turns[0]["role"] == "Student"
-
-    def test_enrichment_rows_are_marked_and_labelled_by_type(self, tmp_path):
-        turns = self._index(tmp_path, [row(0, "The screen froze", kind="[SCREEN UPDATE]")]).turns("t1")
-        assert turns[0]["enrichment"] is True
-        assert turns[0]["role"] == "screen update"
-        assert turns[0]["text"] == "The screen froze"
-
-    def test_dialogue_rows_are_not_marked_as_enrichments(self, tmp_path):
-        turns = self._index(tmp_path, [row(0)]).turns("t1")
-        assert turns[0]["enrichment"] is False
-
-    def test_export_without_index_is_rejected(self, tmp_path):
-        path = tmp_path / "old.jsonl"
-        path.write_text(json.dumps({
-            "transcript_id": "t1",
-            "turns": [{"turn_number": 1, "role": "Tutor", "text": "hi"}],
-        }) + "\n")
-        index = TranscriptIndex(path, {"t1"})
-        with pytest.raises(ValueError, match="no 'index'"):
-            index.turns("t1")
-
-
-class TestActionTags:
-    def _tags(self, first_action, second_action=None):
-        anns = [annotation("a", "selector", action=first_action)]
-        if second_action is not None:
-            anns.append(annotation("b", "reannotator", action=second_action))
-        [r] = annotated_moments([record(anns)], include_single_pass=True)
-        return set(action_tags(r))
-
-    def test_amounts_and_strategies_are_tagged(self):
-        tags = self._tags(action(scaffolding_amount="over_scaffolding",
-                                 scaffolding_strategies=["hint", "co_solve"]))
-        assert "scaffolding_amount:over_scaffolding" in tags
-        assert {"scaffolding_strategies:hint", "scaffolding_strategies:co_solve"} <= tags
-
-    def test_tags_are_namespaced_by_field(self):
-        # "unclear" is a value of both amount fields; the field prefix keeps them apart.
-        tags = self._tags(action(scaffolding_amount="unclear", rigor_present=True,
-                                 rigor_amount="unclear"))
-        assert tags >= {"scaffolding_amount:unclear", "rigor_amount:unclear"}
-
-    def test_either_pass_contributes(self):
-        tags = self._tags(action(rigor_amount="weak"), action(rigor_amount="strong"))
-        assert {"rigor_amount:weak", "rigor_amount:strong"} <= tags
-
-    def test_single_pass_moment_has_no_second_side_to_read(self):
-        assert self._tags(action(rigor_amount="strong")) >= {"rigor_amount:strong"}
-
-    def test_empty_and_null_values_are_not_tagged(self):
-        tags = self._tags(action(rigor_amount=None, rigor_strategies=[],
-                                 scaffolding_amount="appropriate"))
-        assert tags == {"scaffolding_amount:appropriate",
-                        "scaffolding_strategies:guiding_questions"}
-
-    def test_a_thrown_out_review_contributes_nothing(self):
-        tags = self._tags(action(scaffolding_amount="appropriate"), None)
-        assert all(t.startswith(("scaffolding_amount", "scaffolding_strategies")) for t in tags)
-
-
-class TestActionFilterOptions:
-    def test_options_are_grouped_counted_and_ordered(self, tmp_path):
-        records = [
-            record([annotation("a", "selector", action=action(scaffolding_amount="over_scaffolding"))],
-                   moment_id="m1", status="selected"),
-            record([annotation("b", "selector", action=action(scaffolding_amount="over_scaffolding"))],
-                   moment_id="m2", status="selected"),
-            record([annotation("c", "selector", action=action(scaffolding_amount="appropriate"))],
-                   moment_id="m3", status="selected"),
-        ]
-        annotations = tmp_path / "a.jsonl"
-        annotations.write_text("\n".join(json.dumps(r) for r in records) + "\n")
-        transcripts = tmp_path / "t.jsonl"
-        transcripts.write_text(
-            json.dumps(transcript([row(n, f"row {n}") for n in range(25)])) + "\n")
-        payload = build_site(annotations, transcripts, tmp_path / "index.html")
-
-        groups = {g["caption"]: g["options"] for g in payload["action_filters"]}
-        assert groups["Scaffolding amount"][0] == {
-            "tag": "scaffolding_amount:over_scaffolding", "label": "over scaffolding", "count": 2}
-        # Only values actually present are offered, so no filter can come back empty.
-        assert "Rigor amount" not in groups
+        assert (
+            data["transcripts"][0]["turns"][0]["text"]
+            == "[TUTOR] </script><b>pwned</b>"
+        )

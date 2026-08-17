@@ -42,13 +42,13 @@ def _build_parser() -> argparse.ArgumentParser:
     )
     viewer_p.add_argument(
         "--annotations",
-        default="data/v2_annotations/source/step_up_annotations.jsonl",
+        default="data/v2_annotations/source/tutoring_provider_a_annotations.jsonl",
         metavar="FILE",
         help="Raw annotations JSONL (default: %(default)s)",
     )
     viewer_p.add_argument(
         "--transcripts",
-        default="data/v2_annotations/source/step_up_v2_transcripts.jsonl",
+        default="data/v2_annotations/source/tutoring_provider_a_v2_transcripts.jsonl",
         metavar="FILE",
         help="v2 transcripts JSONL, whose rows carry the index moments are numbered "
         "against (default: %(default)s)",
@@ -58,20 +58,6 @@ def _build_parser() -> argparse.ArgumentParser:
         default="data/annotation_viewer/index.html",
         metavar="FILE",
         help="Where to write the page; must stay under data/ (default: %(default)s)",
-    )
-    viewer_p.add_argument(
-        "--max-turns",
-        type=int,
-        default=None,
-        dest="max_turns",
-        metavar="N",
-        help="Cap the rows shown per moment, windowed on the cut row (default: no cap)",
-    )
-    viewer_p.add_argument(
-        "--pairs-only",
-        action="store_true",
-        dest="pairs_only",
-        help="Only moments reviewed twice; omit the majority that had a single pass",
     )
     viewer_p.add_argument(
         "--exclude",
@@ -318,17 +304,30 @@ def _cmd_viewer(args) -> None:
         args.annotations,
         args.transcripts,
         args.out,
-        max_turns=args.max_turns,
         excluded=set(args.exclude),
-        include_single_pass=not args.pairs_only,
     )
     logger.info(
-        "Wrote %s: %d cases over %d moments, %d annotators",
+        "Wrote %s: %d moments over %d transcripts, %d annotators, %d 'no key moments' verdicts",
         args.out,
-        len(payload["cases"]),
         len(payload["moments"]),
+        len(payload["transcripts"]),
         len(payload["annotators"]),
+        len(payload["no_key_moments"]),
     )
+    # A span whose end precedes its start covers no dialogue turn at all, so the page
+    # can only draw it as an empty stretch. Said here rather than patched over: it is
+    # the export to fix, not the drawing.
+    inverted = [
+        m["id"]
+        for m in payload["moments"]
+        if m["boundaries"]["end_turn"] < m["boundaries"]["start_turn"]
+    ]
+    if inverted:
+        logger.warning(
+            "%d moment(s) carry an end turn before their start and highlight nothing: %s",
+            len(inverted),
+            ", ".join(inverted),
+        )
 
 
 def main(argv=None) -> None:
