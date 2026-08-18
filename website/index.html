@@ -136,7 +136,7 @@
         Share of tutor actions across twelve pedagogical moves, for each model and for the human tutors in
         the same transcripts (dashed line). Prompting for the evaluation shifts models toward asking students
         to justify their answers — while humans spread their choices across more varied strategies, including
-        simply stepping back and letting the student work.
+        stepping back and letting the student work.
       </p>
       <div class="chart-tabs" role="tablist" aria-label="Prompt condition">
         <button role="tab" aria-selected="true" data-prompt="plain">Plain prompt</button>
@@ -150,14 +150,13 @@
 
     <!-- Performance vs. time to first token -->
     <div class="chart-block" id="latency-block">
-      <h3 class="chart-title">The best tutors keep students waiting</h3>
+      <h3 class="chart-title">The best models would keep students waiting</h3>
       <p class="chart-sub">
         Overall performance (mean of appropriate scaffolding and appropriate rigor, evaluation-aware prompt)
         against median time to first visible token, measured one request at a time over 112 moments. The two
         strongest tutors leave a student looking at nothing for 8.5 to 9 seconds, and Gemini 2.5 Pro for 14 —
-        a long time for production education technology deployments. Waiting does not buy teaching quality
-        either: DeepSeek V4 Pro is slower than both Claude models and scores 0.2 lower. Fast, pedagogically
-        sound tutors are an open target.
+        a long time for production education technology deployments. Human speech latency is around 100-200 ms,
+        while humans on Zoom are around 500-1000ms. Fast, pedagogically sound tutors are an open target.
       </p>
       <div class="chart-card">
         <div id="latency-chart"></div>
@@ -201,7 +200,7 @@
     <div class="acknowledgments">
       <h3>Acknowledgments</h3>
       <p>
-        This project has been made possible in part through support from the Gates Foundation and Learning Commons.
+        This project has been made possible in part through support from the Gates Foundation and the Learning Commons.
       </p>
     </div>
   </div>
