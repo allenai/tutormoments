@@ -11,7 +11,7 @@ the whole exchange.
 **TTFT is the headline; TTLT is reported beside it.** Both are real, but they are not
 interchangeable, and TTLT should not be the number a model is ranked on:
 
-- TTLT = TTFT + the time to stream the answer out. That window is 0–11% of TTLT across the
+- TTLT = TTFT + the time to stream the answer out. That window is 0–12% of TTLT across the
   roster, so the two rank models almost identically — headlining TTFT gives up very little.
 - What the window *does* carry is generation length × throughput. Length is a content
   property this benchmark already evaluates: a model that over-explains is penalised by
@@ -93,17 +93,90 @@ for a check that comes free with every run.
 `tutormoments run` also records TTFT/TTLT on every transcript, but those are diagnostics —
 see [Concurrency impacts latency](#concurrency-impacts-latency).
 
+### Where the figures surface
+
+Probe results live in their own run directory, which nothing else reads, so two consumers
+join them in ([`probe_runs`](../src/tutormoments/latency.py)):
+
+- **`tutormoments report`** — the leaderboard gains `ttft_p50`, `ttft_cold_p50` and
+  `ttft_warm_p50`, joined onto each run summary by `(tutor_model, mode)`. A cell with no probe
+  shows `-`; it never borrows the TTFT its benchmark run recorded under concurrency. The
+  run-based `tutor_lat_p50` / `tutor_lat_p95` columns stay where they were, and are still
+  end-to-end wall clock that compares a model against its own history rather than against
+  another model.
+- **The website's latency chart** — `website/scripts/refresh-data.py` reads the same figures
+  into `static/data/latency.json` as `ttft_s` (plus `ttft_cold_s` / `ttft_warm_s` where the
+  split is publishable) and plots TTFT on the x-axis. That script imports this module rather
+  than restating its rules; an earlier version restated them and gated on cache hit *rate*,
+  which is the one thing this code deliberately refuses to do.
+
+Two rules keep the join from quietly comparing unlike things:
+
+**Only frozen, complete subsamples are eligible.** A derived sample spans no particular
+prompt-length distribution, and an incomplete one dropped ids, so neither is the same
+measurement as the run before it. Among eligible probes for one cell the newest `measured_at`
+wins, so re-measuring a model supersedes its earlier figure without anyone deleting the old
+run directory — which is how the 40-moment pilot stopped being published the moment the
+112-moment sweep landed beside it. Eligibility is per-probe, though, so two *different* frozen
+samples would each pass it; both consumers therefore check that the selected probes agree on
+`subsample_id` and warn when they do not.
+
+**The pooled figure is the headline, not the cold one.** Cold is the more natural
+"first message of a session" number, but it does not exist on every provider: Gemini reports
+no cache tokens, so it has no cold bucket, and on Together the bucket exists but its labels
+mean something else (above). Pooled TTFT is measured identically on all four providers, so it
+is the only figure that can rank the whole roster, and dropping two models off a chart for a
+provider-reporting reason is worse than the alternative. What that costs: at a fixed
+`max_turns` the mix is structurally 1 cold to 2 warm per moment, but the *realised* hit rate
+varies (0.45–0.67 on Anthropic, since a moment whose head falls under the model's minimum
+prefix fails to cache silently), so a pooled figure carries a small mix effect on top of the
+model's speed. With the warm gain at ~1–3.6s that is worth well under a second — smaller than
+the cold/warm gap it replaces, and far smaller than the p5–p95 spread within any one model.
+The split is published beside it wherever it can be trusted, so nothing is hidden.
+
 ## Analysis
 
-> **The per-model numbers quoted below are provisional.** They were measured on
-> 2026-08-17 over a 40-moment pilot subsample (`subsample_id` `84b4ad5615876a3e`, 80 tutor
-> calls per model), which predates the current frozen list (`589e8acf8ac761f2`, 112 moments,
-> 336 calls). The pilot took each conversation's median moment, so it under-covered short and
-> long prompts — see [the latency subsample](#the-latency-subsample). The *shape* of the
-> findings (TTFT ≫ generation window, caching barely moves TTFT, warm/cold fidelity differing
-> by provider) is what these figures are cited for and is not sensitive to that; the specific
-> seconds are, and no figure here should be published before the roster is re-measured
-> against the current list.
+### The roster, measured
+
+Seven models, `scaffolding_rigor`, the frozen 112-moment subsample
+(`subsample_id` `589e8acf8ac761f2`) at the default `max_turns` of 5 — 336 tutor calls each,
+2,352 in total. Measured 2026-08-18, 10:27–15:31 local, on one unlabelled machine
+(`location` null): **these seconds are comparable to each other and to nothing else.**
+Non-Anthropic lanes ran concurrently with each other; the two Anthropic tutors ran alone,
+because every probe's simulated student is `claude-opus-4-6` on the same account.
+
+| model | TTFT p50 | p5 / p95 | first message | later | TTLT p50 | thinking share of TTFT |
+|---|---|---|---|---|---|---|
+| `gpt-5.4-mini-2026-03-17` | **3.16** | 1.77 / 7.16 | 3.72 | 2.71 | 3.47 | not streamed |
+| `gemini-3.5-flash` | **5.51** | 3.62 / 10.50 | – | – | 5.72 | 3.75s of 5.51 |
+| `gpt-5.5-2026-04-23` | **6.38** | 3.40 / 9.65 | 6.91 | 5.92 | 7.28 | not streamed |
+| `claude-sonnet-4-6` | **8.47** | 3.12 / 21.09 | 9.62 | 7.63 | 8.73 | 7.13s of 8.47 |
+| `claude-opus-4-8` | **9.04** | 4.34 / 27.90 | 13.22 | 7.99 | 10.52 | 7.86s of 9.04 |
+| `deepseek-ai/DeepSeek-V4-Pro` | **11.09** | 4.42 / 36.43 | – | – | 11.86 | 10.35s of 11.09 |
+| `gemini-2.5-pro` | **14.08** | 9.13 / 24.34 | – | – | 14.15 | 11.59s of 14.08 |
+
+TTFT p50 is pooled over all 336 calls, which is what the leaderboard and the website rank on.
+"First message" / "later" are the cold and warm halves, shown only where the provider's cache
+labels can be carried (see [caching fidelity](#caching-fidelity--the-biggest-caveat)) — so
+Gemini has none, and DeepSeek's are withheld rather than published. The thinking column
+subtracts the `ttfc` p50 from the `ttft` p50; the
+[decomposition below](#caching-does-not-systematically-improve-latency) takes the p50 of the
+per-call difference instead, which is why its figures differ by a tenth of a second or so.
+
+The order is not the score order: the two strongest tutors in the benchmark sit 8.5–9.0s from
+first token, and the fastest model on the roster is the weakest. That trade-off is the finding
+the website chart plots.
+
+Sanity checks (see [interpreting a result](#interpreting-a-result)) all hold: `ttfc ≤ ttft ≤
+ttlt` on every one of the 2,352 calls, no failed moments, and every frozen id resolved on
+every model. One exception, on one call: `deepseek-ai/DeepSeek-V4-Pro` recorded
+`n_no_visible_output` 1 of 336 (0.3%), so its percentiles are conditional on 335. That call
+emitted 572 output tokens and never produced a visible one. The probe keeps timings rather
+than text, so the mechanism is not directly observable here, but an unterminated
+`<think>` block produces exactly this on the Together path: TTFT is held until the closing
+tag, and a tag that never arrives leaves nothing ever counted as visible. In a benchmark run
+that turn is recorded as `"..."` and scored as if the tutor said it, which is why this counter
+exists — and why a non-zero value is worth chasing rather than rounding away.
 
 ### Two departures from Artificial Analysis
 
@@ -139,19 +212,33 @@ on OpenAI). A long response streams as hundreds of them, which is what produces 
 token-by-token typing effect. **A tutor turn does not: it is short enough to arrive in one or two deltas.**
 
 A direct instrumented call counted exactly **2 text deltas** for both `claude-sonnet-4-6`
-and `claude-opus-4-8`, carrying answers of 72 and 157 characters. Across the 40-moment
-pilot sample, `claude-sonnet-4-6` delivered its whole visible answer inside a 5ms window on
-44 of 80 calls. Median generation window (TTFT → TTLT): 0.00s for Sonnet 4.6, 0.05s for
-Gemini 2.5 Pro, 1.16s for Opus 4.8.
+and `claude-opus-4-8`, carrying answers of 72 and 157 characters. Median generation window
+(TTFT → TTLT) across the roster:
+
+| model | window p50 | share of TTLT |
+|---|---|---|
+| `claude-sonnet-4-6` | 0.00s | 0.0% |
+| `gemini-2.5-pro` | 0.06s | 0.4% |
+| `gemini-3.5-flash` | 0.15s | 2.6% |
+| `gpt-5.4-mini-2026-03-17` | 0.30s | 8.6% |
+| `deepseek-ai/DeepSeek-V4-Pro` | 0.69s | 5.8% |
+| `gpt-5.5-2026-04-23` | 0.84s | 11.6% |
+| `claude-opus-4-8` | 1.23s | 11.7% |
+
+Sonnet 4.6's median window is **0.00s**: the whole visible answer lands inside one
+millisecond-scale window, in one or two deltas.
 
 The practical consequence: streaming buys a tutoring product almost no progressive
 rendering. The student waits, then the message appears essentially at once. **TTFT is the
-metric; TTLT is TTFT plus about a second; throughput is noise.** Streaming is still
+metric; TTLT is TTFT plus at most about a second; throughput is noise.** Streaming is still
 required — it is the only way to observe TTFT at all — but not for the usual reason.
 
-A corollary for reading `output_tps`: on thinking models most `output_tokens` are thinking
-tokens (Opus 4.8: ~500 of 551 on one measured call), so tokens/sec largely describes
-reasoning speed, not how fast text reaches the student.
+Two corollaries for reading `output_tps`. On models that stream reasoning, most
+`output_tokens` are thinking tokens (Opus 4.8: ~500 of 551 on one measured call), so
+tokens/sec largely describes reasoning speed rather than how fast text reaches the student.
+On the OpenAI path it is not even that: reasoning is finished before `ttfc`, so the window
+`ttlt − ttfc` covers only the visible text while `output_tokens` still counts the reasoning,
+which is how `gpt-5.4-mini` posts a nominal 1,518 tokens/sec. Diagnostic only, as labelled.
 
 ### Caching does not systematically improve latency
 
@@ -168,8 +255,14 @@ experiences:
 - **miss** ≈ the first message of a session
 - **hit** ≈ every later message in that session
 
-They are reported separately. Pooling them would make the figure drift with how many turns
-each conversation happened to run, since `[END]` truncates some conversations early.
+They are reported separately, and the pooled figure is reported too — the pooled one is what
+ranks the roster, because Gemini has no cache states to split on at all (see
+[where the figures surface](#where-the-figures-surface)). The reason to keep the split beside
+it is that pooling can drift with how many turns each conversation happened to run: `[END]`
+truncates some conversations early, and a model that ends more of them shifts its own cold/warm
+mix. Worth checking rather than assuming — on the 2026-08-18 sweep it did not happen at all.
+Every model returned exactly 112 first turns and 224 later ones, so the pooled figures there
+differ only in the models, not in their mix.
 
 **Cache state is read off `cache_read_input_tokens`, never inferred from turn position.**
 Turn index is a bad proxy for two reasons. The minimum cacheable prefix is model-dependent
@@ -179,6 +272,34 @@ cache **silently**. So the same short-transcript moment can cache on one roster 
 not another. And providers that report no cache tokens are recorded as `unknown` rather than
 guessed at.
 
+**Measured, the cold/warm gap is mostly not a caching effect.** Every model with a usable
+split is faster warm — 1.0s on both OpenAI models, 2.0s on Sonnet 4.6, and 5.2s on Opus 4.8.
+That last number looks like a strong case for caching until the gap is decomposed. Splitting
+TTFT into prefill (`ttfc`, first chunk of any kind) and thinking (`ttft − ttfc`) at p50:
+
+| model | | prefill | thinking | TTFT |
+|---|---|---|---|---|
+| `claude-opus-4-8` | first message | 1.18 | 11.75 | 13.22 |
+| | later | 1.18 | 6.14 | 7.99 |
+| `claude-sonnet-4-6` | first message | 1.76 | 7.27 | 9.62 |
+| | later | 1.23 | 6.17 | 7.63 |
+
+Caching can only touch prefill, and on Opus 4.8 prefill does not move *at all* — 1.18s cold,
+1.18s warm, on a cache reading back a median 9,390 tokens. The entire 5.2s belongs to
+thinking, and thinking falls monotonically with turn index (11.75s, then 6.96s, then 6.00s):
+the model reasons hardest when it first meets the problem and less on each continuation.
+Sonnet 4.6 does show a real prefill saving, and it is 0.53s.
+
+So the split is honestly read as **"first message of a session" vs "a later message"**, which
+is how the website labels it — a position-in-conversation effect that caching contributes a
+fraction of a second to. On the OpenAI path the decomposition is unavailable (reasoning is not
+streamed, so `ttfc` ≈ `ttft`) and the whole ~1.0s gain lands in prefill by construction; that
+is an upper bound on its caching effect, not a measurement of one.
+
+None of this weakens the case for caching, which is a cost argument — a ~90% cut on the
+dominant term. It just means **caching is not a latency lever**, and a product that wants a
+faster first token has to spend elsewhere.
+
 ### Caching fidelity — the biggest caveat
 
 **Only the Anthropic path sends a real cache breakpoint.** Gemini
@@ -186,12 +307,13 @@ guessed at.
 into the prompt instead, so neither caches *this conversation's* transcript.
 
 That does not mean they report no cache hits. Together reports `cached_tokens` from its own
-automatic prefix caching, and measured on `deepseek-ai/DeepSeek-V4-Pro` it returns a **0.91
-hit rate** — higher than Anthropic's structural 0.50. The hits are not what they look like:
+automatic prefix caching, and measured on `deepseek-ai/DeepSeek-V4-Pro` it returns a **0.786
+hit rate** — *above* the 0.667 ceiling the run structure allows for a real session cache, which
+is the tell. The hits are not what they look like:
 
 | | hit/miss by turn | median tokens read back |
 |---|---|---|
-| Anthropic, explicit breakpoint | perfect `miss, hit` alternation | **7,400–10,000** |
+| Anthropic, explicit breakpoint | perfect `miss, hit, hit` per moment | **6,767–9,390** |
 | Together, automatic prefix cache | misses cluster at *run start*, unrelated to turn | **256** |
 
 Together is caching one quantised block of the system prompt every moment shares — run
@@ -208,11 +330,37 @@ a real conversation head. The sample gate is a count rather than a hit *rate* de
 the rate is fixed by `max_turns` (exactly 0.5 at `--max-turns 3`, 0.67 at 5), so a rate
 threshold would let a run knob decide whether a model gets a published figure. In practice
 one `claude-sonnet-4-6` run came in at 0.49 because a single turn missed; under a rate gate
-its warm figure would have vanished over one stray call.
+its warm figure would have vanished over one stray call. The roster bears this out from the
+other side: `gpt-5.5-2026-04-23` lands at 0.586 against the 0.667 ceiling — 24 calls that
+should have hit did not — while reading back 5,888 tokens a time, which is a real conversation
+head by any measure.
 
 Every latency block publishes `cache_hit_rate` and `cache_read_p50_on_hits` alongside the
-numbers. **Until real prefix caching is wired for Gemini, Together and OpenAI, the warm column
-is only comparable within the Anthropic-hosted models.** That is tracked as follow-up work.
+numbers.
+
+Note what the gate is and is not testing. It asks what the hits actually read back, not who
+sent a breakpoint — so it is not a list of Anthropic models. Measured on the roster, the
+OpenAI path passes it: `chat.completions` caches automatically and reads back a median of
+5,888 tokens, which is a real conversation head rather than a shared block of system prompt.
+Together fails it at 256 tokens, and Gemini reports nothing to judge. **So the warm column is
+comparable within the Anthropic and OpenAI paths, and absent elsewhere.** Wiring an explicit
+Gemini/Together cache remains follow-up work; the gate is what keeps its absence honest in the
+meantime.
+
+**A withheld split withholds the cold figure too.** The natural reading is that this gate
+guards the warm number alone, but its conditions establish that a provider's hit/miss labels
+mean session warmth *at all* — and labels that cannot be trusted for the hits cannot be
+trusted for their complement. Together is the concrete case: its misses are the calls its
+automatic prefix cache happened not to serve, which cluster at run start rather than at
+session start. On the roster that put its "cold" p50 at 12.86s and its "warm" at 10.86s, a
+2.0s gap that reads exactly like the session effect the Anthropic models show and is nothing
+of the kind — the 72 calls in that bucket are the ones Together's cache happened to miss, not
+the 112 first messages.
+Publishing that as "the first message of a session" would be wrong in exactly the way
+publishing its warm figure would be. `probe_figures` therefore returns the split as a unit or
+not at all. The probe's own terminal summary is looser on purpose — it prints the cold figure
+with a NOTE naming what was withheld and why, because there it is a diagnostic read by
+whoever just ran the probe, not a number lifted into a table.
 
 ### What is not modelled
 
@@ -238,10 +386,8 @@ concurrency distorts latency by a **model-dependent** amount:
 
 The probe runs strictly serially, so its numbers mean the same thing for every model. Run
 figures are stamped `"source": "run"` with the concurrency they were gathered at, so a
-reader can tell the two apart. The leaderboard carries no TTFT column: `tutormoments
-latency` writes its own `latency.json`, and nothing joins that onto a run summary yet, so
-the probe figure is read from `latency.json` directly. Wiring that join — for the
-leaderboard and for the website chart — is tracked as follow-up work.
+reader can tell the two apart. Only probe figures are published — see
+[where the figures surface](#where-the-figures-surface).
 
 Conversations also share one `ModelClient` per model
 ([`get_client`](../src/tutormoments/client.py)). Previously each moment built its own,
@@ -267,10 +413,19 @@ block across runs before trusting a cross-model comparison: if its median moves 
 to the tutor differences you are claiming, those differences may be the network or the hour
 of day rather than the models.
 
-Measured on the seven-model sweep of 2026-08-17 (14:50→16:20): student TTFT p50 ranged
-2.29–2.50s, a spread of **0.21s**, against a within-run p5–p95 spread of ~1.5s. Drift
-between runs was far smaller than noise inside them, so the tutor spread over that sweep
-(3.4s to 14.9s) is not an artifact of the environment changing.
+Measured on the seven-model sweep of 2026-08-18 (10:27→15:31): student TTFT p50 ranged
+2.44–2.76s, a spread of **0.32s**, against a within-run p5–p95 spread of ~1.5s and a tutor
+spread of 3.2s to 14.1s. Drift was an order of magnitude smaller than the differences being
+claimed, so the roster figures are not an artifact of the environment changing over five
+hours.
+
+The control also picked up the one thing it was pointed at. The three slowest student medians
+(2.69–2.76s) are all runs from the first phase of the sweep, when three provider lanes ran
+concurrently and each was making student calls against the same Anthropic account; the two
+runs that had that account to themselves came in at 2.46–2.48s. That is contention showing up
+exactly where the [concurrency](#concurrency-impacts-latency) argument says it should — and it
+is the reason the two Anthropic *tutors* were measured alone rather than in a lane beside the
+others.
 
 ## The latency subsample
 
@@ -365,11 +520,10 @@ another day and compare the two files if you need that.
 ## Interpreting a result
 
 **A p50 gap is not evidence that one model is faster.** TTFT spread is wide — Opus 4.8 runs
-p5 4.62 / p50 9.45 / p95 28.34 — so two close models can differ at p50 while being tied.
+p5 4.34 / p50 9.04 / p95 27.90 — so two close models can differ at p50 while being tied.
 
 Compare them **paired by (moment, turn)** instead, which cancels the moment-to-moment
-variation that dominates the raw spread. Opus 4.8 and Sonnet 4.6 differ by 0.55s at p50, but
-paired, Opus is faster on 39 of 80 calls — 48.7%, a coin flip.
+variation that dominates the raw spread.
 
 Sample size sets what you can resolve. The 95% CI half-width on a paired win rate near 50%
 is `0.98 / sqrt(n)`:
@@ -380,11 +534,25 @@ is `0.98 / sqrt(n)`:
 | 224 | ±6.5 pts | warm figure at default `max_turns` 5 |
 | 336 | ±5.3 pts | all samples pooled, default run |
 
-So a default run separates models differing by roughly 7 points or more on the warm figure,
-and places everything else in a tier. It cannot rank close neighbours, and no run option
-changes that — the sample is already every conversation in the release. An earlier
-40-moment run put Opus 4.8 and Sonnet 4.6 0.55s apart at p50 while paired they split
-39/80: 48.7%, CI [37.8%, 59.7%].
+So a default run separates models differing by roughly 6 points or more, and places everything
+else in a tier. It cannot rank arbitrarily close neighbours, and no run option changes that —
+the sample is already every conversation in the release.
+
+On the 2026-08-18 roster the full sample resolves every adjacent pair, including the two
+closest:
+
+| pair | p50 gap | paired win rate | verdict |
+|---|---|---|---|
+| `gemini-3.5-flash` vs `gpt-5.5` | 0.87s | flash faster on 57.1% ±5.3 | separated, barely |
+| `claude-sonnet-4-6` vs `claude-opus-4-8` | 0.57s | Sonnet faster on 60.4% ±5.3 | separated |
+| `gpt-5.4-mini` vs `gpt-5.5` | 3.22s | mini faster on 91.7% ±5.3 | separated |
+
+The middle row is the one to keep in mind. A 0.57s p50 gap between two models whose p5–p95
+spans are 18–24 seconds wide looks like noise, and on the 40-moment pilot it was: Opus came
+out ahead on 48.7% of pairs, CI [37.8%, 59.7%], a coin flip. At 336 samples the same pairing
+lands at 60.4% ±5.3 for Sonnet — the ranking was real, the pilot simply could not see it. The
+first row is now the limiting case: 57.1% ±5.3 clears 50% with 1.8 points to spare, so a pair
+this close is at the edge of what this benchmark can resolve, not comfortably inside it.
 
 Reporting one model as faster than another means checking the paired win rate, not the p50
 gap, and treating an interval that straddles 50% as a tie.
@@ -400,16 +568,22 @@ Sanity checks that should hold on any live run:
   4,096-token minimum that `claude-opus-4-6` and `claude-haiku-4-5` impose (1% below the
   1,024-token one). So ~0.45 at `max_turns` 5 is normal on those two models and ~0.67 on the
   rest. A rate *above* the ceiling, or far below it on a model with a low minimum, means the
-  cache is behaving differently than assumed.
+  cache is behaving differently than assumed. Observed on the roster: 0.667 and 0.661 on the
+  two Anthropic models (the ceiling, as expected), 0.649 and 0.586 on OpenAI, and **0.786 on
+  DeepSeek — above the ceiling**, which is the automatic-prefix-cache signature rather than a
+  session cache.
 - `ttfc` well below `ttft` on thinking models, and near-equal on the OpenAI path, where
   reasoning is not streamed. Reported in the same cache-state split as the headline
-  metrics, so this reads straight off the block.
+  metrics, so this reads straight off the block. Observed: thinking is 2.1× to 14.1× `ttfc` on
+  the five models that stream it, and `ttft − ttfc` is 0.02s or less on both OpenAI models.
 
-**Do not expect warm to be much faster than cold.** Measured across the roster, the warm
-TTFT gain is ~1–3.6s on Anthropic and *negative* on `gpt-5.5` (6.57 warm vs 6.39 cold).
-Prompt caching skips prefill, and prefill is not the bottleneck: `ttfc` moves by ~0.04s
-between cold and warm on Opus 4.8. On thinking models TTFT is dominated by thinking time by
-roughly 7×. Caching remains a ~90% cost lever; it is close to irrelevant for latency.
+**Do not read the warm figure as the effect of caching.** Measured across the roster the warm
+gain is 1.0–5.2s, but on Opus 4.8 — the largest of them — prefill (`ttfc`) is identical cold
+and warm to within a millisecond, and the whole gap is the model thinking less on a
+continuation than on a fresh problem. See
+[caching does not systematically improve latency](#caching-does-not-systematically-improve-latency)
+for the decomposition. Caching remains a ~90% cost lever; as a latency lever it is worth
+fractions of a second.
 
 One note when comparing against the June 2026 Preview paper: its figures use
 `tutor_latencies`, which is end-to-end wall-clock seconds per call and is **unchanged** by

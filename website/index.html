@@ -148,13 +148,16 @@
       </div>
     </div>
 
-    <!-- Performance vs. latency (paper Fig. 7) -->
+    <!-- Performance vs. time to first token -->
     <div class="chart-block" id="latency-block">
-      <h3 class="chart-title">The best tutors are also the slowest</h3>
+      <h3 class="chart-title">The best tutors keep students waiting</h3>
       <p class="chart-sub">
         Overall performance (mean of appropriate scaffolding and appropriate rigor, evaluation-aware prompt)
-        against average response latency per tutor turn. The strongest models take 10+ seconds to answer —
-        a long time for production education technology deployments. Fast, pedagogically sound tutors are an open target.
+        against median time to first visible token, measured one request at a time over 112 moments. The two
+        strongest tutors leave a student looking at nothing for 8.5 to 9 seconds, and Gemini 2.5 Pro for 14 —
+        a long time for production education technology deployments. Waiting does not buy teaching quality
+        either: DeepSeek V4 Pro is slower than both Claude models and scores 0.2 lower. Fast, pedagogically
+        sound tutors are an open target.
       </p>
       <div class="chart-card">
         <div id="latency-chart"></div>

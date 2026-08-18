@@ -192,14 +192,29 @@ _LEADERBOARD_COLS = [
     ("appropriate_scaffolding", "appropriate_scaffolding"),
     ("appropriate_rigor", "appropriate_rigor"),
     ("avoids_overscaffold", "avoids_overscaffold"),
+    # From `tutormoments latency` (serial probe), joined on (tutor_model,
+    # mode). ttft_p50 is the headline: pooled over all samples, the only
+    # figure measured identically on every provider. The cold/warm split is
+    # dashed unless the provider's cache labels mean session warmth.
+    ("ttft_p50", "ttft_p50"),
+    ("ttft_cold_p50", "ttft_cold_p50"),
+    ("ttft_warm_p50", "ttft_warm_p50"),
+    # From the benchmark run: end-to-end wall clock under --concurrency, so
+    # comparable within a model over time but not across models.
     ("tutor_lat_p50", "tutor_lat_p50"),
     ("tutor_lat_p95", "tutor_lat_p95"),
     ("tokens_total", "tokens_total"),
 ]
 
 
-def _extract_row(summary: dict) -> dict:
-    """Pull the leaderboard-column values out of a run summary dict."""
+def _extract_row(summary: dict, probes: dict | None = None) -> dict:
+    """Pull the leaderboard-column values out of a run summary dict.
+
+    *probes* is ``{(tutor_model, mode): latency.json block}`` from
+    `tutormoments.latency.probe_runs`; a cell with no probe gets ``None`` TTFT
+    columns rather than a figure borrowed from the run, which was gathered
+    under concurrency and means something else.
+    """
     cal_s = summary.get("scaffold_calibrated") or {}
     cal_r = summary.get("rigor_calibrated") or {}
     over = summary.get("overscaffold") or {}
@@ -209,13 +224,28 @@ def _extract_row(summary: dict) -> dict:
     over_rate = over.get("rate")
     avoids = (1.0 - over_rate) if isinstance(over_rate, (int, float)) else None
 
+    tutor_model = summary.get("tutor_model", "")
+    mode = summary.get("mode", "")
+    # Lazy: this module keeps no module-level SDK imports, and the latency
+    # module reaches the provider clients.
+    from tutormoments.latency import probe_figures  # noqa: PLC0415
+
+    probe = (probes or {}).get((tutor_model, mode))
+    ttft = probe_figures((probe or {}).get("tutor") or {})
+
     return {
-        "tutor_model": summary.get("tutor_model", ""),
-        "mode": summary.get("mode", ""),
+        "tutor_model": tutor_model,
+        "mode": mode,
         "n": summary.get("n_scenarios", 0),
         "appropriate_scaffolding": cal_s.get("score"),
         "appropriate_rigor": cal_r.get("score"),
         "avoids_overscaffold": avoids,
+        # Absent unless this cell has a probe run: a benchmark run records
+        # TTFT too, but under --concurrency, which distorts it by a
+        # model-dependent amount. See docs/latency.md.
+        "ttft_p50": ttft["ttft_p50"],
+        "ttft_cold_p50": ttft["ttft_cold_p50"],
+        "ttft_warm_p50": ttft["ttft_warm_p50"],
         # End-to-end wall-clock seconds per tutor turn; unaffected by
         # streaming, so historical and new runs stay comparable.
         "tutor_lat_p50": lat.get("p50_seconds"),
@@ -244,33 +274,44 @@ def _fmt_csv(v) -> str:
     return str(v)
 
 
-def leaderboard(runs: list) -> tuple:
+def leaderboard(runs: list, probes: dict | None = None) -> tuple:
     """Build a leaderboard Markdown table and CSV from a list of run summaries.
 
     Args:
         runs: list of run summary dicts (as returned by aggregate / read from
               summary.json).  Each dict must contain the standard keys written
               by the benchmark pipeline.
+        probes: optional ``{(tutor_model, mode): latency.json block}`` from
+              `tutormoments.latency.probe_runs`, supplying the TTFT columns.
+              Cells with no probe show "-".
 
     Returns:
         (markdown_table: str, csv_str: str)
 
     Columns (the paper's three metrics under the paper's names, plus
-    identity and latency/token diagnostics):
+    identity, TTFT, and latency/token diagnostics):
         tutor_model, mode, n, appropriate_scaffolding, appropriate_rigor,
-        avoids_overscaffold, tutor_lat_p50, tutor_lat_p95, tokens_total
+        avoids_overscaffold, ttft_p50, ttft_cold_p50, ttft_warm_p50,
+        tutor_lat_p50, tutor_lat_p95, tokens_total
 
-    Latency here is end-to-end wall-clock seconds per tutor call, gathered
-    under `--concurrency` and therefore not comparable across models. TTFT is
-    deliberately absent: the comparable figure comes from `tutormoments
-    latency`, which writes its own latency.json that nothing joins onto these
-    summaries yet. See docs/latency.md.
+    Two different latency measurements sit side by side here, deliberately:
+
+    - ``ttft_p50`` and its cold/warm split come from `tutormoments latency`,
+      which runs strictly serially. These are the cross-model-comparable
+      figures, and they are joined in from a probe's own run directory rather
+      than read off the benchmark run.
+    - ``tutor_lat_p50`` / ``tutor_lat_p95`` are end-to-end wall clock per
+      tutor call from the benchmark run itself, gathered under
+      ``--concurrency``, so they compare a model against its own history but
+      not against another model.
+
+    See docs/latency.md.
 
     Rows sorted descending by appropriate_scaffolding (None last).
     avoids_overscaffold = 1 - overscaffold["rate"]  (higher is better).
     Floats formatted to 3 decimal places; None -> "-" (md) / "" (csv).
     """
-    rows = [_extract_row(s) for s in runs]
+    rows = [_extract_row(s, probes) for s in runs]
 
     def _sort_key(r):
         v = r.get("appropriate_scaffolding")

@@ -165,24 +165,46 @@
     table.innerHTML = html;
   }
 
-  /* ---------- latency vs performance scatter (paper Fig. 7) ---------- */
+  /* ---------- time-to-first-token vs performance scatter ----------
+     x is TTFT p50 from `tutormoments latency`, a strictly serial probe: the
+     only latency figure that is comparable across models. The paper's Fig. 7
+     plotted end-to-end seconds per turn, which benchmark runs gather under
+     concurrency, so it moves with each model's rate-limit tier as well as with
+     the model. That figure is kept in the tooltip rather than on the axis.
+     See docs/latency.md in allenai/tutormoments. */
+
+  function niceMax(v) {
+    return Math.max(2, Math.ceil((v * 1.06) / 2) * 2);
+  }
 
   function renderLatency(data) {
     var mount = document.getElementById("latency-chart");
+    // Models without a probe run carry no ttft_s and cannot be placed on this
+    // axis. Omitted rather than zero-filled: "not measured" is not "fast".
+    var models = data.models.filter(function (d) { return typeof d.ttft_s === "number"; });
+    var missing = data.models.length - models.length;
+    if (!models.length) {
+      document.getElementById("latency-block").hidden = true;
+      return;
+    }
+
     var W = 920, H = 480;
     var m = { top: 24, right: 120, bottom: 58, left: 74 };
     var iw = W - m.left - m.right, ih = H - m.top - m.bottom;
 
-    var xMin = 2, xMax = 20, yMin = 0.5, yMax = 0.9;
+    var xMin = 0, yMin = 0.5, yMax = 0.9;
+    var xMax = niceMax(Math.max.apply(null, models.map(function (d) { return d.ttft_s; })));
+    var xStep = xMax > 24 ? 4 : 2;
     var x = function (v) { return m.left + ((v - xMin) / (xMax - xMin)) * iw; };
     var y = function (v) { return m.top + (1 - (v - yMin) / (yMax - yMin)) * ih; };
 
     var svg = el("svg", { viewBox: "0 0 " + W + " " + H, role: "img",
-      "aria-label": "Scatter plot of tutoring performance against mean response latency for seven language models" });
+      "aria-label": "Scatter plot of tutoring performance against median time to first token for "
+        + models.length + " language models" });
 
     // gridlines + ticks
     var xi, yi;
-    for (xi = 4; xi <= 18; xi += 2) {
+    for (xi = xStep; xi <= xMax - 0.001; xi += xStep) {
       el("line", { x1: x(xi), y1: m.top, x2: x(xi), y2: m.top + ih, stroke: GRID, "stroke-width": 1 }, svg);
       el("text", { x: x(xi), y: m.top + ih + 22, "text-anchor": "middle", "font-size": 12, fill: INK_MUTED }, svg)
         .textContent = xi;
@@ -196,17 +218,17 @@
 
     // axis titles
     el("text", { x: m.left + iw / 2, y: H - 12, "text-anchor": "middle", "font-size": 13, fill: INK }, svg)
-      .textContent = "Mean tutor latency per turn (seconds)";
+      .textContent = "Time to first token, median seconds";
     var yl = el("text", { x: 18, y: m.top + ih / 2, "text-anchor": "middle", "font-size": 13, fill: INK,
       transform: "rotate(-90 18 " + (m.top + ih / 2) + ")" }, svg);
     yl.textContent = "Appropriate scaffolding & rigor (mean)";
 
     // points + direct labels
-    var labelLeft = { "gemini-2.5-pro": true };
+    var labelLeft = { "gemini-2.5-pro": true, "claude-sonnet-4-6": true };
     var labelBelow = { "gpt-5.5-2026-04-23": true };
-    data.models.forEach(function (d) {
+    models.forEach(function (d) {
       var s = MODEL_STYLE[d.id] || { color: INK, marker: "square" };
-      var cx = x(d.latency_s), cy = y(d.score);
+      var cx = x(d.ttft_s), cy = y(d.score);
       markerNode(s.marker, cx, cy, 8, s.color, svg);
 
       var lx = labelLeft[d.id] ? cx - 14 : cx + 14;
@@ -220,18 +242,30 @@
       // oversized invisible hit target for hover
       var hit = el("circle", { cx: cx, cy: cy, r: 17, fill: "transparent", cursor: "pointer" }, svg);
       attachHover(hit, function () {
-        return '<div class="tt-title">' + d.name + "</div>" +
+        var html = '<div class="tt-title">' + d.name + "</div>" +
           ttRow("Score", d.score.toFixed(3)) +
-          ttRow("Latency / turn", d.latency_s.toFixed(1) + " s" + (d.latency_estimated ? " (approx.)" : ""));
+          ttRow("Time to first token", d.ttft_s.toFixed(1) + " s");
+        // Cold/warm is present only where the provider's cache labels mean
+        // session warmth; elsewhere the pooled figure is all there is.
+        if (typeof d.ttft_cold_s === "number" && typeof d.ttft_warm_s === "number") {
+          html += ttRow("First message / later", d.ttft_cold_s.toFixed(1) + " / " + d.ttft_warm_s.toFixed(1) + " s");
+        }
+        if (typeof d.latency_s === "number") {
+          html += ttRow("Full turn, end to end", d.latency_s.toFixed(1) + " s" +
+            (d.latency_estimated ? " (approx.)" : ""));
+        }
+        return html;
       });
     });
 
     mount.appendChild(svg);
 
+    var notes = [];
+    if (missing) notes.push(missing + " model(s) omitted: no latency probe run.");
     if (data.models.some(function (d) { return d.latency_estimated; })) {
-      document.getElementById("latency-footnote").textContent =
-        "Scores are exact (Table 8 of the paper).";
+      notes.push("Scores are exact (Table 8 of the paper); end-to-end turn times in the tooltip are read off Figure 7 to about a fifth of a second.");
     }
+    document.getElementById("latency-footnote").textContent = notes.join(" ");
   }
 
   /* ---------- action distribution strip plot (paper Fig. 4) ---------- */

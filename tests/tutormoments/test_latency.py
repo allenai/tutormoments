@@ -18,6 +18,9 @@ from tutormoments.latency import (
     aggregate_timings,
     format_probe_summary,
     latency_stats,
+    probe_figures,
+    probe_runs,
+    probe_subsample_ids,
     resolve_subsample,
     run_probe,
     warm_figure_is_publishable,
@@ -656,3 +659,171 @@ def test_withheld_reason_follows_the_gate_order():
         ]
     )
     assert "incidental shared prefix" in withheld_reason(incidental)
+
+
+# ---------------------------------------------------------------------------
+# Reading probe results back: probe_figures / probe_runs
+# ---------------------------------------------------------------------------
+
+
+def _probe_tutor_block(
+    *,
+    p50_all=9.0,
+    p50_miss=12.0,
+    p50_hit=8.0,
+    cache_hit_rate=0.5,
+    cache_read=8000,
+    n_hits=40,
+):
+    return {
+        "cache_hit_rate": cache_hit_rate,
+        "cache_read_p50_on_hits": cache_read,
+        "ttft": {
+            "all": {"n": 112, "p50_seconds": p50_all},
+            "miss": {"n": 40, "p50_seconds": p50_miss},
+            "hit": {"n": n_hits, "p50_seconds": p50_hit},
+        },
+        "ttlt": {"all": {"n": 112, "p50_seconds": p50_all + 1.0}},
+    }
+
+
+def _write_probe(
+    root: Path,
+    run_id: str,
+    *,
+    tutor="model-a",
+    mode="scaffolding_rigor",
+    measured_at="2026-08-18T10:00:00",
+    source="frozen_packaged",
+    complete=True,
+    sub_id="589e8acf8ac761f2",
+    tutor_block=None,
+):
+    run = root / run_id
+    run.mkdir(parents=True)
+    (run / "latency.json").write_text(
+        json.dumps(
+            {
+                "source": "probe",
+                "tutor_model": tutor,
+                "mode": mode,
+                "tutor": tutor_block or _probe_tutor_block(),
+                "subsample": {
+                    "subsample_source": source,
+                    "subsample_id": sub_id,
+                    "subsample_complete": complete,
+                },
+                "measurement_environment": {"measured_at": measured_at},
+            }
+        ),
+        encoding="utf-8",
+    )
+    return run
+
+
+def test_probe_figures_always_publishes_the_pooled_number():
+    """Pooled TTFT is measured identically on every provider, so it is the one
+    figure that can rank the whole roster."""
+    figs = probe_figures(_probe_tutor_block(cache_hit_rate=None, cache_read=None))
+    assert figs["ttft_p50"] == 9.0
+    assert figs["ttlt_p50"] == 10.0
+
+
+def test_probe_figures_publishes_the_split_when_the_cache_is_real():
+    figs = probe_figures(_probe_tutor_block())
+    assert figs["ttft_cold_p50"] == 12.0
+    assert figs["ttft_warm_p50"] == 8.0
+
+
+def test_probe_figures_withholds_cold_as_well_as_warm():
+    """The gate establishes that hit/miss labels mean session warmth at all.
+    Together's misses are the calls its automatic prefix cache happened not to
+    serve -- clustered at run start, not session start -- so publishing them as
+    a cold figure is wrong in the same way publishing its warm figure is."""
+    figs = probe_figures(_probe_tutor_block(cache_read=256))
+    assert figs["ttft_p50"] == 9.0
+    assert figs["ttft_cold_p50"] is None
+    assert figs["ttft_warm_p50"] is None
+
+
+def test_probe_figures_tolerates_an_absent_probe():
+    assert probe_figures({}) == {
+        "ttft_p50": None,
+        "ttlt_p50": None,
+        "ttft_cold_p50": None,
+        "ttft_warm_p50": None,
+    }
+
+
+def test_probe_runs_keys_by_model_and_mode(tmp_path):
+    _write_probe(tmp_path, "model-a_scaffolding_rigor_latency_20260818")
+    _write_probe(
+        tmp_path, "model-b_plain_latency_20260818", tutor="model-b", mode="plain"
+    )
+    found = probe_runs(str(tmp_path))
+    assert set(found) == {("model-a", "scaffolding_rigor"), ("model-b", "plain")}
+
+
+def test_probe_runs_prefers_the_newest_measurement(tmp_path):
+    """Re-measuring a model supersedes its earlier figure without anyone
+    having to delete the old run directory."""
+    _write_probe(
+        tmp_path,
+        "model-a_scaffolding_rigor_latency_20260817",
+        measured_at="2026-08-17T14:50:00",
+        tutor_block=_probe_tutor_block(p50_all=99.0),
+    )
+    _write_probe(
+        tmp_path,
+        "model-a_scaffolding_rigor_latency_20260818",
+        measured_at="2026-08-18T10:00:00",
+        tutor_block=_probe_tutor_block(p50_all=9.0),
+    )
+    block = probe_runs(str(tmp_path))[("model-a", "scaffolding_rigor")]
+    assert block["tutor"]["ttft"]["all"]["p50_seconds"] == 9.0
+
+
+def test_probe_runs_ignores_a_derived_subsample(tmp_path):
+    """A derived sample spans no particular prompt-length distribution, so it
+    is comparable to nothing -- least of all to another model's frozen run."""
+    _write_probe(
+        tmp_path, "model-a_scaffolding_rigor_latency_20260818", source="derived"
+    )
+    assert probe_runs(str(tmp_path)) == {}
+
+
+def test_probe_runs_ignores_an_incomplete_frozen_subsample(tmp_path):
+    """Dropped ids mean this is not the same sample as the run before it."""
+    _write_probe(tmp_path, "model-a_scaffolding_rigor_latency_20260818", complete=False)
+    assert probe_runs(str(tmp_path)) == {}
+
+
+def test_probe_runs_ignores_benchmark_run_directories(tmp_path):
+    """Benchmark runs write summary.json, not latency.json, and their latency
+    was gathered under --concurrency."""
+    (tmp_path / "model-a_scaffolding_rigor_tutormoments-preview_20260807").mkdir()
+    assert probe_runs(str(tmp_path)) == {}
+
+
+def test_probe_runs_on_a_missing_results_root(tmp_path):
+    assert probe_runs(str(tmp_path / "nope")) == {}
+
+
+def test_probe_subsample_ids_exposes_a_mixed_set(tmp_path):
+    """Eligibility is per-probe, so two frozen-but-different samples each pass
+    it. Callers publishing several cells need to see that."""
+    _write_probe(
+        tmp_path,
+        "model-a_scaffolding_rigor_latency_20260818",
+        sub_id="589e8acf8ac761f2",
+    )
+    _write_probe(
+        tmp_path,
+        "model-b_scaffolding_rigor_latency_20260817",
+        tutor="model-b",
+        sub_id="84b4ad5615876a3e",
+    )
+    assert probe_subsample_ids(probe_runs(str(tmp_path))) == {
+        "589e8acf8ac761f2",
+        "84b4ad5615876a3e",
+    }

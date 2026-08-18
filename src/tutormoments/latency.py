@@ -206,6 +206,111 @@ def warm_figure_is_publishable(block: dict) -> bool:
 
 
 # ---------------------------------------------------------------------------
+# Reading probe results back (leaderboard + website join)
+# ---------------------------------------------------------------------------
+
+
+def probe_figures(block: dict) -> dict:
+    """The publishable TTFT/TTLT p50s from one probe's ``latency.json``.
+
+    Returns ``ttft_p50`` / ``ttlt_p50`` (pooled over all samples) plus the
+    cold and warm halves, which are ``None`` unless the cache split can be
+    trusted.
+
+    Pooled is always populated: it is measured identically on every provider,
+    whatever that provider reports about caching, so it is the only figure
+    that ranks the whole roster. The split refines it where cache state is
+    knowable.
+
+    **The split is published as a unit or not at all.** The obvious reading is
+    that `warm_figure_is_publishable` guards only the warm number, but its
+    three conditions establish that this provider's hit/miss labels mean
+    session warmth at all -- and a label that cannot be trusted for the hits
+    cannot be trusted for their complement either. Concretely: Together's
+    "misses" are the calls its automatic prefix cache happened not to serve,
+    which cluster at run start rather than at session start, and on the pilot
+    that put its cold p50 at 15.03s against a pooled 7.94s. Publishing that as
+    "first message of a session" would be wrong in the same way publishing its
+    warm figure would be.
+
+    The probe's own terminal summary is deliberately looser -- it prints the
+    cold figure with a NOTE explaining why warm was withheld, because there it
+    is a diagnostic read by whoever just ran the probe. These figures go into
+    the leaderboard and onto the website, where they are read without that
+    context.
+    """
+    ttft = block.get("ttft") or {}
+    ttlt = block.get("ttlt") or {}
+
+    def _p50(metric: dict, state: str):
+        return (metric.get(state) or {}).get("p50_seconds")
+
+    split_ok = warm_figure_is_publishable(block)
+    return {
+        "ttft_p50": _p50(ttft, "all"),
+        "ttlt_p50": _p50(ttlt, "all"),
+        "ttft_cold_p50": _p50(ttft, "miss") if split_ok else None,
+        "ttft_warm_p50": _p50(ttft, "hit") if split_ok else None,
+    }
+
+
+def probe_runs(results_root: str = "results") -> dict:
+    """Latest comparable probe result per ``(tutor_model, mode)``.
+
+    Scans *results_root* for run directories carrying a ``latency.json`` and
+    returns ``{(tutor_model, mode): block}``. This is the join the leaderboard
+    and the website both need: a probe writes its own run directory, which
+    nothing else reads.
+
+    Only probes that measured a **frozen** subsample **in full** are eligible.
+    A derived sample spans no particular prompt-length distribution and is
+    comparable to nothing; an incomplete one dropped ids, so it is not the
+    same sample as the run before it. Neither belongs in a table that invites
+    cross-model comparison.
+
+    Among eligible probes for one cell the newest by ``measured_at`` wins, so
+    re-measuring a model supersedes its earlier figure without anyone having
+    to delete the old run. Callers that publish several cells should check the
+    selected blocks agree on ``subsample_id``: eligibility is per-probe, and
+    two frozen-but-different samples would each pass it (see
+    `probe_subsample_ids`).
+    """
+    out: dict[tuple[str, str], dict] = {}
+    best_key: dict[tuple[str, str], tuple] = {}
+
+    for run_id in results.list_runs(results_root):
+        block = results.read_latency(run_id, results_root=results_root)
+        if not block:
+            continue
+        sub = block.get("subsample") or {}
+        if not str(sub.get("subsample_source", "")).startswith("frozen"):
+            continue
+        if not sub.get("subsample_complete", False):
+            continue
+        cell = (block.get("tutor_model", ""), block.get("mode", ""))
+        env = block.get("measurement_environment") or {}
+        # measured_at then run_id: a run directory written without a timestamp
+        # still orders deterministically instead of depending on scan order.
+        rank = (env.get("measured_at") or "", run_id)
+        if cell not in best_key or rank > best_key[cell]:
+            best_key[cell] = rank
+            out[cell] = block
+    return out
+
+
+def probe_subsample_ids(probes: dict) -> set:
+    """The distinct ``subsample_id`` values across selected probe blocks.
+
+    More than one means the figures were measured over different prompt sets
+    and must not be printed in one table -- the point of the id is that this
+    is visible rather than quietly averaged.
+    """
+    return {
+        (block.get("subsample") or {}).get("subsample_id") for block in probes.values()
+    }
+
+
+# ---------------------------------------------------------------------------
 # Subsample resolution
 # ---------------------------------------------------------------------------
 

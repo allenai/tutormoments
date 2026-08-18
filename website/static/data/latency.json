@@ -1,12 +1,82 @@
 {
-  "source": "Figure 7, TutorMoments-Preview working paper (2026-06-30). score = mean of evaluation-aware Appropriate Scaffolding and Appropriate Rigor (exact, from Table 8). TODO: latency_s values are read off the paper figure to ~±0.2s; replace with exact values via scripts/refresh-data.py.",
+  "source": "score = mean of evaluation-aware Appropriate Scaffolding and Appropriate Rigor (exact, from Table 8 of the TutorMoments-Preview working paper, 2026-06-30). ttft_s / ttft_cold_s / ttft_warm_s measured by `tutormoments latency`, a serial probe (see the ttft block for mode, subsample and timestamps). latency_s is end-to-end seconds per tutor turn, still read off the paper's Figure 7 to ~\u00b10.2s; a checkout with results/benchmark replaces it with exact values via scripts/refresh-data.py.",
+  "ttft": {
+    "mode": "scaffolding_rigor",
+    "subsample_id": "589e8acf8ac761f2",
+    "measured_at": {
+      "claude-opus-4-8": "2026-08-18T14:21:39",
+      "claude-sonnet-4-6": "2026-08-18T15:31:44",
+      "deepseek-ai_DeepSeek-V4-Pro": "2026-08-18T12:12:06",
+      "gemini-2.5-pro": "2026-08-18T12:06:09",
+      "gemini-3.5-flash": "2026-08-18T12:54:57",
+      "gpt-5.4-mini-2026-03-17": "2026-08-18T11:58:28",
+      "gpt-5.5-2026-04-23": "2026-08-18T11:23:02"
+    }
+  },
   "models": [
-    { "id": "claude-opus-4-8", "name": "Claude Opus 4.8", "latency_s": 12.5, "latency_estimated": true, "score": 0.8445 },
-    { "id": "claude-sonnet-4-6", "name": "Claude Sonnet 4.6", "latency_s": 10.0, "latency_estimated": true, "score": 0.8115 },
-    { "id": "deepseek-ai_DeepSeek-V4-Pro", "name": "DeepSeek V4 Pro", "latency_s": 7.0, "latency_estimated": true, "score": 0.602 },
-    { "id": "gemini-2.5-pro", "name": "Gemini 2.5 Pro", "latency_s": 17.6, "latency_estimated": true, "score": 0.804 },
-    { "id": "gemini-3.5-flash", "name": "Gemini 3.5 Flash", "latency_s": 9.0, "latency_estimated": true, "score": 0.7655 },
-    { "id": "gpt-5.5-2026-04-23", "name": "GPT 5.5", "latency_s": 10.3, "latency_estimated": true, "score": 0.652 },
-    { "id": "gpt-5.4-mini-2026-03-17", "name": "GPT 5.4 mini", "latency_s": 4.2, "latency_estimated": true, "score": 0.571 }
+    {
+      "id": "claude-opus-4-8",
+      "name": "Claude Opus 4.8",
+      "latency_s": 12.5,
+      "latency_estimated": true,
+      "score": 0.8445,
+      "ttft_s": 9.04,
+      "ttft_cold_s": 13.22,
+      "ttft_warm_s": 7.99
+    },
+    {
+      "id": "claude-sonnet-4-6",
+      "name": "Claude Sonnet 4.6",
+      "latency_s": 10.0,
+      "latency_estimated": true,
+      "score": 0.8115,
+      "ttft_s": 8.47,
+      "ttft_cold_s": 9.62,
+      "ttft_warm_s": 7.63
+    },
+    {
+      "id": "deepseek-ai_DeepSeek-V4-Pro",
+      "name": "DeepSeek V4 Pro",
+      "latency_s": 7.0,
+      "latency_estimated": true,
+      "score": 0.602,
+      "ttft_s": 11.09
+    },
+    {
+      "id": "gemini-2.5-pro",
+      "name": "Gemini 2.5 Pro",
+      "latency_s": 17.6,
+      "latency_estimated": true,
+      "score": 0.804,
+      "ttft_s": 14.08
+    },
+    {
+      "id": "gemini-3.5-flash",
+      "name": "Gemini 3.5 Flash",
+      "latency_s": 9.0,
+      "latency_estimated": true,
+      "score": 0.7655,
+      "ttft_s": 5.51
+    },
+    {
+      "id": "gpt-5.5-2026-04-23",
+      "name": "GPT 5.5",
+      "latency_s": 10.3,
+      "latency_estimated": true,
+      "score": 0.652,
+      "ttft_s": 6.38,
+      "ttft_cold_s": 6.91,
+      "ttft_warm_s": 5.92
+    },
+    {
+      "id": "gpt-5.4-mini-2026-03-17",
+      "name": "GPT 5.4 mini",
+      "latency_s": 4.2,
+      "latency_estimated": true,
+      "score": 0.571,
+      "ttft_s": 3.16,
+      "ttft_cold_s": 3.72,
+      "ttft_warm_s": 2.71
+    }
   ]
 }
