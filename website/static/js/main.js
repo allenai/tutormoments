@@ -248,7 +248,7 @@
         // Cold/warm is present only where the provider's cache labels mean
         // session warmth; elsewhere the pooled figure is all there is.
         if (typeof d.ttft_cold_s === "number" && typeof d.ttft_warm_s === "number") {
-          html += ttRow("First message / later", d.ttft_cold_s.toFixed(1) + " / " + d.ttft_warm_s.toFixed(1) + " s");
+          html += ttRow("First / later messages", d.ttft_cold_s.toFixed(1) + " / " + d.ttft_warm_s.toFixed(1) + " s");
         }
         // TTLT from the same serial probe: when the student can reply.
         if (typeof d.ttlt_s === "number") {
