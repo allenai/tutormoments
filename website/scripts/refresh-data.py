@@ -173,17 +173,18 @@ def load_latency_module(repo: Path):
 def probe_ttft(repo: Path, probe_root: Path, prompt: str) -> tuple[dict, dict]:
     """TTFT figures per site model id, from `tutormoments latency` probe runs.
 
-    Returns ``({site_id: {ttft_s, ttft_cold_s?, ttft_warm_s?, measured_at}},
+    Returns ``({site_id: {ttft_s, ttlt_s?, ttft_first_s?, ttft_later_s?}},
     provenance)``.
 
     Only probe runs are read. A benchmark run also records TTFT, but under
     --concurrency, which distorts it by a model-dependent amount and makes it
     incomparable across models -- exactly the comparison this chart invites.
 
-    `ttft_s` is the pooled p50 over all samples: the only figure measured
-    identically on all four providers, since Gemini reports no cache tokens and
-    so has neither a cold nor a warm bucket. The cold/warm split is carried
-    alongside it when the runtime says that provider's split is publishable.
+    `ttft_s` is the pooled p50 over all samples. `ttft_first_s` /
+    `ttft_later_s` split it by turn position -- the first message of a session
+    against the later ones -- which the probe recorded itself, so every model
+    with a probe run gets the split regardless of what its provider reports
+    about caching.
     """
     lat_mod = load_latency_module(repo)
     if lat_mod is None:
@@ -197,17 +198,18 @@ def probe_ttft(repo: Path, probe_root: Path, prompt: str) -> tuple[dict, dict]:
         # Site ids mirror result-directory names, which flatten the provider
         # slash (deepseek-ai/DeepSeek-V4-Pro -> deepseek-ai_DeepSeek-V4-Pro).
         site_id = tutor_model.replace("/", "_")
-        figs = lat_mod.probe_figures(block.get("tutor") or {})
+        figs = lat_mod.probe_figures(block)
         if figs["ttft_p50"] is None:
             continue
         env = block.get("measurement_environment") or {}
         row = {"ttft_s": round(figs["ttft_p50"], 2)}
-        if figs["ttlt_p50"] is not None:
-            row["ttlt_s"] = round(figs["ttlt_p50"], 2)
-        if figs["ttft_cold_p50"] is not None:
-            row["ttft_cold_s"] = round(figs["ttft_cold_p50"], 2)
-        if figs["ttft_warm_p50"] is not None:
-            row["ttft_warm_s"] = round(figs["ttft_warm_p50"], 2)
+        for src, key in (
+            ("ttlt_p50", "ttlt_s"),
+            ("ttft_first_p50", "ttft_first_s"),
+            ("ttft_later_p50", "ttft_later_s"),
+        ):
+            if figs[src] is not None:
+                row[key] = round(figs[src], 2)
         figures[site_id] = row
         measured[site_id] = env.get("measured_at")
         subsamples.add((block.get("subsample") or {}).get("subsample_id"))
@@ -238,7 +240,17 @@ def apply_ttft(rows: list, figures: dict) -> int:
     """
     n = 0
     for row in rows:
-        for key in ("ttft_s", "ttlt_s", "ttft_cold_s", "ttft_warm_s"):
+        # ttft_cold_s / ttft_warm_s are legacy: the split published under
+        # those names keyed on cache state and is superseded by the turn-based
+        # first/later one. Popped so a refreshed row cannot carry both.
+        for key in (
+            "ttft_s",
+            "ttlt_s",
+            "ttft_first_s",
+            "ttft_later_s",
+            "ttft_cold_s",
+            "ttft_warm_s",
+        ):
             row.pop(key, None)
         figs = figures.get(row["id"])
         if figs:

@@ -71,12 +71,11 @@ interchangeable:
 
 - **`ttft_s`** — median time to first *visible* token, from `tutormoments latency`. That probe
   runs strictly serially, so this is the figure that is comparable across models, and it is
-  what the chart's x-axis plots. Pooled over all samples, because that is the only figure
-  measured identically on every provider: Gemini reports no cache tokens at all, so it has
-  neither a cold nor a warm bucket. `ttft_cold_s` / `ttft_warm_s` (first message of a session
-  vs. later ones) appear alongside it only where the runtime judges that provider's cache
-  labels to mean session warmth — currently the Anthropic and OpenAI paths. A model with no
-  probe run has no `ttft_s` key and is left off the chart rather than plotted at zero.
+  what the chart's x-axis plots. `ttft_first_s` / `ttft_later_s` split it by turn position —
+  the first message of a session against turns 3 and 5 — which the probe recorded itself, so
+  every probed model gets the split regardless of what its provider reports about caching.
+  A model with no probe run has no `ttft_s` key and is left off the chart rather than
+  plotted at zero.
 - **`ttlt_s`** — median time to last token from the same probe: when the student can actually
   reply. Shown in the tooltip as "Full turn, end to end".
 - **`latency_s`** — end-to-end seconds per tutor turn from a benchmark run, which replays

@@ -213,44 +213,54 @@ def warm_figure_is_publishable(block: dict) -> bool:
 def probe_figures(block: dict) -> dict:
     """The publishable TTFT/TTLT p50s from one probe's ``latency.json``.
 
-    Returns ``ttft_p50`` / ``ttlt_p50`` (pooled over all samples) plus the
-    cold and warm halves, which are ``None`` unless the cache split can be
-    trusted.
+    Takes the whole latency.json dict. Returns ``ttft_p50`` / ``ttlt_p50``
+    (pooled over all samples) plus ``ttft_first_p50`` / ``ttft_later_p50`` —
+    the first message of a session (turn 1) against the later ones (turns 3
+    and 5).
 
-    Pooled is always populated: it is measured identically on every provider,
-    whatever that provider reports about caching, so it is the only figure
-    that ranks the whole roster. The split refines it where cache state is
-    knowable.
+    Pooled is the ranking figure: one number per model, measured identically
+    on every provider. The first/later split refines it, and it keys on
+    **turn position, not cache state**. Turn position is ground truth the
+    probe itself recorded, so the split exists for every provider — including
+    the ones that report no cache tokens — and needs no publishability gate.
+    A cache-state split would need one (`warm_figure_is_publishable`), and
+    even where it passes it answers a subtly different question: a "cold"
+    bucket holds every call whose cache missed, which on a provider with
+    silent cache failures includes later-turn calls. Measured on `gpt-5.5`,
+    that diluted the cache-based cold p50 to 6.91s when the actual
+    first-message p50 was 7.53s.
 
-    **The split is published as a unit or not at all.** The obvious reading is
-    that `warm_figure_is_publishable` guards only the warm number, but its
-    three conditions establish that this provider's hit/miss labels mean
-    session warmth at all -- and a label that cannot be trusted for the hits
-    cannot be trusted for their complement either. Concretely: Together's
-    "misses" are the calls its automatic prefix cache happened not to serve,
-    which cluster at run start rather than at session start, and on the pilot
-    that put its cold p50 at 15.03s against a pooled 7.94s. Publishing that as
-    "first message of a session" would be wrong in the same way publishing its
-    warm figure would be.
+    What the split measures is the position effect — mostly the model
+    thinking less on a continuation than on a fresh problem, plus whatever
+    caching contributes where the harness caches (see docs/latency.md). The
+    cache-state aggregates stay in the block for that diagnostic.
 
-    The probe's own terminal summary is deliberately looser -- it prints the
-    cold figure with a NOTE explaining why warm was withheld, because there it
-    is a diagnostic read by whoever just ran the probe. These figures go into
-    the leaderboard and onto the website, where they are read without that
-    context.
+    Computed from ``samples`` rather than a stored aggregate so any probe's
+    latency.json can be read back, including ones written before this split
+    existed. Samples that produced no visible token have no TTFT and are
+    excluded, same as everywhere else.
     """
-    ttft = block.get("ttft") or {}
-    ttlt = block.get("ttlt") or {}
+    tutor = block.get("tutor") or {}
+    ttft = tutor.get("ttft") or {}
+    ttlt = tutor.get("ttlt") or {}
 
-    def _p50(metric: dict, state: str):
-        return (metric.get(state) or {}).get("p50_seconds")
+    def _p50(metric: dict) -> float | None:
+        return (metric.get("all") or {}).get("p50_seconds")
 
-    split_ok = warm_figure_is_publishable(block)
+    def _turn_p50(pred) -> float | None:
+        vals = [
+            s["ttft_seconds"]
+            for s in block.get("samples") or []
+            if s.get("ttft_seconds") is not None and pred(s.get("turn_index"))
+        ]
+        stats = latency_stats(vals)
+        return stats["p50_seconds"] if stats else None
+
     return {
-        "ttft_p50": _p50(ttft, "all"),
-        "ttlt_p50": _p50(ttlt, "all"),
-        "ttft_cold_p50": _p50(ttft, "miss") if split_ok else None,
-        "ttft_warm_p50": _p50(ttft, "hit") if split_ok else None,
+        "ttft_p50": _p50(ttft),
+        "ttlt_p50": _p50(ttlt),
+        "ttft_first_p50": _turn_p50(lambda t: t == 0),
+        "ttft_later_p50": _turn_p50(lambda t: isinstance(t, int) and t > 0),
     }
 
 

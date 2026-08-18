@@ -98,15 +98,15 @@ see [Concurrency impacts latency](#concurrency-impacts-latency).
 Probe results live in their own run directory, which nothing else reads, so two consumers
 join them in ([`probe_runs`](../src/tutormoments/latency.py)):
 
-- **`tutormoments report`** — the leaderboard gains `ttft_p50`, `ttft_cold_p50` and
-  `ttft_warm_p50`, joined onto each run summary by `(tutor_model, mode)`. A cell with no probe
+- **`tutormoments report`** — the leaderboard gains `ttft_p50`, `ttft_first_p50` and
+  `ttft_later_p50`, joined onto each run summary by `(tutor_model, mode)`. A cell with no probe
   shows `-`; it never borrows the TTFT its benchmark run recorded under concurrency. The
   run-based `tutor_lat_p50` / `tutor_lat_p95` columns stay where they were, and are still
   end-to-end wall clock that compares a model against its own history rather than against
   another model.
 - **The website's latency chart** — `website/scripts/refresh-data.py` reads the same figures
-  into `static/data/latency.json` as `ttft_s` and `ttlt_s` (plus `ttft_cold_s` /
-  `ttft_warm_s` where the split is publishable) and plots TTFT on the x-axis, with TTLT in
+  into `static/data/latency.json` as `ttft_s` and `ttlt_s` plus the same first/later split
+  (`ttft_first_s` / `ttft_later_s`), and plots TTFT on the x-axis with TTLT and the split in
   the tooltip. That script imports this module rather
   than restating its rules; an earlier version restated them and gated on cache hit *rate*,
   which is the one thing this code deliberately refuses to do.
@@ -122,18 +122,21 @@ run directory — which is how the 40-moment pilot stopped being published the m
 samples would each pass it; both consumers therefore check that the selected probes agree on
 `subsample_id` and warn when they do not.
 
-**The pooled figure is the headline, not the cold one.** Cold is the more natural
-"first message of a session" number, but it does not exist on every provider: Gemini reports
-no cache tokens, so it has no cold bucket, and on Together the bucket exists but its labels
-mean something else (above). Pooled TTFT is measured identically on all four providers, so it
-is the only figure that can rank the whole roster, and dropping two models off a chart for a
-provider-reporting reason is worse than the alternative. What that costs: at a fixed
-`max_turns` the mix is structurally 1 cold to 2 warm per moment, but the *realised* hit rate
-varies (0.45–0.67 on Anthropic, since a moment whose head falls under the model's minimum
-prefix fails to cache silently), so a pooled figure carries a small mix effect on top of the
-model's speed. With the warm gain at ~1–3.6s that is worth well under a second — smaller than
-the cold/warm gap it replaces, and far smaller than the p5–p95 spread within any one model.
-The split is published beside it wherever it can be trusted, so nothing is hidden.
+**The published split keys on turn position, not cache state.** "First message" is the 112
+turn-1 calls; "later" is the 224 on turns 3 and 5. The probe recorded every call's turn
+itself, so this split is ground truth on all four providers and needs no publishability gate.
+A cache-state split is the natural first idea and is wrong twice over: it does not exist on
+Gemini (no cache tokens reported), and where automatic caching exists it mislabels — a "cold"
+bucket holds every call whose cache missed, which on `gpt-5.5` included 27 later-turn calls
+whose prefix silently failed to cache, diluting its "first message" figure from 7.53s to
+6.91s, and on Together tracks run warmup rather than session position entirely. The
+cache-state aggregates stay in `latency.json` (fidelity-gated, see
+[caching fidelity](#caching-fidelity--the-biggest-caveat)) as the diagnostic for what
+*caching* does; the turn split is what a student's first and later messages actually cost.
+
+**The pooled figure is the ranking number.** One number per model, over an identical sample —
+112 first + 224 later for every model in a full run. The mix is fixed by run structure, not by
+provider behavior, so pooling is fair; the split is published beside it so nothing is hidden.
 
 ## Analysis
 
@@ -148,21 +151,31 @@ because every probe's simulated student is `claude-opus-4-6` on the same account
 
 | model | TTFT p50 | p5 / p95 | first message | later | TTLT p50 | thinking share of TTFT |
 |---|---|---|---|---|---|---|
-| `gpt-5.4-mini-2026-03-17` | **3.16** | 1.77 / 7.16 | 3.72 | 2.71 | 3.47 | not streamed |
-| `gemini-3.5-flash` | **5.51** | 3.62 / 10.50 | – | – | 5.72 | 3.75s of 5.51 |
-| `gpt-5.5-2026-04-23` | **6.38** | 3.40 / 9.65 | 6.91 | 5.92 | 7.28 | not streamed |
+| `gpt-5.4-mini-2026-03-17` | **3.16** | 1.77 / 7.16 | 3.76 | 2.71 | 3.47 | not streamed |
+| `gemini-3.5-flash` | **5.51** | 3.62 / 10.50 | 6.11 | 5.21 | 5.72 | 3.75s of 5.51 |
+| `gpt-5.5-2026-04-23` | **6.38** | 3.40 / 9.65 | 7.53 | 5.89 | 7.28 | not streamed |
 | `claude-sonnet-4-6` | **8.47** | 3.12 / 21.09 | 9.62 | 7.63 | 8.73 | 7.13s of 8.47 |
 | `claude-opus-4-8` | **9.04** | 4.34 / 27.90 | 13.22 | 7.99 | 10.52 | 7.86s of 9.04 |
-| `deepseek-ai/DeepSeek-V4-Pro` | **11.09** | 4.42 / 36.43 | – | – | 11.86 | 10.35s of 11.09 |
-| `gemini-2.5-pro` | **14.08** | 9.13 / 24.34 | – | – | 14.15 | 11.59s of 14.08 |
+| `deepseek-ai/DeepSeek-V4-Pro` | **11.09** | 4.42 / 36.43 | 12.91 | 9.97 | 11.86 | 10.35s of 11.09 |
+| `gemini-2.5-pro` | **14.08** | 9.13 / 24.34 | 14.74 | 13.68 | 14.15 | 11.59s of 14.08 |
 
 TTFT p50 is pooled over all 336 calls, which is what the leaderboard and the website rank on.
-"First message" / "later" are the cold and warm halves, shown only where the provider's cache
-labels can be carried (see [caching fidelity](#caching-fidelity--the-biggest-caveat)) — so
-Gemini has none, and DeepSeek's are withheld rather than published. The thinking column
+"First message" / "later" split it **by turn position** — the 112 turn-1 calls against the 224
+on turns 3 and 5. Turn position is the probe's own record, so the split exists for every
+provider identically; it does not depend on what a provider reports about caching, which is
+why Gemini and DeepSeek have figures here despite having no usable cache split (see
+[caching fidelity](#caching-fidelity--the-biggest-caveat)). On Anthropic it coincides with
+the cache split to a hundredth of a second (turn 1 is always the miss); on `gpt-5.5` it
+corrects it — the cache-based "cold" was 6.91 because 27 later-turn calls silently failed to
+cache and diluted the bucket, while the actual first-message p50 is 7.53. The thinking column
 subtracts the `ttfc` p50 from the `ttft` p50; the
 [decomposition below](#caching-does-not-systematically-improve-latency) takes the p50 of the
 per-call difference instead, which is why its figures differ by a tenth of a second or so.
+
+The split is also where the roster's other pattern shows: every model adapts its effort to
+position. Even Gemini 2.5 Pro, with no session cache in this harness at all, is 1.06s faster
+on later turns — pure thinking adaptation. DeepSeek's 2.94s and Opus 4.8's 5.22s gaps say the
+first message of a session is where reasoning models spend their budget.
 
 The order is not the score order: the two strongest tutors in the benchmark sit 8.5–9.0s from
 first token, and the fastest model on the roster is the weakest. That trade-off is the finding
@@ -291,9 +304,12 @@ thinking, and thinking falls monotonically with turn index (11.75s, then 6.96s, 
 the model reasons hardest when it first meets the problem and less on each continuation.
 Sonnet 4.6 does show a real prefill saving, and it is 0.53s.
 
-So the split is honestly read as **"first message of a session" vs "a later message"**, which
-is how the website labels it — a position-in-conversation effect that caching contributes a
-fraction of a second to. On the OpenAI path the decomposition is unavailable (reasoning is not
+So the split is honestly read as **"first message of a session" vs "a later message"** — a
+position-in-conversation effect that caching contributes a fraction of a second to. That
+reading is now literal: the split the leaderboard and website publish keys on turn position
+directly, so it exists for every provider and measures the position effect wherever thinking
+adapts — including Gemini 2.5 Pro, 1.06s faster on later turns with no session cache in this
+harness at all. On the OpenAI path the decomposition is unavailable (reasoning is not
 streamed, so `ttfc` ≈ `ttft`) and the whole ~1.0s gain lands in prefill by construction; that
 is an upper bound on its caching effect, not a measurement of one.
 
@@ -348,20 +364,24 @@ comparable within the Anthropic and OpenAI paths, and absent elsewhere.** Wiring
 Gemini/Together cache remains follow-up work; the gate is what keeps its absence honest in the
 meantime.
 
-**A withheld split withholds the cold figure too.** The natural reading is that this gate
-guards the warm number alone, but its conditions establish that a provider's hit/miss labels
-mean session warmth *at all* — and labels that cannot be trusted for the hits cannot be
-trusted for their complement. Together is the concrete case: its misses are the calls its
-automatic prefix cache happened not to serve, which cluster at run start rather than at
-session start. On the roster that put its "cold" p50 at 12.86s and its "warm" at 10.86s, a
-2.0s gap that reads exactly like the session effect the Anthropic models show and is nothing
-of the kind — the 72 calls in that bucket are the ones Together's cache happened to miss, not
-the 112 first messages.
-Publishing that as "the first message of a session" would be wrong in exactly the way
-publishing its warm figure would be. `probe_figures` therefore returns the split as a unit or
-not at all. The probe's own terminal summary is looser on purpose — it prints the cold figure
-with a NOTE naming what was withheld and why, because there it is a diagnostic read by
-whoever just ran the probe, not a number lifted into a table.
+**What the gate guards — and what routed around it.** A withheld warm figure withholds the
+cold one too: the gate's conditions establish that a provider's hit/miss labels mean session
+warmth *at all*, and labels that cannot be trusted for the hits cannot be trusted for their
+complement. Together is the concrete case: its misses are the calls its automatic prefix
+cache happened not to serve, which cluster at run start rather than at session start. On the
+roster that put its "cold" p50 at 12.86s and its "warm" at 10.86s — a 2.0s gap that reads
+exactly like the session effect the Anthropic models show and is nothing of the kind. The 72
+calls in that bucket are the ones Together's cache happened to miss, not the 112 first
+messages.
+
+This is why the *published* first/later split keys on turn position instead
+(`probe_figures`): turn index is the probe's own record, needs no gate, and answers the
+product question directly. The cache split this section describes remains in `latency.json`
+and the probe's terminal summary as the caching diagnostic — the summary prints the cold
+figure with a NOTE naming what was withheld and why, because there it is read by whoever just
+ran the probe, not lifted into a table. Where both splits exist they nearly agree on
+Anthropic (turn 1 ≡ miss, to a hundredth of a second) and diverge exactly where the cache
+labels lie, which is itself a useful check.
 
 ### What is not modelled
 

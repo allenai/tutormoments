@@ -333,36 +333,32 @@ EXPECTED_COLUMNS = [
     "appropriate_rigor",
     "avoids_overscaffold",
     "ttft_p50",
-    "ttft_cold_p50",
-    "ttft_warm_p50",
+    "ttft_first_p50",
+    "ttft_later_p50",
     "tutor_lat_p50",
     "tutor_lat_p95",
     "tokens_total",
 ]
 
 
-def _probe_block(
-    *,
-    p50_all: float,
-    p50_miss: float | None = None,
-    p50_hit: float | None = None,
-    cache_hit_rate: float | None = 0.5,
-    cache_read: int | None = 8000,
-    n_hits: int = 40,
-) -> dict:
-    """One `tutormoments latency` result, shaped as the probe writes it."""
+def _probe_block(*, p50_all: float, first: tuple = (), later: tuple = ()) -> dict:
+    """One `tutormoments latency` result, shaped as the probe writes it.
+
+    `first`/`later` are per-call TTFTs for turn 0 and turns 1-2; the split the
+    leaderboard prints is computed from these samples, not from the cache
+    aggregates.
+    """
+    samples = [{"ttft_seconds": v, "turn_index": 0} for v in first]
+    samples += [
+        {"ttft_seconds": v, "turn_index": 1 + i % 2} for i, v in enumerate(later)
+    ]
     return {
         "tutor": {
-            "n_samples": 112,
-            "cache_hit_rate": cache_hit_rate,
-            "cache_read_p50_on_hits": cache_read,
-            "ttft": {
-                "all": {"n": 112, "p50_seconds": p50_all},
-                "miss": {"n": 40, "p50_seconds": p50_miss} if p50_miss else None,
-                "hit": {"n": n_hits, "p50_seconds": p50_hit} if p50_hit else None,
-            },
-            "ttlt": {"all": {"n": 112, "p50_seconds": p50_all + 1.0}},
-        }
+            "n_samples": 336,
+            "ttft": {"all": {"n": 336, "p50_seconds": p50_all}},
+            "ttlt": {"all": {"n": 336, "p50_seconds": p50_all + 1.0}},
+        },
+        "samples": samples,
     }
 
 
@@ -666,14 +662,14 @@ def test_leaderboard_joins_probe_ttft_onto_the_matching_cell():
     two meet. Join key is (tutor_model, mode) -- the cell the probe measured."""
     probes = {
         ("model-alpha", "scaffolding_rigor"): _probe_block(
-            p50_all=9.446, p50_miss=12.377, p50_hit=8.794
+            p50_all=9.043, first=(13.0, 13.2, 13.4), later=(7.9, 8.0, 8.1)
         )
     }
     md, csv_str = leaderboard([SUMMARY_A], probes)
-    assert "9.446" in md
-    assert "12.377" in md
-    assert "8.794" in md
-    assert "9.446" in csv_str
+    assert "9.043" in md
+    assert "13.200" in md  # ttft_first_p50
+    assert "8.000" in md  # ttft_later_p50
+    assert "9.043" in csv_str
 
 
 def test_leaderboard_dashes_ttft_for_a_cell_with_no_probe():
@@ -706,36 +702,30 @@ def test_leaderboard_ttft_join_is_per_mode():
     assert "9.446" not in rows["plain"]
 
 
-def test_leaderboard_publishes_pooled_ttft_when_the_provider_reports_no_cache():
-    """Gemini reports no cache tokens at all, so it has neither a cold nor a
-    warm bucket -- but its pooled figure is measured exactly like everyone
-    else's and is what ranks the roster. Withholding it would drop the model
-    off the table for a provider-reporting reason."""
+def test_leaderboard_splits_by_turn_for_a_provider_with_no_cache_reporting():
+    """Gemini reports no cache tokens, so a cache-state split cannot exist for
+    it -- but turn position is the probe's own record, so its first/later
+    figures publish like everyone else's."""
     probes = {
         ("model-alpha", "scaffolding_rigor"): _probe_block(
-            p50_all=14.94, cache_hit_rate=None, cache_read=None
+            p50_all=14.08, first=(14.6, 14.7, 14.8), later=(13.6, 13.7, 13.8)
         )
     }
     md, _ = leaderboard([SUMMARY_A], probes)
     row = next(line for line in md.splitlines() if line.startswith("| model-alpha"))
     cells = [c.strip() for c in row.split("|")]
-    assert cells[7] == "14.940"  # ttft_p50
-    assert cells[8] == "-"  # ttft_cold_p50
-    assert cells[9] == "-"  # ttft_warm_p50
+    assert cells[7] == "14.080"  # ttft_p50
+    assert cells[8] == "14.700"  # ttft_first_p50
+    assert cells[9] == "13.700"  # ttft_later_p50
 
 
-def test_leaderboard_withholds_the_whole_split_on_an_incidental_cache():
-    """Together's hits read back one quantised block of shared system prompt,
-    so its hit/miss labels track run warmup rather than session warmth. That
-    invalidates the cold half as much as the warm half: on the pilot its
-    "cold" p50 was 15.03s against a pooled 7.94s, because the misses were the
-    calls at run start."""
-    probes = {
-        ("model-alpha", "scaffolding_rigor"): _probe_block(
-            p50_all=7.94, p50_miss=15.034, p50_hit=7.823, cache_read=256
-        )
-    }
+def test_leaderboard_dashes_the_split_when_a_probe_carries_no_samples():
+    """Pooled comes from the stored aggregate; the split needs the samples.
+    A block without them gets a pooled figure and dashes, not a crash."""
+    probes = {("model-alpha", "scaffolding_rigor"): _probe_block(p50_all=7.94)}
     md, _ = leaderboard([SUMMARY_A], probes)
-    assert "7.940" in md
-    assert "15.034" not in md
-    assert "7.823" not in md
+    row = next(line for line in md.splitlines() if line.startswith("| model-alpha"))
+    cells = [c.strip() for c in row.split("|")]
+    assert cells[7] == "7.940"
+    assert cells[8] == "-"
+    assert cells[9] == "-"

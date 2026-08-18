@@ -840,15 +840,15 @@ def _make_probe_run(root: Path, run_id: str, tutor_model: str, mode: str) -> Non
                 "tutor_model": tutor_model,
                 "mode": mode,
                 "tutor": {
-                    "cache_hit_rate": 0.667,
-                    "cache_read_p50_on_hits": 9390,
-                    "ttft": {
-                        "all": {"n": 336, "p50_seconds": 9.043},
-                        "miss": {"n": 112, "p50_seconds": 13.217},
-                        "hit": {"n": 224, "p50_seconds": 7.993},
-                    },
+                    "ttft": {"all": {"n": 336, "p50_seconds": 9.043}},
                     "ttlt": {"all": {"n": 336, "p50_seconds": 10.52}},
                 },
+                "samples": [
+                    {"ttft_seconds": 13.217, "turn_index": 0},
+                    {"ttft_seconds": 7.9, "turn_index": 1},
+                    {"ttft_seconds": 7.993, "turn_index": 1},
+                    {"ttft_seconds": 8.1, "turn_index": 2},
+                ],
                 "subsample": {
                     "subsample_source": "frozen_packaged",
                     "subsample_id": "589e8acf8ac761f2",

@@ -245,10 +245,10 @@
         var html = '<div class="tt-title">' + d.name + "</div>" +
           ttRow("Score", d.score.toFixed(3)) +
           ttRow("Time to first token", d.ttft_s.toFixed(1) + " s");
-        // Cold/warm is present only where the provider's cache labels mean
-        // session warmth; elsewhere the pooled figure is all there is.
-        if (typeof d.ttft_cold_s === "number" && typeof d.ttft_warm_s === "number") {
-          html += ttRow("First / later messages", d.ttft_cold_s.toFixed(1) + " / " + d.ttft_warm_s.toFixed(1) + " s");
+        // Split on turn position (turn 1 vs turns 3 and 5), so every model
+        // with a probe run has it -- no dependence on cache reporting.
+        if (typeof d.ttft_first_s === "number" && typeof d.ttft_later_s === "number") {
+          html += ttRow("First / later messages", d.ttft_first_s.toFixed(1) + " / " + d.ttft_later_s.toFixed(1) + " s");
         }
         // TTLT from the same serial probe: when the student can reply.
         if (typeof d.ttlt_s === "number") {

@@ -193,12 +193,13 @@ _LEADERBOARD_COLS = [
     ("appropriate_rigor", "appropriate_rigor"),
     ("avoids_overscaffold", "avoids_overscaffold"),
     # From `tutormoments latency` (serial probe), joined on (tutor_model,
-    # mode). ttft_p50 is the headline: pooled over all samples, the only
-    # figure measured identically on every provider. The cold/warm split is
-    # dashed unless the provider's cache labels mean session warmth.
+    # mode). ttft_p50 is the headline: pooled over all samples, one number per
+    # model. first/later split on turn position -- the first message of a
+    # session against turns 3 and 5 -- which is ground truth on every
+    # provider, unlike cache state.
     ("ttft_p50", "ttft_p50"),
-    ("ttft_cold_p50", "ttft_cold_p50"),
-    ("ttft_warm_p50", "ttft_warm_p50"),
+    ("ttft_first_p50", "ttft_first_p50"),
+    ("ttft_later_p50", "ttft_later_p50"),
     # From the benchmark run: end-to-end wall clock under --concurrency, so
     # comparable within a model over time but not across models.
     ("tutor_lat_p50", "tutor_lat_p50"),
@@ -230,8 +231,7 @@ def _extract_row(summary: dict, probes: dict | None = None) -> dict:
     # module reaches the provider clients.
     from tutormoments.latency import probe_figures  # noqa: PLC0415
 
-    probe = (probes or {}).get((tutor_model, mode))
-    ttft = probe_figures((probe or {}).get("tutor") or {})
+    ttft = probe_figures((probes or {}).get((tutor_model, mode)) or {})
 
     return {
         "tutor_model": tutor_model,
@@ -244,8 +244,8 @@ def _extract_row(summary: dict, probes: dict | None = None) -> dict:
         # TTFT too, but under --concurrency, which distorts it by a
         # model-dependent amount. See docs/latency.md.
         "ttft_p50": ttft["ttft_p50"],
-        "ttft_cold_p50": ttft["ttft_cold_p50"],
-        "ttft_warm_p50": ttft["ttft_warm_p50"],
+        "ttft_first_p50": ttft["ttft_first_p50"],
+        "ttft_later_p50": ttft["ttft_later_p50"],
         # End-to-end wall-clock seconds per tutor turn; unaffected by
         # streaming, so historical and new runs stay comparable.
         "tutor_lat_p50": lat.get("p50_seconds"),
@@ -291,15 +291,15 @@ def leaderboard(runs: list, probes: dict | None = None) -> tuple:
     Columns (the paper's three metrics under the paper's names, plus
     identity, TTFT, and latency/token diagnostics):
         tutor_model, mode, n, appropriate_scaffolding, appropriate_rigor,
-        avoids_overscaffold, ttft_p50, ttft_cold_p50, ttft_warm_p50,
+        avoids_overscaffold, ttft_p50, ttft_first_p50, ttft_later_p50,
         tutor_lat_p50, tutor_lat_p95, tokens_total
 
     Two different latency measurements sit side by side here, deliberately:
 
-    - ``ttft_p50`` and its cold/warm split come from `tutormoments latency`,
-      which runs strictly serially. These are the cross-model-comparable
-      figures, and they are joined in from a probe's own run directory rather
-      than read off the benchmark run.
+    - ``ttft_p50`` and its first/later-message split come from `tutormoments
+      latency`, which runs strictly serially. These are the
+      cross-model-comparable figures, and they are joined in from a probe's
+      own run directory rather than read off the benchmark run.
     - ``tutor_lat_p50`` / ``tutor_lat_p95`` are end-to-end wall clock per
       tutor call from the benchmark run itself, gathered under
       ``--concurrency``, so they compare a model against its own history but

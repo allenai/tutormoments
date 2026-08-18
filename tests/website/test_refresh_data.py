@@ -37,13 +37,15 @@ def _probe_dir(
     tutor: str,
     mode: str = "scaffolding_rigor",
     p50_all: float = 9.0,
-    p50_miss: float = 12.0,
-    p50_hit: float = 8.0,
-    cache_read: int | None = 8000,
-    cache_hit_rate: float | None = 0.5,
+    first: tuple = (12.0, 12.5, 13.0),
+    later: tuple = (7.5, 8.0, 8.5),
     measured_at: str = "2026-08-18T10:00:00",
     sub_id: str = "589e8acf8ac761f2",
 ) -> None:
+    samples = [{"ttft_seconds": v, "turn_index": 0} for v in first]
+    samples += [
+        {"ttft_seconds": v, "turn_index": 1 + i % 2} for i, v in enumerate(later)
+    ]
     run = root / run_id
     run.mkdir(parents=True)
     (run / "latency.json").write_text(
@@ -54,15 +56,10 @@ def _probe_dir(
                 "mode": mode,
                 "tutor": {
                     "n_samples": 336,
-                    "cache_hit_rate": cache_hit_rate,
-                    "cache_read_p50_on_hits": cache_read,
-                    "ttft": {
-                        "all": {"n": 336, "p50_seconds": p50_all},
-                        "miss": {"n": 112, "p50_seconds": p50_miss},
-                        "hit": {"n": 224, "p50_seconds": p50_hit},
-                    },
+                    "ttft": {"all": {"n": 336, "p50_seconds": p50_all}},
                     "ttlt": {"all": {"n": 336, "p50_seconds": p50_all + 1}},
                 },
+                "samples": samples,
                 "subsample": {
                     "subsample_source": "frozen_packaged",
                     "subsample_id": sub_id,
@@ -88,8 +85,8 @@ def test_probe_ttft_reads_pooled_p50_and_the_split(refresh, tmp_path):
     assert figures["claude-opus-4-8"] == {
         "ttft_s": 9.0,
         "ttlt_s": 10.0,
-        "ttft_cold_s": 12.0,
-        "ttft_warm_s": 8.0,
+        "ttft_first_s": 12.5,
+        "ttft_later_s": 8.0,
     }
     assert provenance["subsample_id"] == "589e8acf8ac761f2"
     assert provenance["measured_at"]["claude-opus-4-8"] == "2026-08-18T10:00:00"
@@ -107,34 +104,37 @@ def test_probe_ttft_flattens_the_provider_slash_to_the_site_id(refresh, tmp_path
     assert "deepseek-ai_DeepSeek-V4-Pro" in figures
 
 
-def test_probe_ttft_defers_to_the_runtime_on_an_incidental_cache(refresh, tmp_path):
-    """The gate this script must not reimplement: a 0.91 hit rate reading back
-    256 tokens of shared system prompt is not session warmth, so neither half
-    of the split may be published -- but the pooled figure still is."""
+def test_probe_ttft_splits_by_turn_regardless_of_cache_reporting(refresh, tmp_path):
+    """The split keys on turn position, which the probe recorded itself -- so
+    Gemini (no cache tokens) and DeepSeek (automatic prefix cache whose labels
+    the runtime rejects) get first/later figures like everyone else."""
     _probe_dir(
         tmp_path,
-        "ds_scaffolding_rigor_latency_20260818",
-        tutor="deepseek-ai/DeepSeek-V4-Pro",
-        cache_hit_rate=0.91,
-        cache_read=256,
+        "gem_scaffolding_rigor_latency_20260818",
+        tutor="gemini-2.5-pro",
+        p50_all=14.08,
+        first=(14.6, 14.7, 14.8),
+        later=(13.6, 13.7, 13.8),
     )
     figures, _ = refresh.probe_ttft(REPO, tmp_path, "scaffolding_rigor")
-    assert figures["deepseek-ai_DeepSeek-V4-Pro"] == {"ttft_s": 9.0, "ttlt_s": 10.0}
+    assert figures["gemini-2.5-pro"] == {
+        "ttft_s": 14.08,
+        "ttlt_s": 15.08,
+        "ttft_first_s": 14.7,
+        "ttft_later_s": 13.7,
+    }
 
 
-def test_probe_ttft_publishes_pooled_when_the_provider_reports_no_cache(
-    refresh, tmp_path
-):
-    """Gemini reports no cache tokens, so it has no cold or warm bucket. It
-    must still reach the chart -- pooled TTFT is measured identically on every
-    provider."""
+def test_probe_ttft_omits_the_split_when_a_probe_has_no_samples(refresh, tmp_path):
+    """Pooled comes from the stored aggregate; the split needs samples. An
+    empty samples list yields a pooled-only row rather than a crash."""
     _probe_dir(
         tmp_path,
         "gem_scaffolding_rigor_latency_20260818",
         tutor="gemini-2.5-pro",
         p50_all=14.94,
-        cache_hit_rate=None,
-        cache_read=None,
+        first=(),
+        later=(),
     )
     figures, _ = refresh.probe_ttft(REPO, tmp_path, "scaffolding_rigor")
     assert figures["gemini-2.5-pro"] == {"ttft_s": 14.94, "ttlt_s": 15.94}
@@ -179,7 +179,7 @@ def test_apply_ttft_drops_a_stale_figure(refresh):
     to prevent."""
     rows = [
         {"id": "kept", "latency_s": 10.0, "ttft_s": 99.0, "ttft_warm_s": 98.0},
-        {"id": "gone", "latency_s": 7.0, "ttft_s": 99.0, "ttlt_s": 99.5},
+        {"id": "gone", "latency_s": 7.0, "ttft_s": 99.0, "ttft_first_s": 99.5},
     ]
     assert refresh.apply_ttft(rows, {"kept": {"ttft_s": 9.4}}) == 1
     assert rows[0] == {"id": "kept", "latency_s": 10.0, "ttft_s": 9.4}

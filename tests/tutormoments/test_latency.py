@@ -687,6 +687,21 @@ def _probe_tutor_block(
     }
 
 
+def _probe_samples(first=(12.0, 13.0, 14.0), later=(7.0, 8.0, 9.0)):
+    """Tutor samples spanning both turn positions."""
+    rows = [{"ttft_seconds": v, "turn_index": 0} for v in first]
+    rows += [{"ttft_seconds": v, "turn_index": 1 + i % 2} for i, v in enumerate(later)]
+    return rows
+
+
+def _probe_block(tutor_block=None, samples=None):
+    """A whole latency.json dict, as probe_figures takes it."""
+    return {
+        "tutor": tutor_block or _probe_tutor_block(),
+        "samples": _probe_samples() if samples is None else samples,
+    }
+
+
 def _write_probe(
     root: Path,
     run_id: str,
@@ -708,6 +723,7 @@ def _write_probe(
                 "tutor_model": tutor,
                 "mode": mode,
                 "tutor": tutor_block or _probe_tutor_block(),
+                "samples": _probe_samples(),
                 "subsample": {
                     "subsample_source": source,
                     "subsample_id": sub_id,
@@ -724,34 +740,57 @@ def _write_probe(
 def test_probe_figures_always_publishes_the_pooled_number():
     """Pooled TTFT is measured identically on every provider, so it is the one
     figure that can rank the whole roster."""
-    figs = probe_figures(_probe_tutor_block(cache_hit_rate=None, cache_read=None))
+    figs = probe_figures(
+        _probe_block(_probe_tutor_block(cache_hit_rate=None, cache_read=None))
+    )
     assert figs["ttft_p50"] == 9.0
     assert figs["ttlt_p50"] == 10.0
 
 
-def test_probe_figures_publishes_the_split_when_the_cache_is_real():
-    figs = probe_figures(_probe_tutor_block())
-    assert figs["ttft_cold_p50"] == 12.0
-    assert figs["ttft_warm_p50"] == 8.0
+def test_probe_figures_splits_on_turn_position_not_cache_state():
+    """First/later keys on turn_index, which the probe recorded itself. A
+    cache-state split needs a publishability gate and, even where it passes,
+    dilutes the first-message bucket with later-turn calls whose cache
+    silently missed (measured on gpt-5.5: cache-based cold p50 6.91s against
+    an actual first-message p50 of 7.53s)."""
+    figs = probe_figures(_probe_block())
+    assert figs["ttft_first_p50"] == 13.0  # p50 of (12, 13, 14) -- turn 0
+    assert figs["ttft_later_p50"] == 8.0  # p50 of (7, 8, 9) -- turns 1 and 2
 
 
-def test_probe_figures_withholds_cold_as_well_as_warm():
-    """The gate establishes that hit/miss labels mean session warmth at all.
-    Together's misses are the calls its automatic prefix cache happened not to
-    serve -- clustered at run start, not session start -- so publishing them as
-    a cold figure is wrong in the same way publishing its warm figure is."""
-    figs = probe_figures(_probe_tutor_block(cache_read=256))
-    assert figs["ttft_p50"] == 9.0
-    assert figs["ttft_cold_p50"] is None
-    assert figs["ttft_warm_p50"] is None
+def test_probe_figures_splits_for_a_provider_reporting_no_cache_tokens():
+    """The point of the turn split: Gemini reports no cache tokens, so a
+    cache-state split cannot exist for it -- but its first/later figures are
+    as real as anyone's."""
+    figs = probe_figures(
+        _probe_block(_probe_tutor_block(cache_hit_rate=None, cache_read=None))
+    )
+    assert figs["ttft_first_p50"] == 13.0
+    assert figs["ttft_later_p50"] == 8.0
+
+
+def test_probe_figures_excludes_samples_with_no_visible_output():
+    """A call that produced no visible token has no TTFT and must not enter a
+    position bucket."""
+    samples = _probe_samples() + [{"ttft_seconds": None, "turn_index": 0}]
+    figs = probe_figures(_probe_block(samples=samples))
+    assert figs["ttft_first_p50"] == 13.0
+
+
+def test_probe_figures_reads_old_files_without_a_stored_split():
+    """The split is computed from `samples`, which every probe has always
+    written -- a latency.json from before the split existed still yields one."""
+    block = _probe_block()
+    assert "ttft_first_p50" not in json.dumps(block)  # nothing precomputed
+    assert probe_figures(block)["ttft_first_p50"] == 13.0
 
 
 def test_probe_figures_tolerates_an_absent_probe():
     assert probe_figures({}) == {
         "ttft_p50": None,
         "ttlt_p50": None,
-        "ttft_cold_p50": None,
-        "ttft_warm_p50": None,
+        "ttft_first_p50": None,
+        "ttft_later_p50": None,
     }
 
 
