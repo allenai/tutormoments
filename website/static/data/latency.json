@@ -1,5 +1,5 @@
 {
-  "source": "score = mean of evaluation-aware Appropriate Scaffolding and Appropriate Rigor (exact, from Table 8 of the TutorMoments-Preview working paper, 2026-06-30). ttft_s / ttft_cold_s / ttft_warm_s measured by `tutormoments latency`, a serial probe (see the ttft block for mode, subsample and timestamps). latency_s is end-to-end seconds per tutor turn, still read off the paper's Figure 7 to ~\u00b10.2s; a checkout with results/benchmark replaces it with exact values via scripts/refresh-data.py.",
+  "source": "score = mean of evaluation-aware Appropriate Scaffolding and Appropriate Rigor (exact, from Table 8 of the TutorMoments-Preview working paper, 2026-06-30). ttft_s / ttlt_s / ttft_cold_s / ttft_warm_s measured by `tutormoments latency`, a serial probe (see the ttft block for mode, subsample and timestamps). latency_s is end-to-end seconds per tutor turn from benchmark runs, kept for correspondence with the paper's Figure 7 but not displayed; still read off that figure to ~\u00b10.2s until refreshed from a checkout with results/benchmark.",
   "ttft": {
     "mode": "scaffolding_rigor",
     "subsample_id": "589e8acf8ac761f2",
@@ -21,6 +21,7 @@
       "latency_estimated": true,
       "score": 0.8445,
       "ttft_s": 9.04,
+      "ttlt_s": 10.52,
       "ttft_cold_s": 13.22,
       "ttft_warm_s": 7.99
     },
@@ -31,6 +32,7 @@
       "latency_estimated": true,
       "score": 0.8115,
       "ttft_s": 8.47,
+      "ttlt_s": 8.73,
       "ttft_cold_s": 9.62,
       "ttft_warm_s": 7.63
     },
@@ -40,7 +42,8 @@
       "latency_s": 7.0,
       "latency_estimated": true,
       "score": 0.602,
-      "ttft_s": 11.09
+      "ttft_s": 11.09,
+      "ttlt_s": 11.86
     },
     {
       "id": "gemini-2.5-pro",
@@ -48,7 +51,8 @@
       "latency_s": 17.6,
       "latency_estimated": true,
       "score": 0.804,
-      "ttft_s": 14.08
+      "ttft_s": 14.08,
+      "ttlt_s": 14.15
     },
     {
       "id": "gemini-3.5-flash",
@@ -56,7 +60,8 @@
       "latency_s": 9.0,
       "latency_estimated": true,
       "score": 0.7655,
-      "ttft_s": 5.51
+      "ttft_s": 5.51,
+      "ttlt_s": 5.72
     },
     {
       "id": "gpt-5.5-2026-04-23",
@@ -65,6 +70,7 @@
       "latency_estimated": true,
       "score": 0.652,
       "ttft_s": 6.38,
+      "ttlt_s": 7.28,
       "ttft_cold_s": 6.91,
       "ttft_warm_s": 5.92
     },
@@ -75,6 +81,7 @@
       "latency_estimated": true,
       "score": 0.571,
       "ttft_s": 3.16,
+      "ttlt_s": 3.47,
       "ttft_cold_s": 3.72,
       "ttft_warm_s": 2.71
     }

@@ -77,9 +77,13 @@ interchangeable:
   vs. later ones) appear alongside it only where the runtime judges that provider's cache
   labels to mean session warmth — currently the Anthropic and OpenAI paths. A model with no
   probe run has no `ttft_s` key and is left off the chart rather than plotted at zero.
+- **`ttlt_s`** — median time to last token from the same probe: when the student can actually
+  reply. Shown in the tooltip as "Full turn, end to end".
 - **`latency_s`** — end-to-end seconds per tutor turn from a benchmark run, which replays
   moments under `--concurrency`. Rate-limit tiers differ per model, so this compares a model
-  against its own history but not against another model. It stays in the tooltip.
+  against its own history but not against another model. It is kept in the JSON for
+  correspondence with the paper's Figure 7 but is **not displayed** — the tooltip's
+  end-to-end row is the probe's `ttlt_s`.
 
 `ttft_s` values are read from probe runs under `<checkout>/results` (override with
 `--probe-root`), taking the newest run per model that measured the frozen subsample in full.
@@ -88,5 +92,5 @@ hash means different prompts were measured, and the script warns rather than cha
 samples together. See `docs/latency.md` in the main repo.
 
 `latency_s` is still read off the paper's Figure 7 (±0.2s) for every model; a checkout with
-`results/benchmark/` present replaces those with exact values. The chart footnote says so
-while the estimate stands.
+`results/benchmark/` present replaces those with exact values. Since nothing on the page
+renders it, that estimate no longer needs a footnote.

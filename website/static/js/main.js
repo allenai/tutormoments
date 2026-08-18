@@ -250,9 +250,9 @@
         if (typeof d.ttft_cold_s === "number" && typeof d.ttft_warm_s === "number") {
           html += ttRow("First message / later", d.ttft_cold_s.toFixed(1) + " / " + d.ttft_warm_s.toFixed(1) + " s");
         }
-        if (typeof d.latency_s === "number") {
-          html += ttRow("Full turn, end to end", d.latency_s.toFixed(1) + " s" +
-            (d.latency_estimated ? " (approx.)" : ""));
+        // TTLT from the same serial probe: when the student can reply.
+        if (typeof d.ttlt_s === "number") {
+          html += ttRow("Full turn, end to end", d.ttlt_s.toFixed(1) + " s");
         }
         return html;
       });
@@ -260,12 +260,10 @@
 
     mount.appendChild(svg);
 
-    var notes = [];
-    if (missing) notes.push(missing + " model(s) omitted: no latency probe run.");
-    if (data.models.some(function (d) { return d.latency_estimated; })) {
-      notes.push("Scores are exact (Table 8 of the paper); end-to-end turn times in the tooltip are read off Figure 7 to about a fifth of a second.");
+    if (missing) {
+      document.getElementById("latency-footnote").textContent =
+        missing + " model(s) omitted: no latency probe run.";
     }
-    document.getElementById("latency-footnote").textContent = notes.join(" ");
   }
 
   /* ---------- action distribution strip plot (paper Fig. 4) ---------- */

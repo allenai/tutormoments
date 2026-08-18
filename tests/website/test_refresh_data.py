@@ -87,6 +87,7 @@ def test_probe_ttft_reads_pooled_p50_and_the_split(refresh, tmp_path):
     figures, provenance = refresh.probe_ttft(REPO, tmp_path, "scaffolding_rigor")
     assert figures["claude-opus-4-8"] == {
         "ttft_s": 9.0,
+        "ttlt_s": 10.0,
         "ttft_cold_s": 12.0,
         "ttft_warm_s": 8.0,
     }
@@ -118,7 +119,7 @@ def test_probe_ttft_defers_to_the_runtime_on_an_incidental_cache(refresh, tmp_pa
         cache_read=256,
     )
     figures, _ = refresh.probe_ttft(REPO, tmp_path, "scaffolding_rigor")
-    assert figures["deepseek-ai_DeepSeek-V4-Pro"] == {"ttft_s": 9.0}
+    assert figures["deepseek-ai_DeepSeek-V4-Pro"] == {"ttft_s": 9.0, "ttlt_s": 10.0}
 
 
 def test_probe_ttft_publishes_pooled_when_the_provider_reports_no_cache(
@@ -136,7 +137,7 @@ def test_probe_ttft_publishes_pooled_when_the_provider_reports_no_cache(
         cache_read=None,
     )
     figures, _ = refresh.probe_ttft(REPO, tmp_path, "scaffolding_rigor")
-    assert figures["gemini-2.5-pro"] == {"ttft_s": 14.94}
+    assert figures["gemini-2.5-pro"] == {"ttft_s": 14.94, "ttlt_s": 15.94}
 
 
 def test_probe_ttft_ignores_other_prompt_modes(refresh, tmp_path):
@@ -178,7 +179,7 @@ def test_apply_ttft_drops_a_stale_figure(refresh):
     to prevent."""
     rows = [
         {"id": "kept", "latency_s": 10.0, "ttft_s": 99.0, "ttft_warm_s": 98.0},
-        {"id": "gone", "latency_s": 7.0, "ttft_s": 99.0},
+        {"id": "gone", "latency_s": 7.0, "ttft_s": 99.0, "ttlt_s": 99.5},
     ]
     assert refresh.apply_ttft(rows, {"kept": {"ttft_s": 9.4}}) == 1
     assert rows[0] == {"id": "kept", "latency_s": 10.0, "ttft_s": 9.4}

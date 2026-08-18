@@ -105,8 +105,9 @@ join them in ([`probe_runs`](../src/tutormoments/latency.py)):
   end-to-end wall clock that compares a model against its own history rather than against
   another model.
 - **The website's latency chart** — `website/scripts/refresh-data.py` reads the same figures
-  into `static/data/latency.json` as `ttft_s` (plus `ttft_cold_s` / `ttft_warm_s` where the
-  split is publishable) and plots TTFT on the x-axis. That script imports this module rather
+  into `static/data/latency.json` as `ttft_s` and `ttlt_s` (plus `ttft_cold_s` /
+  `ttft_warm_s` where the split is publishable) and plots TTFT on the x-axis, with TTLT in
+  the tooltip. That script imports this module rather
   than restating its rules; an earlier version restated them and gated on cache hit *rate*,
   which is the one thing this code deliberately refuses to do.
 

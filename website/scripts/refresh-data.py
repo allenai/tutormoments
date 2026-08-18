@@ -202,6 +202,8 @@ def probe_ttft(repo: Path, probe_root: Path, prompt: str) -> tuple[dict, dict]:
             continue
         env = block.get("measurement_environment") or {}
         row = {"ttft_s": round(figs["ttft_p50"], 2)}
+        if figs["ttlt_p50"] is not None:
+            row["ttlt_s"] = round(figs["ttlt_p50"], 2)
         if figs["ttft_cold_p50"] is not None:
             row["ttft_cold_s"] = round(figs["ttft_cold_p50"], 2)
         if figs["ttft_warm_p50"] is not None:
@@ -236,7 +238,7 @@ def apply_ttft(rows: list, figures: dict) -> int:
     """
     n = 0
     for row in rows:
-        for key in ("ttft_s", "ttft_cold_s", "ttft_warm_s"):
+        for key in ("ttft_s", "ttlt_s", "ttft_cold_s", "ttft_warm_s"):
             row.pop(key, None)
         figs = figures.get(row["id"])
         if figs:
