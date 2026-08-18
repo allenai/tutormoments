@@ -49,8 +49,17 @@ class Transcript:
             "total_tokens": 0,
         }
     )
+    # Per-call end-to-end wall-clock seconds. Meaning is unchanged by the
+    # streaming work, so the paper's Figure 7 pipeline and the website
+    # refresh script -- which read these directly -- stay comparable.
     tutor_latencies: list[float] = field(default_factory=list)
     student_latencies: list[float] = field(default_factory=list)
+    # Per-call streaming timing, one entry per LLM call in order. Shape:
+    #   {ttfc_seconds, ttft_seconds, ttlt_seconds, output_tokens,
+    #    cache_read_input_tokens, output_tps, turn_index, cache_state}
+    # Empty in batch mode (batch APIs expose no timing).
+    tutor_timings: list[dict] = field(default_factory=list)
+    student_timings: list[dict] = field(default_factory=list)
     completed: bool = False
     # "END" | "PROBLEM_CHANGE" | "MAX_TURNS" | "" (in-progress)
     ended_via: str = ""
@@ -109,6 +118,30 @@ def _add_usage(total: dict, new: dict) -> None:
     """Accumulate token usage."""
     for key in ("input_tokens", "output_tokens", "total_tokens"):
         total[key] = total.get(key, 0) + new.get(key, 0)
+
+
+def _record_timing(timings: list[dict], response, turn_index: int) -> None:
+    """Append this call's streaming timing, tagged with its cache state.
+
+    `cache_state` is read off `cache_read_input_tokens` rather than inferred
+    from `turn_index`. Turn position is a bad proxy for two reasons: the
+    minimum cacheable prefix is model-dependent and not monotonic across
+    generations (a short pre-cut transcript can cache on one roster model and
+    silently fail to on another), and only the Anthropic path sends a real
+    cache breakpoint at all -- Gemini, Together and OpenAI concatenate the
+    prefix into the prompt and depend on the provider's automatic caching, so
+    a hit there need not mean this conversation was served from cache.
+    Providers that report nothing get "unknown", never a guess.
+    """
+    timing = getattr(response, "timing", None)
+    if not timing:
+        return
+    cache_read = timing.get("cache_read_input_tokens")
+    if cache_read is None:
+        cache_state = "unknown"
+    else:
+        cache_state = "hit" if cache_read > 0 else "miss"
+    timings.append({**timing, "turn_index": turn_index, "cache_state": cache_state})
 
 
 def _append_turns_to_extra(
@@ -238,8 +271,8 @@ def run_conversation(
     max_turns: int,
     tutor_mode: str | None = None,
     student_mode: str = "oracle",
-    tutor_max_tokens: int = 1500,
-    student_max_tokens: int = 1000,
+    tutor_max_tokens: int = 0,
+    student_max_tokens: int = 0,
     images: list[str] | None = None,
     tutor_kwargs: dict | None = None,
     student_kwargs: dict | None = None,
@@ -262,8 +295,14 @@ def run_conversation(
         max_turns: Maximum speaking turns (each LLM call = 1 speaking turn).
         tutor_mode: Prompt mode for the tutor (None/"plain"/oracle/etc.).
         student_mode: Student simulator mode label (recorded; oracle only).
-        tutor_max_tokens: Max tokens for tutor responses.
-        student_max_tokens: Max tokens for student responses.
+        tutor_max_tokens: Max tokens for tutor responses; 0 (the default)
+            means the model's maximum. The benchmark deliberately imposes no
+            output cap -- a cap a thinking model can exhaust before emitting
+            any visible text yields an empty response, which is recorded as
+            "..." below and scored as if the tutor said that. Measured on
+            claude-opus-4-8 at effort=xhigh, a 1500-token cap did this to
+            17.5% of tutor turns.
+        student_max_tokens: Max tokens for student responses; 0 = model max.
         images: Optional list of image paths/URLs forwarded to both clients.
         tutor_kwargs: Extra kwargs merged into tutor client.generate() calls.
         student_kwargs: Extra kwargs merged into student client.generate() calls.
@@ -322,15 +361,21 @@ def run_conversation(
                 max_tokens=tutor_max_tokens,
                 images=images,
                 cacheable_prefix=head,
+                stream=True,
                 **{**kwargs, **(tutor_kwargs or {})},
             )
         else:
             raw_text = tutor_res["fn"](transcript.generated_turns)
-            response = SimpleNamespace(text=raw_text, usage={}, latency_seconds=None)
+            response = SimpleNamespace(
+                text=raw_text, usage={}, latency_seconds=None, timing=None
+            )
 
         _add_usage(transcript.tutor_usage, response.usage)
         if response.latency_seconds is not None:
             transcript.tutor_latencies.append(response.latency_seconds)
+        _record_timing(
+            transcript.tutor_timings, response, len(transcript.tutor_timings)
+        )
         speaking_turns += 1
 
         text, ended, problem_change = _parse_tutor_tokens(response.text)
@@ -373,15 +418,21 @@ def run_conversation(
                 max_tokens=student_max_tokens,
                 images=images,
                 cacheable_prefix=head,
+                stream=True,
                 **{**kwargs, **(student_kwargs or {})},
             )
         else:
             raw_text = student_res["fn"](transcript.generated_turns)
-            response = SimpleNamespace(text=raw_text, usage={}, latency_seconds=None)
+            response = SimpleNamespace(
+                text=raw_text, usage={}, latency_seconds=None, timing=None
+            )
 
         _add_usage(transcript.student_usage, response.usage)
         if response.latency_seconds is not None:
             transcript.student_latencies.append(response.latency_seconds)
+        _record_timing(
+            transcript.student_timings, response, len(transcript.student_timings)
+        )
         speaking_turns += 1
 
         messages = _split_messages(response.text) or ["..."]
@@ -420,8 +471,8 @@ def run_conversations_batch(
     tutor_mode: str | None = None,
     student_id: str | None = None,
     max_turns: int,
-    tutor_max_tokens: int = 1500,
-    student_max_tokens: int = 1000,
+    tutor_max_tokens: int = 0,
+    student_max_tokens: int = 0,
     poll_interval: int = 60,
     save_callback: callable = None,
     images_by_scenario: dict[str, list[str]] | None = None,
@@ -436,8 +487,9 @@ def run_conversations_batch(
     Round-based batching: all active scenarios' tutor calls go in one batch
     via tutormoments.client.run_batch, then all active student calls go in the
     next batch. A scenario that emits [END] or [PROBLEM_CHANGE] is pruned
-    from later rounds. Latencies are omitted in batch mode (not available
-    from the batch API).
+    from later rounds. Latencies and per-call timings are omitted in batch
+    mode (the batch APIs expose neither), so `tutormoments latency` requires
+    a sync run.
 
     Args:
         scenarios: List of fully-hydrated Moment objects.
@@ -445,8 +497,8 @@ def run_conversations_batch(
         tutor_mode: Prompt mode for the tutor (None/"plain"/oracle/etc.).
         student_id: Registered student name, or None for default.
         max_turns: Maximum speaking turns (each LLM call = 1 speaking turn).
-        tutor_max_tokens: Max tokens for tutor responses.
-        student_max_tokens: Max tokens for student responses.
+        tutor_max_tokens: Max tokens for tutor responses; 0 = model max.
+        student_max_tokens: Max tokens for student responses; 0 = model max.
         poll_interval: Seconds between batch status polls (pass 0 in tests).
         save_callback: Optional callable(scenario_id, transcript) called after
             each round for each scenario.
@@ -486,6 +538,14 @@ def run_conversations_batch(
     # tutors losing thinking/effort).
     tutor_gen_kwargs = _batch_gen_kwargs(tutor_res["kwargs"])
     student_gen_kwargs = _batch_gen_kwargs(student_res["kwargs"])
+
+    # Resolve 0 ("model max") here rather than letting it reach the batch
+    # entries: the Gemini batch path forwards generation_config verbatim, so a
+    # literal max_output_tokens=0 would be sent to the API.
+    from tutormoments.client import resolve_max_tokens
+
+    tutor_max_tokens = resolve_max_tokens(tutor_client, tutor_max_tokens)
+    student_max_tokens = resolve_max_tokens(student_client, student_max_tokens)
 
     # Per-scenario state
     transcript_map: dict[str, Transcript] = {}
@@ -574,7 +634,8 @@ def run_conversations_batch(
             transcript = transcript_map[sid]
             if result.get("usage"):
                 _add_usage(transcript.tutor_usage, result["usage"])
-            # Latencies omitted in batch mode (not available from batch API).
+            # Latencies and timings omitted in batch mode (batch APIs expose
+            # neither, so a batch run yields no latency figures at all).
 
             text, ended, problem_change = _parse_tutor_tokens(result["text"])
             messages = _split_messages(text)
@@ -664,7 +725,8 @@ def run_conversations_batch(
             transcript = transcript_map[sid]
             if result.get("usage"):
                 _add_usage(transcript.student_usage, result["usage"])
-            # Latencies omitted in batch mode (not available from batch API).
+            # Latencies and timings omitted in batch mode (batch APIs expose
+            # neither, so a batch run yields no latency figures at all).
 
             messages = _split_messages(result["text"]) or ["..."]
             extras[sid], next_turns[sid] = _append_turns_to_extra(

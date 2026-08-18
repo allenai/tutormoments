@@ -162,6 +162,7 @@ def _import_modules():
 # These are imported at function call time, not at module load time,
 # but we re-export references so patch targets resolve correctly.
 import tutormoments.conversation as conversation
+import tutormoments.latency as latency
 import tutormoments.report as report
 import tutormoments.results as results
 import tutormoments.scoring as scoring
@@ -499,27 +500,6 @@ def run_cell(
         # Latency / token helpers
         # ---------------------------------------------------------------------------
 
-        def _latency_stats(samples: list) -> dict | None:
-            """Mean / p50 / p95 over per-call latency samples. None on empty.
-
-            Sorted-index percentile: p50 = s[n//2], p95_idx = max(0, min(n-1, round(0.95*n)-1)).
-            """
-            if not samples:
-                return None
-            s = sorted(samples)
-            n = len(s)
-            p50 = s[n // 2]
-            p95_idx = max(0, min(n - 1, int(round(0.95 * n)) - 1))
-            p95 = s[p95_idx]
-            total = sum(samples)
-            return {
-                "n": n,
-                "total_seconds": round(total, 3),
-                "mean_seconds": round(total / n, 3),
-                "p50_seconds": round(p50, 3),
-                "p95_seconds": round(p95, 3),
-            }
-
         def _run_trial(trial_idx: int) -> tuple:
             """Run all scenarios once (one trial): conversations, then pooled scoring.
 
@@ -811,11 +791,15 @@ def run_cell(
         # Build latency + token blocks from all completed transcripts
         tutor_lat_samples: list = []
         student_lat_samples: list = []
+        tutor_timings: list = []
+        student_timings: list = []
         tutor_input = tutor_output = 0
         student_input = student_output = 0
         for tx in all_trial_transcripts:
             tutor_lat_samples.extend(getattr(tx, "tutor_latencies", []) or [])
             student_lat_samples.extend(getattr(tx, "student_latencies", []) or [])
+            tutor_timings.extend(getattr(tx, "tutor_timings", []) or [])
+            student_timings.extend(getattr(tx, "student_timings", []) or [])
             tu = getattr(tx, "tutor_usage", {}) or {}
             su = getattr(tx, "student_usage", {}) or {}
             tutor_input += tu.get("input_tokens", 0) or 0
@@ -838,9 +822,19 @@ def run_cell(
             "output_tokens": tutor_output + student_output,
             "total_tokens": tutor_input + tutor_output + student_input + student_output,
         }
+        # `tutor`/`student` keep their historical shape and meaning
+        # (end-to-end wall-clock seconds per call) so report.py, the paper's
+        # figure pipeline and the website refresh script keep working
+        # unchanged. The ttft/ttlt blocks are additive. source="run" marks these as concurrency-confounded: a run
+        # replays through a thread pool, so its figures are not comparable
+        # across models. Use `tutormoments latency` for that.
         latency_block = {
-            "tutor": _latency_stats(tutor_lat_samples),
-            "student": _latency_stats(student_lat_samples),
+            "source": "run",
+            "concurrency": replay_concurrency,
+            "tutor": latency.latency_stats(tutor_lat_samples),
+            "student": latency.latency_stats(student_lat_samples),
+            "tutor_streamed": latency.aggregate_timings(tutor_timings),
+            "student_streamed": latency.aggregate_timings(student_timings),
         }
         token_block = {
             "tutor": tutor_tokens,
@@ -1007,6 +1001,46 @@ def _build_parser() -> argparse.ArgumentParser:
         "typically 4). Result-preserving; lower it on smaller API tiers that "
         "hit rate limits.",
     )
+    # -- latency subcommand ---------------------------------------------------
+    lat_p = subs.add_parser(
+        "latency",
+        help="Measure TTFT/TTLT for one tutor, serially (the reportable number)",
+        parents=[log_parent],
+        description=(
+            "Measure time-to-first-token and time-to-last-token over the frozen "
+            "moment subsample, strictly serially. `run` also records latency, "
+            "but under --concurrency, which distorts it by a model-dependent "
+            "amount; only this command's figures are comparable across models. "
+            "See docs/latency.md."
+        ),
+    )
+    lat_p.add_argument(
+        "--tutor", required=True, metavar="MODEL", help="Tutor model id to measure"
+    )
+    lat_p.add_argument(
+        "--mode", default="", metavar="MODE", help="Prompt mode (default: plain)"
+    )
+    lat_p.add_argument(
+        "--n",
+        type=int,
+        default=None,
+        metavar="N",
+        help="Subsample size, used only when the release carries no frozen "
+        "id list (default: 112, one per conversation). Ignored when a frozen "
+        "list is present -- that list is what keeps measurements comparable "
+        "over time.",
+    )
+    lat_p.add_argument("--dataset", default=None, metavar="HF_ID")
+    lat_p.add_argument("--data_path", default=None, dest="data_path", metavar="DIR")
+    lat_p.add_argument(
+        "--dataset-revision", default=None, dest="dataset_revision", metavar="REV"
+    )
+    lat_p.add_argument("--max-turns", type=int, default=None, dest="max_turns")
+    lat_p.add_argument("--config", default=None, metavar="PATH")
+    lat_p.add_argument(
+        "--results-root", default="results", dest="results_root", metavar="DIR"
+    )
+
     # -- report subcommand ----------------------------------------------------
     report_p = subs.add_parser(
         "report",
@@ -1103,6 +1137,33 @@ def _cmd_report(args) -> None:
     print("Rows: " + str(len(summaries)))
 
 
+def _cmd_latency(args) -> None:
+    """Implement the 'latency' subcommand: serial TTFT/TTLT probe."""
+    from tutormoments.latency import DEFAULT_SUBSAMPLE_SIZE
+
+    if args.config:
+        os.environ["TUTORMOMENTS_CONFIG"] = args.config
+    cfg = build_run_config(
+        tutors=[args.tutor],
+        modes=[args.mode],
+        dataset=args.dataset,
+        data_path=args.data_path,
+        dataset_revision=args.dataset_revision,
+        max_turns=args.max_turns,
+        config_path=args.config,
+    )
+    run_id, block = latency.run_probe(
+        args.tutor,
+        args.mode,
+        cfg=cfg,
+        n=args.n or DEFAULT_SUBSAMPLE_SIZE,
+        results_root=args.results_root,
+        package_version=_package_version(),
+    )
+    print(latency.format_probe_summary(block))
+    print("Wrote: " + os.path.join(args.results_root, run_id, latency.LATENCY_FILENAME))
+
+
 def _cmd_view(args) -> None:
     """Implement the 'view' subcommand: read all run summaries -> HTML viewer."""
     from pathlib import Path
@@ -1180,6 +1241,13 @@ def main(argv=None) -> None:
             sys.exit(2)
         for run_id in run_ids:
             print("Completed run: " + run_id)
+
+    elif args.command == "latency":
+        try:
+            _cmd_latency(args)
+        except DatasetNotFoundError as e:
+            print("Error: " + str(e), file=sys.stderr)
+            sys.exit(2)
 
     elif args.command == "report":
         _cmd_report(args)

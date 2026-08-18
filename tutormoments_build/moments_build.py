@@ -25,6 +25,12 @@ from tutormoments.moments import (
     records_content_hash,
     validate_dataset,
 )
+from tutormoments_build.latency_subsample import (
+    PROBE_IDS_FILENAME,
+    packaged_probe_ids,
+    subsample_id,
+    write_probe_ids,
+)
 
 logger = logging.getLogger(__name__)
 
@@ -681,6 +687,25 @@ def validate_records_against_schema(records: "list[dict]") -> None:
             )
 
 
+def _copy_probe_ids(out_dir: Path) -> list[str] | None:
+    """Copy the committed latency-probe id list into the release dir.
+
+    The canonical copy lives in the runtime package, not here: unlike
+    balanced_520_ids.json (an *input* telling this builder which moments to
+    include), the probe list is an *output* the runtime reads at measurement
+    time. The build only relays it, so releases stay self-describing for
+    anyone who downloads one as a directory.
+
+    Returns the ids, or None when the file is absent (the release then carries
+    no subsample and the probe falls back to the packaged list).
+    """
+    ids = packaged_probe_ids()
+    if ids is None:
+        return None
+    write_probe_ids(ids, out_dir / PROBE_IDS_FILENAME)
+    return ids
+
+
 def write_release(
     moments: "list[Moment]",
     out_dir: str | Path,
@@ -728,6 +753,12 @@ def write_release(
     loaded = _read_moments_jsonl(jsonl_path)
     content_hash = records_content_hash([m.to_dict() for m in loaded])
 
+    # Ship the frozen latency-probe subsample so the runtime reads it as
+    # released data rather than reaching into tutormoments_build/ (the runtime
+    # never imports build code). Absent on releases predating the probe --
+    # the runtime falls back to deriving it and records that it did.
+    probe_ids = _copy_probe_ids(out_dir)
+
     manifest = {
         "name": set_name,
         "version": version,
@@ -735,6 +766,7 @@ def write_release(
         "record_count": len(moments),
         "content_hash": content_hash,
         "file_sha256": file_sha256(jsonl_path),
+        "latency_subsample_id": subsample_id(probe_ids) if probe_ids else None,
         "provenance": provenance or {},
         "created": created,
     }

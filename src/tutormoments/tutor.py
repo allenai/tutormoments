@@ -80,7 +80,7 @@ def resolve_tutor(tutor_id: str) -> dict:
     Raises:
         ValueError: If tutor_id is not registered and not in model roster.
     """
-    from tutormoments.client import ModelClient
+    from tutormoments.client import get_client
     from tutormoments.config import get_registered_tutor, resolve_model
 
     # FIRST: check registry
@@ -90,7 +90,9 @@ def resolve_tutor(tutor_id: str) -> dict:
 
     # ELSE: resolve as hosted model (raises ValueError if unknown)
     model_spec = resolve_model(tutor_id)
-    client = ModelClient(tutor_id)
+    # Shared per model: a fresh client per moment would pay a TLS handshake on
+    # the conversation's first turn, inflating the cold-cache latency figure.
+    client = get_client(tutor_id)
     return {
         "kind": "hosted",
         "client": client,

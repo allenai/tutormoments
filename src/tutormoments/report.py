@@ -216,6 +216,8 @@ def _extract_row(summary: dict) -> dict:
         "appropriate_scaffolding": cal_s.get("score"),
         "appropriate_rigor": cal_r.get("score"),
         "avoids_overscaffold": avoids,
+        # End-to-end wall-clock seconds per tutor turn; unaffected by
+        # streaming, so historical and new runs stay comparable.
         "tutor_lat_p50": lat.get("p50_seconds"),
         "tutor_lat_p95": lat.get("p95_seconds"),
         "tokens_total": tokens.get("total_tokens"),
@@ -257,6 +259,12 @@ def leaderboard(runs: list) -> tuple:
     identity and latency/token diagnostics):
         tutor_model, mode, n, appropriate_scaffolding, appropriate_rigor,
         avoids_overscaffold, tutor_lat_p50, tutor_lat_p95, tokens_total
+
+    Latency here is end-to-end wall-clock seconds per tutor call, gathered
+    under `--concurrency` and therefore not comparable across models. TTFT is
+    deliberately absent: the comparable figure comes from `tutormoments
+    latency`, which writes its own latency.json that nothing joins onto these
+    summaries yet. See docs/latency.md.
 
     Rows sorted descending by appropriate_scaffolding (None last).
     avoids_overscaffold = 1 - overscaffold["rate"]  (higher is better).

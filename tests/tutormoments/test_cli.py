@@ -1255,7 +1255,16 @@ def test_replay_concurrency_matches_serial(tmp_path):
             for p in (base / sub).glob("*.json")
         )
 
-    assert _summary(root_serial, rid_serial) == _summary(root_conc, rid_conc)
+    # Scores must be byte-identical across concurrency settings. The latency
+    # block is deliberately excluded: concurrency genuinely does change
+    # latency (shared decode batches, edge queueing near rate limits), which
+    # is why the block records the concurrency it was gathered at and why the
+    # reportable figure comes from `tutormoments latency` instead.
+    serial_summary = _summary(root_serial, rid_serial)
+    conc_summary = _summary(root_conc, rid_conc)
+    assert serial_summary.pop("latency")["concurrency"] == 1
+    assert conc_summary.pop("latency")["concurrency"] == 4
+    assert serial_summary == conc_summary
     assert _files(root_serial, rid_serial) == _files(root_conc, rid_conc)
 
 

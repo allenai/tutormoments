@@ -50,6 +50,7 @@ include = ["tutormoments*", "tutormoments_build*", "analysis*"]
 [tool.setuptools.package-data]
 tutormoments = [
     "default_config.yaml",
+    "latency_probe_ids.json",
     "prompts/tutor/*.txt",
     "prompts/student/*.txt",
     "prompts/scorer/annotate/*.md",

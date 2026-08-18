@@ -613,3 +613,16 @@ def test_format_run_summary_none_metrics_render_dash():
     assert "Appropriate Scaffolding    -" in out
     assert "Appropriate Rigor          -" in out
     assert "Avoids Over-Scaffolding    -" in out
+
+
+# ---------------------------------------------------------------------------
+# Legacy latency columns
+# ---------------------------------------------------------------------------
+
+
+def test_leaderboard_tolerates_pre_streaming_summaries():
+    """Runs recorded before the streaming work have no timing block at all;
+    their end-to-end latency columns must still render."""
+    md, _ = leaderboard([SUMMARY_A])
+    row = next(line for line in md.split("\n") if "model-alpha" in line)
+    assert "1.234" in row, "existing latency columns still render"
