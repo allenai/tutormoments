@@ -128,9 +128,17 @@ def ttft(bench: Path, model: str, prompt: str) -> float | None:
     Only probe runs are read. A benchmark run also records TTFT, but under
     --concurrency, which distorts it by a model-dependent amount and makes it
     incomparable across models -- exactly the comparison this chart invites.
-    Returns None when no probe run exists, or when the model's cache hit rate
-    is too low for a "warm" figure to mean anything (Gemini and Together have
-    no real prompt cache wired). See docs/latency.md.
+
+    KNOWN BROKEN -- do not trust this output; see website/README.md. The hit
+    *rate* gate below is the one the runtime deliberately rejects: the rate is
+    fixed by --max-turns (0.5 at 3, 0.67 at 5), so the 0.5 threshold sits on
+    the structural boundary and one stray missed call drops a model, while a
+    provider whose "hits" read back 256 tokens of shared system prompt passes
+    it and publishes a warm figure that is not warm. The fix is to call
+    tutormoments.latency.warm_figure_is_publishable rather than reimplement
+    the check, and to read from the results root the probe actually writes to
+    (results/, not results/benchmark/). Tracked for the follow-up PR that
+    wires probe results into the leaderboard and this chart.
     """
     needle = f"{model}_{prompt}_latency"
     for run in sorted(bench.iterdir(), reverse=True):  # newest run id first

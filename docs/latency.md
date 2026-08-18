@@ -24,9 +24,9 @@ interchangeable, and TTLT should not be the number a model is ranked on:
 Report TTLT because "when can the student reply" is a genuine question. Rank on TTFT
 because it isolates responsiveness from verbosity.
 
-Throughput (tokens per second) is measured by Artificial Analysis but is not reported here. Good tutor turns are short, so high throughout only matters to the extent that it reduces time to last token.
-
-Tokens per second is recorded as `output_tps` but is never a headline.
+Throughput (tokens per second) is measured by Artificial Analysis but is not reported here.
+Good tutor turns are short, so high throughput only matters to the extent that it reduces
+time to last token. It is recorded as `output_tps`, but never as a headline.
 
 ## Definitions
 
@@ -35,7 +35,7 @@ Tokens per second is recorded as `output_tps` but is never a headline.
 | `ttft_seconds` | first **visible answer** token | what the student sees appear |
 | `ttlt_seconds` | last visible delta | when the student can reply |
 | `ttfc_seconds` | first chunk of any kind, reasoning included | diagnostic; `ttft − ttfc` is roughly thinking time |
-| `output_tps` | `output_tokens / (ttlt − ttft)` | diagnostic only |
+| `output_tps` | `output_tokens / (ttlt − ttfc)` | diagnostic only; window starts at `ttfc` because `output_tokens` counts thinking too |
 | `n_no_visible_output` | calls that emitted no visible token | sanity check; should be 0 |
 
 A call that emits no visible token has no TTFT, so the percentiles are conditional on a
@@ -91,9 +91,19 @@ have averaged away — see [the student as drift control](#the-student-is-a-free
 for a check that comes free with every run.
 
 `tutormoments run` also records TTFT/TTLT on every transcript, but those are diagnostics —
-see [Why a separate command](#why-a-separate-command).
+see [Concurrency impacts latency](#concurrency-impacts-latency).
 
 ## Analysis
+
+> **The per-model numbers quoted below are provisional.** They were measured on
+> 2026-08-17 over a 40-moment pilot subsample (`subsample_id` `84b4ad5615876a3e`, 80 tutor
+> calls per model), which predates the current frozen list (`589e8acf8ac761f2`, 112 moments,
+> 336 calls). The pilot took each conversation's median moment, so it under-covered short and
+> long prompts — see [the latency subsample](#the-latency-subsample). The *shape* of the
+> findings (TTFT ≫ generation window, caching barely moves TTFT, warm/cold fidelity differing
+> by provider) is what these figures are cited for and is not sensitive to that; the specific
+> seconds are, and no figure here should be published before the roster is re-measured
+> against the current list.
 
 ### Two departures from Artificial Analysis
 
@@ -129,8 +139,8 @@ on OpenAI). A long response streams as hundreds of them, which is what produces 
 token-by-token typing effect. **A tutor turn does not: it is short enough to arrive in one or two deltas.**
 
 A direct instrumented call counted exactly **2 text deltas** for both `claude-sonnet-4-6`
-and `claude-opus-4-8`, carrying answers of 72 and 157 characters. Across the frozen
-subsample, `claude-sonnet-4-6` delivered its whole visible answer inside a 5ms window on
+and `claude-opus-4-8`, carrying answers of 72 and 157 characters. Across the 40-moment
+pilot sample, `claude-sonnet-4-6` delivered its whole visible answer inside a 5ms window on
 44 of 80 calls. Median generation window (TTFT → TTLT): 0.00s for Sonnet 4.6, 0.05s for
 Gemini 2.5 Pro, 1.16s for Opus 4.8.
 
@@ -201,8 +211,8 @@ one `claude-sonnet-4-6` run came in at 0.49 because a single turn missed; under 
 its warm figure would have vanished over one stray call.
 
 Every latency block publishes `cache_hit_rate` and `cache_read_p50_on_hits` alongside the
-numbers. **Until real prefix caching is wired for Gemini and Together, the warm column is
-only comparable within the Anthropic-hosted models.** That is tracked as follow-up work.
+numbers. **Until real prefix caching is wired for Gemini, Together and OpenAI, the warm column
+is only comparable within the Anthropic-hosted models.** That is tracked as follow-up work.
 
 ### What is not modelled
 
@@ -227,8 +237,11 @@ concurrency distorts latency by a **model-dependent** amount:
    That is what actually breaks cross-model comparison — more than the absolute error.
 
 The probe runs strictly serially, so its numbers mean the same thing for every model. Run
-figures are stamped `"source": "run"` with the concurrency they were gathered at, and the
-leaderboard withholds the TTFT column for them.
+figures are stamped `"source": "run"` with the concurrency they were gathered at, so a
+reader can tell the two apart. The leaderboard carries no TTFT column: `tutormoments
+latency` writes its own `latency.json`, and nothing joins that onto a run summary yet, so
+the probe figure is read from `latency.json` directly. Wiring that join — for the
+leaderboard and for the website chart — is tracked as follow-up work.
 
 Conversations also share one `ModelClient` per model
 ([`get_client`](../src/tutormoments/client.py)). Previously each moment built its own,
@@ -240,8 +253,9 @@ Batch mode records no latency at all: the batch APIs expose none. The probe requ
 ### The student is a free drift control
 
 Student turns are streamed and timed like tutor turns, and `latency.json` carries a
-`student` block. It is never surfaced in the summary or the leaderboard — no human waits on
-a simulated student, so its latency is not a product metric.
+`student` block. Neither the probe's terminal summary nor the leaderboard ever shows it —
+no human waits on a simulated student, so its latency is not a product metric. (A benchmark
+run's `summary.json` does carry a `student_streamed` block; it is written, not displayed.)
 
 It is useful for something else. **The student model is fixed across every run in a sweep**
 (the config's `student.model`, not the tutor under test), so its latency is the same
@@ -287,10 +301,37 @@ It lives in the runtime package rather than `tutormoments_build/` because of wha
 include, and the runtime never needs it. This list is the opposite: an output the runtime
 reads at measurement time, which the build merely relays.
 
-Selection rule (in [`select_latency_subsample`](../tutormoments_build/latency_subsample.py): sort moments by context length, then stride-sample, endpoints included. Prompt length is the dominant driver
-of TTFT — in the current release, context spans 984 to 55,681 characters, a 56× range — so
-striding across the sorted distribution guarantees short, middling, and long prompts are all
-represented.
+Selection rule (in [`select_latency_subsample`](../tutormoments_build/latency_subsample.py)),
+two constraints:
+
+1. **One moment per source conversation.** Moments cut from the same conversation share a
+   long transcript prefix, and a provider with automatic prefix caching serves the second
+   one from cache — so it is not an independent measurement, and a sample labelled cold
+   would not be cold. Measured on the 40-moment pilot: every `gpt-5.5` turn-1 cache hit
+   came from a conversation contributing more than one moment, reading back 4.9k–9.0k
+   tokens. This caps the sample at the release's 112 conversations.
+2. **Match the release's context-length distribution.** Prompt length is the dominant
+   driver of TTFT — context spans 984 to 55,681 characters, a 57× range — so each of 112
+   quantiles of that distribution is assigned a distinct conversation, which contributes
+   the moment nearest its quantile.
+
+The first constraint fixes *how many* moments each conversation contributes, not *which*;
+the second spends that freedom on coverage. The assignment is greedy from the most
+constrained targets inward — an extreme target is reachable by only a few conversations, so
+it is matched before a central target consumes the conversation holding the release's
+longest moment — then refined by swapping any pair of assignments that lowers total error.
+Ties break on (distance, length, id) throughout, so the result does not depend on the order
+moments arrive in.
+
+The committed sample spans the full 984–55,681 characters and tracks the population's
+quantile curve to within 203 characters on average (worst 797, against a median prompt of
+~15k).
+
+> An earlier rule took each conversation's *median* moment. That satisfied constraint 1 but
+> discarded every conversation's shortest and longest moment, so the sample covered only the
+> 9th–98th percentile of prompt length — 5,223 to 37,695 characters — and never measured the
+> tails of the axis TTFT depends on most. It was replaced before any figures were published
+> against it; the two samples are not comparable, and `subsample_id` distinguishes them.
 
 Every `latency.json` records:
 
@@ -300,6 +341,8 @@ Every `latency.json` records:
 | `subsample_source` | `frozen_release`, `frozen_packaged`, or `derived` (**not** comparable to frozen runs) |
 | `subsample_complete` | false when the release has dropped a frozen id, breaking the series |
 | `missing_ids` | which ids were dropped |
+| `n_requested` | how many ids the list asked for, against `tutor.n_samples` actually measured |
+| `failed_moments` | top-level, not in `subsample`: moments whose conversation raised and was skipped, so a partial run is visibly partial rather than quietly short |
 
 ## Measurement environment
 
@@ -350,11 +393,17 @@ Sanity checks that should hold on any live run:
 
 - `ttfc ≤ ttft ≤ ttlt` on every sample.
 - `n_no_visible_output` is 0.
-- `cache_hit_rate` ≈ 0.5 at `--max-turns 3` on providers with a real session cache. That is
-  structural (one miss then one hit per moment), not a quality signal — a rate far from it
-  means the cache is behaving differently than assumed, in either direction.
+- `cache_hit_rate` at or below the structural ceiling — 0.5 at `--max-turns 3`, 0.67 at 5 —
+  on providers with a real session cache. The ceiling is one miss then hits per moment, not
+  a quality signal. Expect to land *under* it: a moment whose cacheable head falls below the
+  model's minimum prefix fails to cache silently, and 32% of the subsample sits below the
+  4,096-token minimum that `claude-opus-4-6` and `claude-haiku-4-5` impose (1% below the
+  1,024-token one). So ~0.45 at `max_turns` 5 is normal on those two models and ~0.67 on the
+  rest. A rate *above* the ceiling, or far below it on a model with a low minimum, means the
+  cache is behaving differently than assumed.
 - `ttfc` well below `ttft` on thinking models, and near-equal on the OpenAI path, where
-  reasoning is not streamed.
+  reasoning is not streamed. Reported in the same cache-state split as the headline
+  metrics, so this reads straight off the block.
 
 **Do not expect warm to be much faster than cold.** Measured across the roster, the warm
 TTFT gain is ~1–3.6s on Anthropic and *negative* on `gpt-5.5` (6.57 warm vs 6.39 cold).

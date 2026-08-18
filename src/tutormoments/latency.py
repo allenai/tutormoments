@@ -165,6 +165,12 @@ def aggregate_timings(timings: list[dict]) -> dict:
         "cache_state_known": len(known),
         "ttft": _split("ttft_seconds"),
         "ttlt": _split("ttlt_seconds"),
+        # Diagnostic: ttft - ttfc is roughly how long the model spent
+        # thinking before the student saw anything. Aggregated in the same
+        # cache-state split as the headline metrics so the "ttfc well below
+        # ttft on thinking models" check in docs/latency.md can be read off
+        # this block rather than recomputed from `samples`.
+        "ttfc": _split("ttfc_seconds"),
         # Diagnostic only -- tutor turns are short, so throughput is not a
         # headline metric for this benchmark.
         "output_tps_mean": round(sum(tps) / len(tps), 2) if tps else None,
@@ -174,10 +180,12 @@ def aggregate_timings(timings: list[dict]) -> dict:
 def warm_figure_is_publishable(block: dict) -> bool:
     """Whether a warm (cache-hit) figure should be shown rather than dashed.
 
-    Only the Anthropic path sends a real cache breakpoint; Gemini and Together
-    concatenate the cacheable prefix into the prompt, so they have no warm
-    state at all. Publishing a "warm" number for those models would make them
-    look slower for a harness reason rather than a model reason.
+    Only the Anthropic path sends a real cache breakpoint. Gemini, Together
+    and OpenAI concatenate the cacheable prefix into the prompt and rely on
+    whatever automatic prefix caching the provider does, which is not this
+    conversation's transcript in the general case. Publishing a "warm" number
+    for those models would make them look slower -- or faster -- for a harness
+    reason rather than a model reason.
 
     Three conditions, each ruling out a different way the number could lie:
 
@@ -384,6 +392,27 @@ def run_probe(
     return run_id, block
 
 
+def withheld_reason(block: dict) -> str:
+    """Why the warm figure is dashed, tested in the same order as the gate.
+
+    The order matters. A provider that reports cache tokens but recorded no
+    hits has `cache_read_p50_on_hits` of None, so testing the read size first
+    reports "hits read only None tokens" -- a cache *fidelity* problem, when
+    the actual problem is that there were no hits to judge the fidelity of.
+    Mirror `warm_figure_is_publishable` exactly: provider, then count, then
+    what the hits actually read back.
+    """
+    if block.get("cache_hit_rate") is None:
+        return "provider reports no cache tokens"
+    hits = ((block.get("ttft") or {}).get("hit") or {}).get("n") or 0
+    if hits < MIN_CACHE_HIT_SAMPLES:
+        return f"only {hits} cache hit(s), need {MIN_CACHE_HIT_SAMPLES}"
+    return (
+        f"hits read only {block.get('cache_read_p50_on_hits')} tokens "
+        "(incidental shared prefix, not this conversation)"
+    )
+
+
 def format_probe_summary(block: dict) -> str:
     """Render a compact terminal summary of a probe result."""
     t = block.get("tutor") or {}
@@ -433,18 +462,7 @@ def format_probe_summary(block: dict) -> str:
             "missing -- not comparable to earlier runs"
         )
     if not warm_ok:
-        reason = (
-            "provider reports no cache tokens"
-            if t.get("cache_hit_rate") is None
-            else (
-                f"hits read only {t.get('cache_read_p50_on_hits')} tokens "
-                "(incidental shared prefix, not this conversation)"
-                if (t.get("cache_read_p50_on_hits") or 0)
-                < MIN_SESSION_CACHE_READ_TOKENS
-                else "too few cache hits"
-            )
-        )
-        lines.append(f"  {'NOTE':<26} warm figure withheld: {reason}")
+        lines.append(f"  {'NOTE':<26} warm figure withheld: {withheld_reason(t)}")
     if env.get("location"):
         lines.append(f"  {'Location':<26} {env['location']}")
     return "\n".join(lines)

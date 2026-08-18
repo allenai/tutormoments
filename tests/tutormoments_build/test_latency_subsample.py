@@ -40,8 +40,13 @@ def _moment(mid: str, context_chars: int, conv: str | None = None):
 
 
 def _moments(lengths: list[int]):
-    """One moment per conversation, so length striding is what's exercised."""
+    """One moment per conversation, so length coverage is what's exercised."""
     return [_moment(f"m{i:03d}", n) for i, n in enumerate(lengths)]
+
+
+def _len(moment) -> int:
+    """Context length of a stand-in moment, as the selection rule sees it."""
+    return sum(len(t["text"]) for t in moment.context)
 
 
 # ---------------------------------------------------------------------------
@@ -95,15 +100,71 @@ def test_selection_takes_one_moment_per_conversation():
     assert convs == {"A", "B", "C"}
 
 
-def test_conversation_representative_is_median_length():
-    """Taking the first or shortest moment per conversation would skew the
-    sample's length distribution; the median keeps it honest."""
+def test_lone_conversation_contributes_its_most_typical_moment():
+    """With room for one sample, take the moment nearest the population's
+    median length rather than an arbitrary or extreme one."""
     moments = [
         _moment("a1", 10, conv="A"),
         _moment("a2", 500, conv="A"),
         _moment("a3", 9000, conv="A"),
     ]
     assert select_latency_subsample(moments, 10) == ["a2"]
+
+
+def test_sample_reaches_the_population_tails():
+    """The de-duplication fixes *how many* moments each conversation gives, not
+    *which*. Spending that freedom on coverage is what keeps the tails in.
+
+    Every conversation here has a short, a middling and a long moment. Taking
+    each conversation's median (the previous rule) would return 50/51/52 and
+    never measure a prompt outside that band, even though the release spans
+    1-100. Prompt length is the dominant driver of TTFT, so the untouched tails
+    were the part worth measuring most.
+    """
+    moments = [
+        _moment("a_short", 1, conv="A"),
+        _moment("a_mid", 50, conv="A"),
+        _moment("a_long", 99, conv="A"),
+        _moment("b_short", 2, conv="B"),
+        _moment("b_mid", 51, conv="B"),
+        _moment("b_long", 100, conv="B"),
+        _moment("c_short", 3, conv="C"),
+        _moment("c_mid", 52, conv="C"),
+        _moment("c_long", 98, conv="C"),
+    ]
+    picked = select_latency_subsample(moments, 3)
+    lengths = sorted({m.id: _len(m) for m in moments}[i] for i in picked)
+
+    assert lengths[0] == 1, "the release's shortest prompt must be measured"
+    assert lengths[-1] == 100, "the release's longest prompt must be measured"
+    assert 40 <= lengths[1] <= 60, "and the middle must still be represented"
+
+
+def test_tail_coverage_does_not_reuse_a_conversation():
+    """Reaching the tails must not come at the cost of prefix independence:
+    the shortest and longest moments here live in the same conversation, so
+    only one of them can be taken."""
+    moments = [
+        _moment("a_short", 1, conv="A"),
+        _moment("a_long", 100, conv="A"),
+        _moment("b_mid", 50, conv="B"),
+    ]
+    picked = select_latency_subsample(moments, 2)
+    assert len(picked) == 2
+    assert not {"a_short", "a_long"} <= set(picked), "one moment per conversation"
+    assert "b_mid" in picked
+
+
+def test_order_independent_with_multi_moment_conversations():
+    """Determinism has to survive the assignment step, not just the grouping:
+    ties break on (distance, length, id) at every stage."""
+    moments = [
+        _moment(f"{c}{i}", n, conv=c)
+        for c, lens in (("A", (5, 60, 90)), ("B", (5, 61, 90)), ("C", (7, 62, 91)))
+        for i, n in enumerate(lens)
+    ]
+    shuffled = [moments[i] for i in (4, 0, 8, 3, 6, 1, 7, 2, 5)]
+    assert select_latency_subsample(moments, 3) == select_latency_subsample(shuffled, 3)
 
 
 def test_dedup_caps_the_sample_at_the_conversation_count():
@@ -213,11 +274,13 @@ def test_committed_ids_match_the_selection_rule():
     not _COMMITTED_IDS.exists(), reason="committed probe id list not present"
 )
 def test_committed_ids_span_the_length_distribution():
-    """The committed sample must actually cover short and long prompts.
+    """The committed sample must reproduce the release's length distribution.
 
-    Context length in this release spans roughly 1k to 56k characters, and
-    prompt length drives TTFT -- a sample clustered at one end would report a
-    latency that no representative moment produces.
+    Context length in this release spans 984 to 55,681 characters, and prompt
+    length drives TTFT -- a sample clustered in the middle would report a
+    latency that says nothing about short or long prompts. One moment per
+    conversation constrains how many samples there are, not which, so the
+    exact endpoints are reachable and are asserted here rather than conceded.
     """
     moments = _released_moments()
     if moments is None:
@@ -231,13 +294,19 @@ def test_committed_ids_span_the_length_distribution():
     population = sorted(lengths.values())
 
     def q(a, f):
-        return a[min(len(a) - 1, int(len(a) * f))]
+        return a[min(len(a) - 1, round(f * (len(a) - 1)))]
 
-    # Not the exact population extremes: one-moment-per-conversation drops
-    # atypical moments whose conversation's median sits elsewhere. What must
-    # hold is that the sample is representative and spans the bulk of the
-    # distribution -- measured, the median lands within ~2% of the
-    # population's.
-    assert abs(q(picked, 0.5) - q(population, 0.5)) < 0.10 * q(population, 0.5)
-    assert picked[0] <= q(population, 0.25)
-    assert picked[-1] >= q(population, 0.75)
+    assert picked[0] == population[0], "the shortest prompt in the release"
+    assert picked[-1] == population[-1], "the longest prompt in the release"
+    assert abs(q(picked, 0.5) - q(population, 0.5)) < 0.02 * q(population, 0.5)
+
+    # Not just the endpoints: the sample must track the population's shape
+    # across the whole range, or it would span the right interval while
+    # clustering inside it. Deviations are measured against the median prompt
+    # rather than against each quantile's own value -- a few hundred
+    # characters is a rounding error at the long tail but a large *fraction*
+    # at the short one, which would make a relative bound meaninglessly tight
+    # there. Measured on this release: mean 203 characters, worst 797, against
+    # a median prompt of ~15k.
+    worst = max(abs(q(picked, i / 20) - q(population, i / 20)) for i in range(21))
+    assert worst < 0.10 * q(population, 0.5), "sample must track the population's shape"

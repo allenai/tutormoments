@@ -192,36 +192,10 @@ _LEADERBOARD_COLS = [
     ("appropriate_scaffolding", "appropriate_scaffolding"),
     ("appropriate_rigor", "appropriate_rigor"),
     ("avoids_overscaffold", "avoids_overscaffold"),
-    ("tutor_ttft_p50", "tutor_ttft_p50"),
     ("tutor_lat_p50", "tutor_lat_p50"),
     ("tutor_lat_p95", "tutor_lat_p95"),
     ("tokens_total", "tokens_total"),
 ]
-
-
-def _ttft_p50(summary: dict):
-    """Warm-cache TTFT p50, or None when it would not mean what it says.
-
-    Withheld in two cases, both of which would otherwise mislead:
-
-    - Too few cache hits to constitute a warm sample. Only the Anthropic path
-      sends a real cache breakpoint; Gemini and Together concatenate the
-      cacheable prefix into the prompt, so they have no warm state at all.
-      Publishing a "warm" number for those models would make them look slower
-      for a harness reason rather than a model reason.
-    - The figure came from a benchmark run rather than the serial probe, so it
-      is confounded by that run's --concurrency and is not comparable across
-      models. `tutormoments latency` produces the comparable number.
-    """
-    from tutormoments.latency import warm_figure_is_publishable
-
-    lat = summary.get("latency") or {}
-    if lat.get("source") not in (None, "probe"):
-        return None
-    block = lat.get("tutor_streamed") or lat.get("tutor") or {}
-    if not warm_figure_is_publishable(block):
-        return None
-    return ((block.get("ttft") or {}).get("hit") or {}).get("p50_seconds")
 
 
 def _extract_row(summary: dict) -> dict:
@@ -242,7 +216,6 @@ def _extract_row(summary: dict) -> dict:
         "appropriate_scaffolding": cal_s.get("score"),
         "appropriate_rigor": cal_r.get("score"),
         "avoids_overscaffold": avoids,
-        "tutor_ttft_p50": _ttft_p50(summary),
         # End-to-end wall-clock seconds per tutor turn; unaffected by
         # streaming, so historical and new runs stay comparable.
         "tutor_lat_p50": lat.get("p50_seconds"),
@@ -285,13 +258,13 @@ def leaderboard(runs: list) -> tuple:
     Columns (the paper's three metrics under the paper's names, plus
     identity and latency/token diagnostics):
         tutor_model, mode, n, appropriate_scaffolding, appropriate_rigor,
-        avoids_overscaffold, tutor_ttft_p50, tutor_lat_p50, tutor_lat_p95,
-        tokens_total
+        avoids_overscaffold, tutor_lat_p50, tutor_lat_p95, tokens_total
 
-    tutor_ttft_p50 is warm-cache time-to-first-visible-token from a serial
-    `tutormoments latency` probe; it renders as "-" for runs that measured it
-    under concurrency or on providers with no real prompt cache (see
-    docs/latency.md).
+    Latency here is end-to-end wall-clock seconds per tutor call, gathered
+    under `--concurrency` and therefore not comparable across models. TTFT is
+    deliberately absent: the comparable figure comes from `tutormoments
+    latency`, which writes its own latency.json that nothing joins onto these
+    summaries yet. See docs/latency.md.
 
     Rows sorted descending by appropriate_scaffolding (None last).
     avoids_overscaffold = 1 - overscaffold["rate"]  (higher is better).
@@ -432,10 +405,6 @@ def format_run_summary(
             f"  {'Tutor latency p50/p95 (s)':<26} "
             f"{_fmt_md(row.get('tutor_lat_p50'))} / {_fmt_md(row.get('tutor_lat_p95'))}"
         )
-    if row.get("tutor_ttft_p50") is not None:
-        lines.append(
-            f"  {'Tutor TTFT p50 (s, warm)':<26} {_fmt_md(row.get('tutor_ttft_p50'))}"
-        )
     if row.get("tokens_total") is not None:
         lines.append(f"  {'Total tokens':<26} {_fmt_md(row.get('tokens_total'))}")
 
@@ -480,7 +449,6 @@ def view(runs: list) -> str:
                 "appropriate_scaffolding": _safe(row["appropriate_scaffolding"]),
                 "appropriate_rigor": _safe(row["appropriate_rigor"]),
                 "avoids_overscaffold": _safe(row["avoids_overscaffold"]),
-                "tutor_ttft_p50": _safe(row["tutor_ttft_p50"]),
                 "tutor_lat_p50": _safe(row["tutor_lat_p50"]),
                 "tutor_lat_p95": _safe(row["tutor_lat_p95"]),
                 "tokens_total": row["tokens_total"],
@@ -538,7 +506,6 @@ tr:hover td { background: #f9f9fc; }
       <th class="num">appropriate_scaffolding</th>
       <th class="num">appropriate_rigor</th>
       <th class="num">avoids_overscaffold</th>
-      <th class="num" title="Warm-cache time to first visible token, from a serial latency probe">tutor_ttft_p50</th>
       <th class="num">tutor_lat_p50</th>
       <th class="num">tutor_lat_p95</th>
       <th class="num">tokens_total</th>
@@ -582,7 +549,6 @@ function buildRow(r, isTop) {
     cell(r.appropriate_scaffolding, '') +
     cell(r.appropriate_rigor, '') +
     cell(r.avoids_overscaffold, '') +
-    cell(r.tutor_ttft_p50, '') +
     cell(r.tutor_lat_p50, '') +
     cell(r.tutor_lat_p95, '') +
     cell(r.tokens_total, '', 0) +

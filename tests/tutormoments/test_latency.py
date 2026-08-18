@@ -21,6 +21,7 @@ from tutormoments.latency import (
     resolve_subsample,
     run_probe,
     warm_figure_is_publishable,
+    withheld_reason,
 )
 from tutormoments.moments import PROBE_IDS_FILENAME, subsample_id
 
@@ -597,3 +598,61 @@ def test_summary_explains_why_a_warm_figure_was_withheld():
         "measurement_environment": {},
     }
     assert "incidental shared prefix" in format_probe_summary(block)
+
+
+def test_no_hits_is_reported_as_no_hits_not_as_a_fidelity_problem():
+    """A provider that reports cache tokens but recorded zero hits has no
+    `cache_read_p50_on_hits` to judge, so the read-size branch must not claim
+    the hits were incidental -- there were none. Reporting a fidelity problem
+    here would send a reader hunting for a caching bug that isn't there.
+    """
+    all_missed = aggregate_timings(
+        [
+            {**_timing(cache_state="miss"), "cache_read_input_tokens": 0}
+            for _ in range(40)
+        ]
+    )
+    assert all_missed["cache_hit_rate"] == 0.0, "hit rate known, and it is zero"
+    assert all_missed["cache_read_p50_on_hits"] is None
+
+    reason = withheld_reason(all_missed)
+    assert "only 0 cache hit(s)" in reason
+    assert "incidental" not in reason
+    assert "None tokens" not in reason
+
+
+def test_ttfc_is_aggregated_alongside_the_headline_metrics():
+    """docs/latency.md tells a reader to check `ttfc` well below `ttft` on
+    thinking models. That has to be readable off the block: recomputing it
+    from `samples` is a different (and easily skipped) piece of work.
+    """
+    block = aggregate_timings(
+        [
+            {**_timing(cache_state="hit"), "ttfc_seconds": 0.1, "ttft_seconds": 4.0},
+            {**_timing(cache_state="miss"), "ttfc_seconds": 0.2, "ttft_seconds": 5.0},
+        ]
+    )
+    assert block["ttfc"]["all"]["n"] == 2
+    assert block["ttfc"]["hit"]["p50_seconds"] == 0.1
+    assert block["ttfc"]["miss"]["p50_seconds"] == 0.2
+    assert block["ttfc"]["all"]["p50_seconds"] < block["ttft"]["all"]["p50_seconds"]
+
+
+def test_withheld_reason_follows_the_gate_order():
+    """Each reason corresponds to the condition that actually failed."""
+    unknown = aggregate_timings([_timing(cache_state="unknown")])
+    assert "reports no cache tokens" in withheld_reason(unknown)
+
+    too_few = aggregate_timings(
+        [{**_timing(cache_state="hit"), "cache_read_input_tokens": 9000}]
+        + [{**_timing(cache_state="miss"), "cache_read_input_tokens": 0}] * 5
+    )
+    assert "cache hit(s)" in withheld_reason(too_few)
+
+    incidental = aggregate_timings(
+        [
+            {**_timing(cache_state="hit"), "cache_read_input_tokens": 256}
+            for _ in range(40)
+        ]
+    )
+    assert "incidental shared prefix" in withheld_reason(incidental)

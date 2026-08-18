@@ -616,115 +616,13 @@ def test_format_run_summary_none_metrics_render_dash():
 
 
 # ---------------------------------------------------------------------------
-# TTFT column: only shown when the number means what the header says
+# Legacy latency columns
 # ---------------------------------------------------------------------------
 
 
-def _probe_summary(*, hit_rate, ttft_p50, source="probe", n_hits=40, cache_read=8000):
-    """A summary carrying a latency block in the post-streaming shape."""
-    return {
-        "tutor_model": "model-ttft",
-        "mode": "plain",
-        "n_scenarios": 10,
-        "scaffold_calibrated": {"score": 0.5},
-        "rigor_calibrated": {"score": 0.5},
-        "overscaffold": {"rate": 0.1},
-        "latency": {
-            "source": source,
-            "tutor": {"p50_seconds": 4.0, "p95_seconds": 6.0},
-            "tutor_streamed": {
-                "cache_hit_rate": hit_rate,
-                "cache_read_p50_on_hits": cache_read,
-                "ttft": {"hit": {"p50_seconds": ttft_p50, "n": n_hits}},
-            },
-        },
-        "tokens": {"total": {"total_tokens": 1000}},
-    }
-
-
-def _row_for(summary, model):
-    md, _ = leaderboard([summary])
-    return next(line for line in md.split("\n") if model in line)
-
-
-def test_leaderboard_shows_ttft_from_a_probe_run():
-    row = _row_for(_probe_summary(hit_rate=1.0, ttft_p50=0.842), "model-ttft")
-    assert "0.842" in row
-
-
-def test_leaderboard_header_includes_ttft_column():
-    md, csv_str = leaderboard([_probe_summary(hit_rate=1.0, ttft_p50=0.5)])
-    assert "tutor_ttft_p50" in md.split("\n")[0]
-    assert "tutor_ttft_p50" in csv_str.split("\n")[0]
-
-
-def test_leaderboard_withholds_ttft_from_a_concurrency_confounded_run():
-    """A benchmark run measures latency under --concurrency, so its figures
-    are not comparable across models -- the column must stay '-'."""
-    row = _row_for(
-        _probe_summary(hit_rate=1.0, ttft_p50=0.842, source="run"), "model-ttft"
-    )
-    assert "0.842" not in row
-
-
-def test_leaderboard_withholds_ttft_when_provider_has_no_prompt_cache():
-    """Gemini/Together concatenate the cacheable prefix into the prompt, so
-    they have no warm state; a 'warm' figure there would penalise them for a
-    harness reason rather than a model one."""
-    row = _row_for(_probe_summary(hit_rate=None, ttft_p50=0.842), "model-ttft")
-    assert "0.842" not in row
-
-
-def test_leaderboard_withholds_ttft_below_the_hit_sample_floor():
-    """Too few warm samples to support a percentile."""
-    row = _row_for(_probe_summary(hit_rate=1.0, ttft_p50=0.842, n_hits=2), "model-ttft")
-    assert "0.842" not in row
-
-
-def test_leaderboard_shows_ttft_at_the_structural_hit_rate():
-    """--max-turns 3 yields a hit rate of exactly 0.5 by construction; that
-    must not be treated as a marginal or suspect sample."""
-    row = _row_for(
-        _probe_summary(hit_rate=0.5, ttft_p50=0.842, n_hits=40), "model-ttft"
-    )
-    assert "0.842" in row
-
-
 def test_leaderboard_tolerates_pre_streaming_summaries():
-    """Runs recorded before this change have no ttft block at all."""
+    """Runs recorded before the streaming work have no timing block at all;
+    their end-to-end latency columns must still render."""
     md, _ = leaderboard([SUMMARY_A])
     row = next(line for line in md.split("\n") if "model-alpha" in line)
     assert "1.234" in row, "existing latency columns still render"
-
-
-def test_view_includes_ttft_column():
-    html = view([_probe_summary(hit_rate=1.0, ttft_p50=0.5)])
-    assert "tutor_ttft_p50" in html
-
-
-def test_format_run_summary_shows_ttft_when_available():
-    out = format_run_summary(
-        _probe_summary(hit_rate=1.0, ttft_p50=0.842),
-        tutor_model="model-ttft",
-        mode="plain",
-    )
-    assert "TTFT" in out and "0.842" in out
-
-
-def test_format_run_summary_omits_ttft_when_withheld():
-    out = format_run_summary(
-        _probe_summary(hit_rate=None, ttft_p50=0.842),
-        tutor_model="model-ttft",
-        mode="plain",
-    )
-    assert "TTFT" not in out
-
-
-def test_leaderboard_withholds_ttft_for_incidental_prefix_cache():
-    """A provider whose "hits" read one shared-prefix block has no warm
-    session figure, even with a high hit rate and plenty of samples."""
-    row = _row_for(
-        _probe_summary(hit_rate=0.91, ttft_p50=0.842, n_hits=73, cache_read=256),
-        "model-ttft",
-    )
-    assert "0.842" not in row

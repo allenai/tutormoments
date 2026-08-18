@@ -128,9 +128,10 @@ def _record_timing(timings: list[dict], response, turn_index: int) -> None:
     minimum cacheable prefix is model-dependent and not monotonic across
     generations (a short pre-cut transcript can cache on one roster model and
     silently fail to on another), and only the Anthropic path sends a real
-    cache breakpoint at all -- Gemini and Together concatenate the prefix into
-    the prompt, so they have no warm state to detect. Providers that report
-    nothing get "unknown", never a guess.
+    cache breakpoint at all -- Gemini, Together and OpenAI concatenate the
+    prefix into the prompt and depend on the provider's automatic caching, so
+    a hit there need not mean this conversation was served from cache.
+    Providers that report nothing get "unknown", never a guess.
     """
     timing = getattr(response, "timing", None)
     if not timing:
