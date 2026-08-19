@@ -49,8 +49,13 @@ Results live in the benchmark's `results/` (gitignored) alongside the `analysis/
 After running new models:
 
 ```sh
-python3 scripts/refresh-data.py /path/to/tutormoments/checkout
+/path/to/tutormoments/.venv/bin/python scripts/refresh-data.py /path/to/tutormoments
 ```
+
+Run it with an interpreter that can `import tutormoments` — the checkout's own venv is the
+easy one. The TTFT figures come with publishability rules that live in
+`tutormoments.latency`, and the script reads them out rather than restating them. Under a
+bare `python3` it refreshes everything else and says that it skipped `ttft_s`.
 
 This regenerates `static/data/{leaderboard,latency,action_distribution}.json`. The
 action-distribution figure reads the repo's
@@ -59,10 +64,32 @@ action-distribution figure reads the repo's
 new models to the `MODELS` list in the script (plus `ACTION_CSV_MODELS`, and `MODEL_STYLE` in
 `static/js/main.js`). Partial refreshes are fine — missing inputs just skip that JSON.
 
-## TODOs when things go live
+### The two latency figures
 
-- `static/data/latency.json` — latencies are currently read off the paper's Figure 7 (±0.2s); the refresh script replaces them with exact values from a checkout with results
-- `latency_s` is end-to-end seconds per tutor turn, taken from benchmark runs. `ttft_s` (time to first visible token) is separate: it appears only for models that have a `tutormoments latency` probe run, because benchmark runs measure latency under `--concurrency` and are not comparable across models. Models without a probe run — and models on providers with no real prompt cache — simply have no `ttft_s` key. See `docs/latency.md` in the main repo.
-- `ttft_s` is **not wired correctly yet, and the refresh script should not be trusted for it.** Two known problems, both tracked for the follow-up PR that wires probe results into the leaderboard and this chart:
-  - `ttft()` gates on `cache_hit_rate >= 0.5`. The runtime deliberately does *not* gate on a hit rate — the rate is fixed by `--max-turns` (exactly 0.5 at 3, 0.67 at 5), so the threshold sits on the structural boundary and one stray missed call drops a model. Worse, a provider with automatic prefix caching can hit on 91% of calls while reading back only a 256-token block of shared system prompt, which passes this gate and publishes a "warm" figure that is not warm. Call `tutormoments.latency.warm_figure_is_publishable` instead of reimplementing the check; it tests provider, hit *count*, and how much was actually read back.
-  - It reads probe runs from `results/benchmark/`, but `tutormoments latency` writes to `results/` unless given `--results-root results/benchmark`.
+`static/data/latency.json` carries both, from different sources, and they are not
+interchangeable:
+
+- **`ttft_s`** — median time to first *visible* token, from `tutormoments latency`. That probe
+  runs strictly serially, so this is the figure that is comparable across models, and it is
+  what the chart's x-axis plots. `ttft_first_s` / `ttft_later_s` split it by turn position —
+  the first message of a session against turns 3 and 5 — which the probe recorded itself, so
+  every probed model gets the split regardless of what its provider reports about caching.
+  A model with no probe run has no `ttft_s` key and is left off the chart rather than
+  plotted at zero.
+- **`ttlt_s`** — median time to last token from the same probe: when the student can actually
+  reply. Shown in the tooltip as "Full turn, end to end".
+- **`latency_s`** — end-to-end seconds per tutor turn from a benchmark run, which replays
+  moments under `--concurrency`. Rate-limit tiers differ per model, so this compares a model
+  against its own history but not against another model. It is kept in the JSON for
+  correspondence with the paper's Figure 7 but is **not displayed** — the tooltip's
+  end-to-end row is the probe's `ttlt_s`.
+
+`ttft_s` values are read from probe runs under `<checkout>/results` (override with
+`--probe-root`), taking the newest run per model that measured the frozen subsample in full.
+The `ttft.subsample_id` recorded in the JSON is what makes the series auditable: a different
+hash means different prompts were measured, and the script warns rather than charting two
+samples together. See `docs/latency.md` in the main repo.
+
+`latency_s` is still read off the paper's Figure 7 (±0.2s) for every model; a checkout with
+`results/benchmark/` present replaces those with exact values. Since nothing on the page
+renders it, that estimate no longer needs a footnote.

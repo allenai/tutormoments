@@ -9,11 +9,23 @@ static JSON. Re-run this after benchmarking new models:
 Reads (same sources as the repo's analysis/working-paper-20260630 scripts):
   results/benchmark/_full_combined/<model>__<prompt>/scores.json   -> leaderboard.json
   results/benchmark/<model>_v10_<prompt>_tutor_oracle_student*/exchanges/*.json
-                                                                   -> latency.json
+                                                                   -> latency.json (latency_s)
+  results/<model>_<prompt>_latency_<date>/latency.json             -> latency.json (ttft_s)
   data/taxonomy/{human,lm}/classified.csv (via tutormoments.taxonomy)  -> action_distribution.json
 
 Writes to static/data/. Sections of the site hide automatically when their JSON
 is absent, so partial refreshes are fine.
+
+Run this with an interpreter that can ``import tutormoments`` -- the checkout's
+own venv is the easy one:
+
+    /path/to/tutormoments/.venv/bin/python scripts/refresh-data.py /path/to/tutormoments
+
+The TTFT figures come with publishability rules (which providers' cache labels
+can be trusted, how many hit samples support a percentile) that live in
+`tutormoments.latency` and must not be reimplemented here -- an earlier version
+of this script did reimplement them and got them wrong. Without that import the
+script still refreshes everything else and says what it skipped.
 """
 
 from __future__ import annotations
@@ -79,7 +91,11 @@ def write_json(name: str, payload: dict) -> None:
     OUT_DIR.mkdir(parents=True, exist_ok=True)
     path = OUT_DIR / name
     path.write_text(json.dumps(payload, indent=2) + "\n", encoding="utf-8")
-    print(f"wrote {path.relative_to(SITE_ROOT)}")
+    try:
+        shown = path.relative_to(SITE_ROOT)
+    except ValueError:  # OUT_DIR redirected outside the site (tests)
+        shown = path
+    print(f"wrote {shown}")
 
 
 def perf(bench: Path, model: str, prompt: str) -> dict | None:
@@ -122,50 +138,163 @@ def latency(bench: Path, model: str, prompt: str, ids: set[str]) -> float | None
     return round(statistics.mean(lats), 2) if lats else None
 
 
-def ttft(bench: Path, model: str, prompt: str) -> float | None:
-    """Warm-cache TTFT p50 from a `tutormoments latency` probe run.
+def load_latency_module(repo: Path):
+    """Import `tutormoments.latency` from the checkout, or None if unavailable.
+
+    The probe's rules about what may be published -- whether a provider's
+    cache labels mean session warmth at all, how many hit samples support a
+    percentile -- belong to the runtime, and this script's job is to read them
+    out, not to restate them. An earlier version restated them and gated on
+    cache hit *rate*, which the runtime deliberately rejects: the rate is fixed
+    by --max-turns, so the threshold sat on the structural boundary, and a
+    provider whose "hits" read back 256 tokens of shared system prompt sailed
+    through it.
+
+    Returns None (rather than falling back to a local copy of the rules) when
+    the interpreter cannot import the package, so a bare `python3` run still
+    refreshes the rest of the site and reports the gap.
+    """
+    src = repo / "src"
+    if src.is_dir() and str(src) not in sys.path:
+        sys.path.insert(0, str(src))
+    try:
+        from tutormoments import latency  # noqa: PLC0415
+    except ImportError as exc:
+        print(
+            f"cannot import tutormoments.latency ({exc}); skipping ttft_s. "
+            f"Re-run with an interpreter that has the package installed, e.g. "
+            f"{repo}/.venv/bin/python",
+            file=sys.stderr,
+        )
+        return None
+    return latency
+
+
+def probe_ttft(repo: Path, probe_root: Path, prompt: str) -> tuple[dict, dict]:
+    """TTFT figures per site model id, from `tutormoments latency` probe runs.
+
+    Returns ``({site_id: {ttft_s, ttlt_s?, ttft_first_s?, ttft_later_s?}},
+    provenance)``.
 
     Only probe runs are read. A benchmark run also records TTFT, but under
     --concurrency, which distorts it by a model-dependent amount and makes it
     incomparable across models -- exactly the comparison this chart invites.
 
-    KNOWN BROKEN -- do not trust this output; see website/README.md. The hit
-    *rate* gate below is the one the runtime deliberately rejects: the rate is
-    fixed by --max-turns (0.5 at 3, 0.67 at 5), so the 0.5 threshold sits on
-    the structural boundary and one stray missed call drops a model, while a
-    provider whose "hits" read back 256 tokens of shared system prompt passes
-    it and publishes a warm figure that is not warm. The fix is to call
-    tutormoments.latency.warm_figure_is_publishable rather than reimplement
-    the check, and to read from the results root the probe actually writes to
-    (results/, not results/benchmark/). Tracked for the follow-up PR that
-    wires probe results into the leaderboard and this chart.
+    `ttft_s` is the pooled p50 over all samples. `ttft_first_s` /
+    `ttft_later_s` split it by turn position -- the first message of a session
+    against the later ones -- which the probe recorded itself, so every model
+    with a probe run gets the split regardless of what its provider reports
+    about caching.
     """
-    needle = f"{model}_{prompt}_latency"
-    for run in sorted(bench.iterdir(), reverse=True):  # newest run id first
-        if not (run.is_dir() and run.name.startswith(needle)):
+    lat_mod = load_latency_module(repo)
+    if lat_mod is None:
+        return {}, {}
+
+    probes = lat_mod.probe_runs(str(probe_root))
+    figures, measured, subsamples = {}, {}, set()
+    for (tutor_model, mode), block in probes.items():
+        if mode != prompt:
             continue
-        fp = run / "latency.json"
-        if not fp.exists():
+        # Site ids mirror result-directory names, which flatten the provider
+        # slash (deepseek-ai/DeepSeek-V4-Pro -> deepseek-ai_DeepSeek-V4-Pro).
+        site_id = tutor_model.replace("/", "_")
+        figs = lat_mod.probe_figures(block)
+        if figs["ttft_p50"] is None:
             continue
-        try:
-            block = json.loads(fp.read_text("utf-8")).get("tutor") or {}
-        except (json.JSONDecodeError, OSError):
-            continue
-        rate = block.get("cache_hit_rate")
-        if rate is None or rate < 0.5:
-            continue
-        p50 = ((block.get("ttft") or {}).get("hit") or {}).get("p50_seconds")
-        if p50 is not None:
-            return round(p50, 2)
-    return None
+        env = block.get("measurement_environment") or {}
+        row = {"ttft_s": round(figs["ttft_p50"], 2)}
+        for src, key in (
+            ("ttlt_p50", "ttlt_s"),
+            ("ttft_first_p50", "ttft_first_s"),
+            ("ttft_later_p50", "ttft_later_s"),
+        ):
+            if figs[src] is not None:
+                row[key] = round(figs[src], 2)
+        figures[site_id] = row
+        measured[site_id] = env.get("measured_at")
+        subsamples.add((block.get("subsample") or {}).get("subsample_id"))
+
+    if len(subsamples) > 1:
+        print(
+            f"probe runs mix {len(subsamples)} latency subsamples "
+            f"({', '.join(sorted(str(i) for i in subsamples))}); those figures "
+            "were measured over different prompts and must not be charted "
+            "together -- re-measure the roster against one subsample",
+            file=sys.stderr,
+        )
+    provenance = {
+        "mode": prompt,
+        "subsample_id": subsamples.pop() if len(subsamples) == 1 else None,
+        "measured_at": measured,
+    }
+    return figures, provenance
 
 
-def build_benchmark_json(repo: Path) -> None:
+def apply_ttft(rows: list, figures: dict) -> int:
+    """Write TTFT figures onto latency.json rows in place; returns how many.
+
+    Absent figures are *removed* rather than left standing: a stale ttft_s from
+    an earlier subsample next to a freshly measured one is the failure the
+    subsample_id exists to prevent. Rows the chart plots on TTFT therefore only
+    ever carry a figure from the run just read.
+    """
+    n = 0
+    for row in rows:
+        # ttft_cold_s / ttft_warm_s are legacy: the split published under
+        # those names keyed on cache state and is superseded by the turn-based
+        # first/later one. Popped so a refreshed row cannot carry both.
+        for key in (
+            "ttft_s",
+            "ttlt_s",
+            "ttft_first_s",
+            "ttft_later_s",
+            "ttft_cold_s",
+            "ttft_warm_s",
+        ):
+            row.pop(key, None)
+        figs = figures.get(row["id"])
+        if figs:
+            row.update(figs)
+            n += 1
+    return n
+
+
+def refresh_ttft_only(repo: Path, probe_root: Path) -> None:
+    """Update ttft_s in the existing latency.json, leaving the rest alone.
+
+    The two figures in latency.json come from different places: latency_s from
+    benchmark runs, ttft_s from probe runs. A checkout can easily have the
+    probes without the benchmark results (probes are cheap to re-run; a full
+    scored sweep is not), and in that case rebuilding the file wholesale would
+    throw away the scores it already carries.
+    """
+    fp = OUT_DIR / "latency.json"
+    if not fp.exists():
+        print(f"no {fp} to update — skipping ttft_s", file=sys.stderr)
+        return
+    payload = json.loads(fp.read_text("utf-8"))
+    figures, provenance = probe_ttft(repo, probe_root, "scaffolding_rigor")
+    if not figures:
+        return
+    n = apply_ttft(payload.get("models") or [], figures)
+    # Keep provenance above the rows it describes.
+    payload = {
+        "source": payload.get("source"),
+        "ttft": provenance,
+        "models": payload.get("models") or [],
+    }
+    write_json("latency.json", payload)
+    print(f"  ttft_s updated for {n} model(s) from probe runs in {probe_root}")
+
+
+def build_benchmark_json(repo: Path, probe_root: Path) -> None:
     bench = repo / "results" / "benchmark"
     if not bench.exists():
         print(
-            f"no {bench} — skipping leaderboard.json and latency.json", file=sys.stderr
+            f"no {bench} — skipping leaderboard.json scores and latency_s",
+            file=sys.stderr,
         )
+        refresh_ttft_only(repo, probe_root)
         return
 
     ids_fp = bench / "_balanced_520_scenario_ids.json"
@@ -194,12 +323,6 @@ def build_benchmark_json(repo: Path) -> None:
                 "latency_estimated": False,
                 "score": round((ea["scaffolding"] + ea["rigor"]) / 2, 4),
             }
-            # Only present for models with a probe run; omitted rather than
-            # zero-filled so the chart can distinguish "not measured" from
-            # "fast". See docs/latency.md.
-            first_token = ttft(bench, model, "scaffolding_rigor")
-            if first_token is not None:
-                row["ttft_s"] = first_token
             lat_models.append(row)
 
     if lb_models:
@@ -213,10 +336,15 @@ def build_benchmark_json(repo: Path) -> None:
             },
         )
     if lat_models:
+        # ttft_s is only present for models with a probe run -- omitted rather
+        # than zero-filled, so the chart can tell "not measured" from "fast".
+        figures, provenance = probe_ttft(repo, probe_root, "scaffolding_rigor")
+        apply_ttft(lat_models, figures)
         write_json(
             "latency.json",
             {
                 "source": f"Generated by scripts/refresh-data.py from {repo}",
+                "ttft": provenance,
                 "models": lat_models,
             },
         )
@@ -295,6 +423,14 @@ def main() -> None:
         help="path to a local allenai/tutormoments checkout with results",
     )
     ap.add_argument(
+        "--probe-root",
+        type=Path,
+        default=None,
+        help="results root holding `tutormoments latency` probe runs "
+        "(default: <checkout>/results, where the probe writes unless given "
+        "--results-root)",
+    )
+    ap.add_argument(
         "--action-csv",
         type=Path,
         default=None,
@@ -309,7 +445,12 @@ def main() -> None:
         repo = args.tutormoments_repo.expanduser().resolve()
         if not repo.exists():
             ap.error(f"{repo} does not exist")
-        build_benchmark_json(repo)
+        probe_root = (
+            args.probe_root.expanduser().resolve()
+            if args.probe_root
+            else repo / "results"
+        )
+        build_benchmark_json(repo, probe_root)
 
     csv_path = args.action_csv or (
         repo

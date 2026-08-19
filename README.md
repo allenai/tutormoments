@@ -96,9 +96,13 @@ reportable number, run the serial probe:
 tutormoments latency --tutor claude-sonnet-5 --mode scaffolding_rigor
 ```
 
-This writes `results/<run_id>/latency.json`. See [docs/latency.md](docs/latency.md) for what
-the metrics mean, why warm and cold cache states are reported separately, and the caveats
-that apply before quoting a number.
+This writes `results/<run_id>/latency.json`. `tutormoments report` then joins that onto the
+leaderboard as `ttft_p50`, split into `ttft_first_p50` / `ttft_later_p50` (the first message
+of a session against turns 3 and 5), matching on tutor model and prompt mode; a cell with no
+probe run shows `-` rather than the concurrency-distorted figure from its benchmark run.
+
+See [docs/latency.md](docs/latency.md) for what the metrics mean, why warm and cold cache
+states are reported separately, and the caveats that apply before quoting a number.
 
 ## Reports And Viewers
 
@@ -108,7 +112,9 @@ Aggregate completed run summaries into leaderboard files:
 tutormoments report --results-root results --out leaderboard
 ```
 
-This writes `leaderboard.md` and `leaderboard.csv`.
+This writes `leaderboard.md` and `leaderboard.csv`. Columns are the paper's three metrics,
+then TTFT from any serial [latency](#latency) probe in the same results root, then the run's
+own end-to-end tutor latency and token totals.
 
 Build a self-contained HTML viewer:
 

@@ -206,6 +206,121 @@ def warm_figure_is_publishable(block: dict) -> bool:
 
 
 # ---------------------------------------------------------------------------
+# Reading probe results back (leaderboard + website join)
+# ---------------------------------------------------------------------------
+
+
+def probe_figures(block: dict) -> dict:
+    """The publishable TTFT/TTLT p50s from one probe's ``latency.json``.
+
+    Takes the whole latency.json dict. Returns ``ttft_p50`` / ``ttlt_p50``
+    (pooled over all samples) plus ``ttft_first_p50`` / ``ttft_later_p50`` —
+    the first message of a session (turn 1) against the later ones (turns 3
+    and 5).
+
+    Pooled is the ranking figure: one number per model, measured identically
+    on every provider. The first/later split refines it, and it keys on
+    **turn position, not cache state**. Turn position is ground truth the
+    probe itself recorded, so the split exists for every provider — including
+    the ones that report no cache tokens — and needs no publishability gate.
+    A cache-state split would need one (`warm_figure_is_publishable`), and
+    even where it passes it answers a subtly different question: a "cold"
+    bucket holds every call whose cache missed, which on a provider with
+    silent cache failures includes later-turn calls. Measured on `gpt-5.5`,
+    that diluted the cache-based cold p50 to 6.91s when the actual
+    first-message p50 was 7.53s.
+
+    What the split measures is the position effect — mostly the model
+    thinking less on a continuation than on a fresh problem, plus whatever
+    caching contributes where the harness caches (see docs/latency.md). The
+    cache-state aggregates stay in the block for that diagnostic.
+
+    Computed from ``samples`` rather than a stored aggregate so any probe's
+    latency.json can be read back, including ones written before this split
+    existed. Samples that produced no visible token have no TTFT and are
+    excluded, same as everywhere else.
+    """
+    tutor = block.get("tutor") or {}
+    ttft = tutor.get("ttft") or {}
+    ttlt = tutor.get("ttlt") or {}
+
+    def _p50(metric: dict) -> float | None:
+        return (metric.get("all") or {}).get("p50_seconds")
+
+    def _turn_p50(pred) -> float | None:
+        vals = [
+            s["ttft_seconds"]
+            for s in block.get("samples") or []
+            if s.get("ttft_seconds") is not None and pred(s.get("turn_index"))
+        ]
+        stats = latency_stats(vals)
+        return stats["p50_seconds"] if stats else None
+
+    return {
+        "ttft_p50": _p50(ttft),
+        "ttlt_p50": _p50(ttlt),
+        "ttft_first_p50": _turn_p50(lambda t: t == 0),
+        "ttft_later_p50": _turn_p50(lambda t: isinstance(t, int) and t > 0),
+    }
+
+
+def probe_runs(results_root: str = "results") -> dict:
+    """Latest comparable probe result per ``(tutor_model, mode)``.
+
+    Scans *results_root* for run directories carrying a ``latency.json`` and
+    returns ``{(tutor_model, mode): block}``. This is the join the leaderboard
+    and the website both need: a probe writes its own run directory, which
+    nothing else reads.
+
+    Only probes that measured a **frozen** subsample **in full** are eligible.
+    A derived sample spans no particular prompt-length distribution and is
+    comparable to nothing; an incomplete one dropped ids, so it is not the
+    same sample as the run before it. Neither belongs in a table that invites
+    cross-model comparison.
+
+    Among eligible probes for one cell the newest by ``measured_at`` wins, so
+    re-measuring a model supersedes its earlier figure without anyone having
+    to delete the old run. Callers that publish several cells should check the
+    selected blocks agree on ``subsample_id``: eligibility is per-probe, and
+    two frozen-but-different samples would each pass it (see
+    `probe_subsample_ids`).
+    """
+    out: dict[tuple[str, str], dict] = {}
+    best_key: dict[tuple[str, str], tuple] = {}
+
+    for run_id in results.list_runs(results_root):
+        block = results.read_latency(run_id, results_root=results_root)
+        if not block:
+            continue
+        sub = block.get("subsample") or {}
+        if not str(sub.get("subsample_source", "")).startswith("frozen"):
+            continue
+        if not sub.get("subsample_complete", False):
+            continue
+        cell = (block.get("tutor_model", ""), block.get("mode", ""))
+        env = block.get("measurement_environment") or {}
+        # measured_at then run_id: a run directory written without a timestamp
+        # still orders deterministically instead of depending on scan order.
+        rank = (env.get("measured_at") or "", run_id)
+        if cell not in best_key or rank > best_key[cell]:
+            best_key[cell] = rank
+            out[cell] = block
+    return out
+
+
+def probe_subsample_ids(probes: dict) -> set:
+    """The distinct ``subsample_id`` values across selected probe blocks.
+
+    More than one means the figures were measured over different prompt sets
+    and must not be printed in one table -- the point of the id is that this
+    is visible rather than quietly averaged.
+    """
+    return {
+        (block.get("subsample") or {}).get("subsample_id") for block in probes.values()
+    }
+
+
+# ---------------------------------------------------------------------------
 # Subsample resolution
 # ---------------------------------------------------------------------------
 

@@ -1106,23 +1106,52 @@ def _cmd_report(args) -> None:
         if summary is None:
             logger.warning("No summary.json for run %s -- skipping", run_id)
             continue
-        # Inject run_id-derived fields if not already present
-        if "tutor_model" not in summary or not summary.get("tutor_model"):
-            # Best-effort: parse tutor from run_id prefix
+        # Identify the cell. Runs from before the summary carried these fields
+        # need them recovered, and the recovery has to be exact: (tutor_model,
+        # mode) is the key the TTFT probe figures join on, and it is also what
+        # the mode column prints.
+        if not summary.get("tutor_model") or not summary.get("mode"):
+            # config.json records both verbatim, so prefer it over the run id.
+            cfg_json = results.read_config(run_id, results_root=args.results_root) or {}
+            # Last resort: split the run id. Lossy -- make_run_id joins
+            # {tutor}_{mode}_{dataset}_{date} with underscores that also occur
+            # inside a tutor id ("deepseek-ai/DeepSeek-V4-Pro" becomes
+            # "deepseek-ai_DeepSeek-V4-Pro") and inside a mode
+            # ("scaffolding_rigor"), so this can only be trusted to find a
+            # first field. A mode read this way is a prefix of the real one,
+            # which is why it must not be the first choice: it silently misses
+            # the probe join and mislabels the row.
             parts = run_id.split("_")
             summary = dict(summary)
-            summary.setdefault("tutor_model", parts[0] if parts else run_id)
-        if "mode" not in summary or not summary.get("mode"):
-            parts = run_id.split("_")
-            summary = dict(summary)
-            summary.setdefault("mode", parts[1] if len(parts) > 1 else "")
+            if not summary.get("tutor_model"):
+                summary["tutor_model"] = cfg_json.get("tutor") or (
+                    parts[0] if parts else run_id
+                )
+            if not summary.get("mode"):
+                summary["mode"] = cfg_json.get("mode") or (
+                    parts[1] if len(parts) > 1 else ""
+                )
         summaries.append(summary)
 
     if not summaries:
         print("No run summaries found in: " + args.results_root)
         return
 
-    markdown, csv_str = report.leaderboard(summaries)
+    # Join the serial-probe TTFT figures onto the run summaries. Probes write
+    # their own run directories under the same results root; nothing else
+    # reads them.
+    probes = latency.probe_runs(args.results_root)
+    sample_ids = {i for i in latency.probe_subsample_ids(probes) if i}
+    if len(sample_ids) > 1:
+        logger.warning(
+            "TTFT columns mix %d latency subsamples (%s); those figures were "
+            "measured over different prompts and are not comparable to each "
+            "other -- re-measure the roster against one subsample",
+            len(sample_ids),
+            ", ".join(sorted(sample_ids)),
+        )
+
+    markdown, csv_str = report.leaderboard(summaries, probes)
 
     out_stem = args.out
     md_path = Path(out_stem + ".md")

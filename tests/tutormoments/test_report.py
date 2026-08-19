@@ -332,10 +332,34 @@ EXPECTED_COLUMNS = [
     "appropriate_scaffolding",
     "appropriate_rigor",
     "avoids_overscaffold",
+    "ttft_p50",
+    "ttft_first_p50",
+    "ttft_later_p50",
     "tutor_lat_p50",
     "tutor_lat_p95",
     "tokens_total",
 ]
+
+
+def _probe_block(*, p50_all: float, first: tuple = (), later: tuple = ()) -> dict:
+    """One `tutormoments latency` result, shaped as the probe writes it.
+
+    `first`/`later` are per-call TTFTs for turn 0 and turns 1-2; the split the
+    leaderboard prints is computed from these samples, not from the cache
+    aggregates.
+    """
+    samples = [{"ttft_seconds": v, "turn_index": 0} for v in first]
+    samples += [
+        {"ttft_seconds": v, "turn_index": 1 + i % 2} for i, v in enumerate(later)
+    ]
+    return {
+        "tutor": {
+            "n_samples": 336,
+            "ttft": {"all": {"n": 336, "p50_seconds": p50_all}},
+            "ttlt": {"all": {"n": 336, "p50_seconds": p50_all + 1.0}},
+        },
+        "samples": samples,
+    }
 
 
 def test_leaderboard_returns_both_formats():
@@ -626,3 +650,82 @@ def test_leaderboard_tolerates_pre_streaming_summaries():
     md, _ = leaderboard([SUMMARY_A])
     row = next(line for line in md.split("\n") if "model-alpha" in line)
     assert "1.234" in row, "existing latency columns still render"
+
+
+# ---------------------------------------------------------------------------
+# TTFT columns, joined in from `tutormoments latency` probe runs
+# ---------------------------------------------------------------------------
+
+
+def test_leaderboard_joins_probe_ttft_onto_the_matching_cell():
+    """The probe writes its own run directory; the leaderboard is where the
+    two meet. Join key is (tutor_model, mode) -- the cell the probe measured."""
+    probes = {
+        ("model-alpha", "scaffolding_rigor"): _probe_block(
+            p50_all=9.043, first=(13.0, 13.2, 13.4), later=(7.9, 8.0, 8.1)
+        )
+    }
+    md, csv_str = leaderboard([SUMMARY_A], probes)
+    assert "9.043" in md
+    assert "13.200" in md  # ttft_first_p50
+    assert "8.000" in md  # ttft_later_p50
+    assert "9.043" in csv_str
+
+
+def test_leaderboard_dashes_ttft_for_a_cell_with_no_probe():
+    """A benchmark run records TTFT too, but under --concurrency. A cell
+    without a probe must show nothing rather than borrow that number."""
+    md, _ = leaderboard([SUMMARY_A, SUMMARY_B], {})
+    for line in md.splitlines():
+        if line.startswith("| model-"):
+            assert "-" in line.split("|")[7]
+
+
+def test_leaderboard_ttft_join_is_per_mode():
+    """Same model, two prompt modes: a probe of one must not fill the other."""
+    plain = _make_run_summary(
+        tutor_model="model-alpha",
+        mode="plain",
+        n=100,
+        scaffold_cal=0.70,
+        rigor_cal=0.55,
+        overscaffold_rate=0.10,
+    )
+    probes = {("model-alpha", "scaffolding_rigor"): _probe_block(p50_all=9.446)}
+    md, _ = leaderboard([SUMMARY_A, plain], probes)
+    rows = {
+        line.split("|")[2].strip(): line
+        for line in md.splitlines()
+        if line.startswith("| model-alpha")
+    }
+    assert "9.446" in rows["scaffolding_rigor"]
+    assert "9.446" not in rows["plain"]
+
+
+def test_leaderboard_splits_by_turn_for_a_provider_with_no_cache_reporting():
+    """Gemini reports no cache tokens, so a cache-state split cannot exist for
+    it -- but turn position is the probe's own record, so its first/later
+    figures publish like everyone else's."""
+    probes = {
+        ("model-alpha", "scaffolding_rigor"): _probe_block(
+            p50_all=14.08, first=(14.6, 14.7, 14.8), later=(13.6, 13.7, 13.8)
+        )
+    }
+    md, _ = leaderboard([SUMMARY_A], probes)
+    row = next(line for line in md.splitlines() if line.startswith("| model-alpha"))
+    cells = [c.strip() for c in row.split("|")]
+    assert cells[7] == "14.080"  # ttft_p50
+    assert cells[8] == "14.700"  # ttft_first_p50
+    assert cells[9] == "13.700"  # ttft_later_p50
+
+
+def test_leaderboard_dashes_the_split_when_a_probe_carries_no_samples():
+    """Pooled comes from the stored aggregate; the split needs the samples.
+    A block without them gets a pooled figure and dashes, not a crash."""
+    probes = {("model-alpha", "scaffolding_rigor"): _probe_block(p50_all=7.94)}
+    md, _ = leaderboard([SUMMARY_A], probes)
+    row = next(line for line in md.splitlines() if line.startswith("| model-alpha"))
+    cells = [c.strip() for c in row.split("|")]
+    assert cells[7] == "7.940"
+    assert cells[8] == "-"
+    assert cells[9] == "-"

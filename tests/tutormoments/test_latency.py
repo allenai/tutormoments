@@ -18,6 +18,9 @@ from tutormoments.latency import (
     aggregate_timings,
     format_probe_summary,
     latency_stats,
+    probe_figures,
+    probe_runs,
+    probe_subsample_ids,
     resolve_subsample,
     run_probe,
     warm_figure_is_publishable,
@@ -656,3 +659,210 @@ def test_withheld_reason_follows_the_gate_order():
         ]
     )
     assert "incidental shared prefix" in withheld_reason(incidental)
+
+
+# ---------------------------------------------------------------------------
+# Reading probe results back: probe_figures / probe_runs
+# ---------------------------------------------------------------------------
+
+
+def _probe_tutor_block(
+    *,
+    p50_all=9.0,
+    p50_miss=12.0,
+    p50_hit=8.0,
+    cache_hit_rate=0.5,
+    cache_read=8000,
+    n_hits=40,
+):
+    return {
+        "cache_hit_rate": cache_hit_rate,
+        "cache_read_p50_on_hits": cache_read,
+        "ttft": {
+            "all": {"n": 112, "p50_seconds": p50_all},
+            "miss": {"n": 40, "p50_seconds": p50_miss},
+            "hit": {"n": n_hits, "p50_seconds": p50_hit},
+        },
+        "ttlt": {"all": {"n": 112, "p50_seconds": p50_all + 1.0}},
+    }
+
+
+def _probe_samples(first=(12.0, 13.0, 14.0), later=(7.0, 8.0, 9.0)):
+    """Tutor samples spanning both turn positions."""
+    rows = [{"ttft_seconds": v, "turn_index": 0} for v in first]
+    rows += [{"ttft_seconds": v, "turn_index": 1 + i % 2} for i, v in enumerate(later)]
+    return rows
+
+
+def _probe_block(tutor_block=None, samples=None):
+    """A whole latency.json dict, as probe_figures takes it."""
+    return {
+        "tutor": tutor_block or _probe_tutor_block(),
+        "samples": _probe_samples() if samples is None else samples,
+    }
+
+
+def _write_probe(
+    root: Path,
+    run_id: str,
+    *,
+    tutor="model-a",
+    mode="scaffolding_rigor",
+    measured_at="2026-08-18T10:00:00",
+    source="frozen_packaged",
+    complete=True,
+    sub_id="589e8acf8ac761f2",
+    tutor_block=None,
+):
+    run = root / run_id
+    run.mkdir(parents=True)
+    (run / "latency.json").write_text(
+        json.dumps(
+            {
+                "source": "probe",
+                "tutor_model": tutor,
+                "mode": mode,
+                "tutor": tutor_block or _probe_tutor_block(),
+                "samples": _probe_samples(),
+                "subsample": {
+                    "subsample_source": source,
+                    "subsample_id": sub_id,
+                    "subsample_complete": complete,
+                },
+                "measurement_environment": {"measured_at": measured_at},
+            }
+        ),
+        encoding="utf-8",
+    )
+    return run
+
+
+def test_probe_figures_always_publishes_the_pooled_number():
+    """Pooled TTFT is measured identically on every provider, so it is the one
+    figure that can rank the whole roster."""
+    figs = probe_figures(
+        _probe_block(_probe_tutor_block(cache_hit_rate=None, cache_read=None))
+    )
+    assert figs["ttft_p50"] == 9.0
+    assert figs["ttlt_p50"] == 10.0
+
+
+def test_probe_figures_splits_on_turn_position_not_cache_state():
+    """First/later keys on turn_index, which the probe recorded itself. A
+    cache-state split needs a publishability gate and, even where it passes,
+    dilutes the first-message bucket with later-turn calls whose cache
+    silently missed (measured on gpt-5.5: cache-based cold p50 6.91s against
+    an actual first-message p50 of 7.53s)."""
+    figs = probe_figures(_probe_block())
+    assert figs["ttft_first_p50"] == 13.0  # p50 of (12, 13, 14) -- turn 0
+    assert figs["ttft_later_p50"] == 8.0  # p50 of (7, 8, 9) -- turns 1 and 2
+
+
+def test_probe_figures_splits_for_a_provider_reporting_no_cache_tokens():
+    """The point of the turn split: Gemini reports no cache tokens, so a
+    cache-state split cannot exist for it -- but its first/later figures are
+    as real as anyone's."""
+    figs = probe_figures(
+        _probe_block(_probe_tutor_block(cache_hit_rate=None, cache_read=None))
+    )
+    assert figs["ttft_first_p50"] == 13.0
+    assert figs["ttft_later_p50"] == 8.0
+
+
+def test_probe_figures_excludes_samples_with_no_visible_output():
+    """A call that produced no visible token has no TTFT and must not enter a
+    position bucket."""
+    samples = _probe_samples() + [{"ttft_seconds": None, "turn_index": 0}]
+    figs = probe_figures(_probe_block(samples=samples))
+    assert figs["ttft_first_p50"] == 13.0
+
+
+def test_probe_figures_reads_old_files_without_a_stored_split():
+    """The split is computed from `samples`, which every probe has always
+    written -- a latency.json from before the split existed still yields one."""
+    block = _probe_block()
+    assert "ttft_first_p50" not in json.dumps(block)  # nothing precomputed
+    assert probe_figures(block)["ttft_first_p50"] == 13.0
+
+
+def test_probe_figures_tolerates_an_absent_probe():
+    assert probe_figures({}) == {
+        "ttft_p50": None,
+        "ttlt_p50": None,
+        "ttft_first_p50": None,
+        "ttft_later_p50": None,
+    }
+
+
+def test_probe_runs_keys_by_model_and_mode(tmp_path):
+    _write_probe(tmp_path, "model-a_scaffolding_rigor_latency_20260818")
+    _write_probe(
+        tmp_path, "model-b_plain_latency_20260818", tutor="model-b", mode="plain"
+    )
+    found = probe_runs(str(tmp_path))
+    assert set(found) == {("model-a", "scaffolding_rigor"), ("model-b", "plain")}
+
+
+def test_probe_runs_prefers_the_newest_measurement(tmp_path):
+    """Re-measuring a model supersedes its earlier figure without anyone
+    having to delete the old run directory."""
+    _write_probe(
+        tmp_path,
+        "model-a_scaffolding_rigor_latency_20260817",
+        measured_at="2026-08-17T14:50:00",
+        tutor_block=_probe_tutor_block(p50_all=99.0),
+    )
+    _write_probe(
+        tmp_path,
+        "model-a_scaffolding_rigor_latency_20260818",
+        measured_at="2026-08-18T10:00:00",
+        tutor_block=_probe_tutor_block(p50_all=9.0),
+    )
+    block = probe_runs(str(tmp_path))[("model-a", "scaffolding_rigor")]
+    assert block["tutor"]["ttft"]["all"]["p50_seconds"] == 9.0
+
+
+def test_probe_runs_ignores_a_derived_subsample(tmp_path):
+    """A derived sample spans no particular prompt-length distribution, so it
+    is comparable to nothing -- least of all to another model's frozen run."""
+    _write_probe(
+        tmp_path, "model-a_scaffolding_rigor_latency_20260818", source="derived"
+    )
+    assert probe_runs(str(tmp_path)) == {}
+
+
+def test_probe_runs_ignores_an_incomplete_frozen_subsample(tmp_path):
+    """Dropped ids mean this is not the same sample as the run before it."""
+    _write_probe(tmp_path, "model-a_scaffolding_rigor_latency_20260818", complete=False)
+    assert probe_runs(str(tmp_path)) == {}
+
+
+def test_probe_runs_ignores_benchmark_run_directories(tmp_path):
+    """Benchmark runs write summary.json, not latency.json, and their latency
+    was gathered under --concurrency."""
+    (tmp_path / "model-a_scaffolding_rigor_tutormoments-preview_20260807").mkdir()
+    assert probe_runs(str(tmp_path)) == {}
+
+
+def test_probe_runs_on_a_missing_results_root(tmp_path):
+    assert probe_runs(str(tmp_path / "nope")) == {}
+
+
+def test_probe_subsample_ids_exposes_a_mixed_set(tmp_path):
+    """Eligibility is per-probe, so two frozen-but-different samples each pass
+    it. Callers publishing several cells need to see that."""
+    _write_probe(
+        tmp_path,
+        "model-a_scaffolding_rigor_latency_20260818",
+        sub_id="589e8acf8ac761f2",
+    )
+    _write_probe(
+        tmp_path,
+        "model-b_scaffolding_rigor_latency_20260817",
+        tutor="model-b",
+        sub_id="84b4ad5615876a3e",
+    )
+    assert probe_subsample_ids(probe_runs(str(tmp_path))) == {
+        "589e8acf8ac761f2",
+        "84b4ad5615876a3e",
+    }

@@ -829,6 +829,154 @@ def test_report_writes_leaderboard_md_and_csv(tmp_path):
     assert len(csv_lines) == 3, f"Expected header + 2 rows, got: {csv_lines}"
 
 
+def _make_probe_run(root: Path, run_id: str, tutor_model: str, mode: str) -> None:
+    """Write a minimal `tutormoments latency` result inside root/run_id/."""
+    run_dir = root / run_id
+    run_dir.mkdir(parents=True, exist_ok=True)
+    (run_dir / "latency.json").write_text(
+        json.dumps(
+            {
+                "source": "probe",
+                "tutor_model": tutor_model,
+                "mode": mode,
+                "tutor": {
+                    "ttft": {"all": {"n": 336, "p50_seconds": 9.043}},
+                    "ttlt": {"all": {"n": 336, "p50_seconds": 10.52}},
+                },
+                "samples": [
+                    {"ttft_seconds": 13.217, "turn_index": 0},
+                    {"ttft_seconds": 7.9, "turn_index": 1},
+                    {"ttft_seconds": 7.993, "turn_index": 1},
+                    {"ttft_seconds": 8.1, "turn_index": 2},
+                ],
+                "subsample": {
+                    "subsample_source": "frozen_packaged",
+                    "subsample_id": "589e8acf8ac761f2",
+                    "subsample_complete": True,
+                },
+                "measurement_environment": {"measured_at": "2026-08-18T14:21:39"},
+            }
+        ),
+        encoding="utf-8",
+    )
+
+
+def test_report_joins_probe_ttft_onto_the_matching_run(tmp_path):
+    """End to end: a probe run sitting beside a benchmark run in the same
+    results root fills that cell's TTFT columns, and only that cell's."""
+    from tutormoments.cli import main
+
+    results_root = tmp_path / "results"
+    _make_fake_run(
+        results_root,
+        "model-alpha_scaffolding_rigor_ds_20260818",
+        "model-alpha",
+        "scaffolding_rigor",
+    )
+    _make_fake_run(
+        results_root, "model-alpha_plain_ds_20260818", "model-alpha", "plain"
+    )
+    _make_probe_run(
+        results_root,
+        "model-alpha_scaffolding_rigor_latency_20260818",
+        "model-alpha",
+        "scaffolding_rigor",
+    )
+
+    out_stem = str(tmp_path / "leaderboard")
+    main(["report", "--results-root", str(results_root), "--out", out_stem])
+
+    rows = {
+        line.split("|")[2].strip(): line
+        for line in (tmp_path / "leaderboard.md").read_text("utf-8").splitlines()
+        if line.startswith("| model-alpha")
+    }
+    assert "9.043" in rows["scaffolding_rigor"]
+    assert "13.217" in rows["scaffolding_rigor"]
+    assert "9.043" not in rows["plain"]
+
+
+def test_report_recovers_the_cell_from_config_not_the_run_id(tmp_path):
+    """Runs predating tutor_model/mode in summary.json must still join. The run
+    id cannot supply the mode: make_run_id joins fields with underscores that
+    occur inside a mode too, so splitting it yields "scaffolding" for
+    "scaffolding_rigor" -- which would silently miss the probe."""
+    from tutormoments.cli import main
+
+    results_root = tmp_path / "results"
+    run_id = "claude-opus-4-8_scaffolding_rigor_tutormoments-preview_20260807"
+    _make_fake_run(results_root, run_id, "claude-opus-4-8", "scaffolding_rigor")
+    summary_path = results_root / run_id / "summary.json"
+    summary = json.loads(summary_path.read_text("utf-8"))
+    del summary["tutor_model"]
+    del summary["mode"]
+    summary_path.write_text(json.dumps(summary), encoding="utf-8")
+    (results_root / run_id / "config.json").write_text(
+        json.dumps({"tutor": "claude-opus-4-8", "mode": "scaffolding_rigor"}),
+        encoding="utf-8",
+    )
+    _make_probe_run(
+        results_root,
+        "claude-opus-4-8_scaffolding_rigor_latency_20260818",
+        "claude-opus-4-8",
+        "scaffolding_rigor",
+    )
+
+    out_stem = str(tmp_path / "leaderboard")
+    main(["report", "--results-root", str(results_root), "--out", out_stem])
+
+    row = next(
+        line
+        for line in (tmp_path / "leaderboard.md").read_text("utf-8").splitlines()
+        if line.startswith("| claude-opus-4-8")
+    )
+    assert "| scaffolding_rigor |" in row
+    assert "9.043" in row
+
+
+def test_report_warns_when_probes_mix_subsamples(tmp_path, caplog):
+    """Two frozen-but-different samples each pass per-probe eligibility, so the
+    table would compare figures measured over different prompts."""
+    from tutormoments.cli import main
+
+    results_root = tmp_path / "results"
+    _make_fake_run(
+        results_root,
+        "model-alpha_scaffolding_rigor_ds_20260818",
+        "model-alpha",
+        "scaffolding_rigor",
+    )
+    _make_probe_run(
+        results_root,
+        "model-alpha_scaffolding_rigor_latency_20260818",
+        "model-alpha",
+        "scaffolding_rigor",
+    )
+    _make_probe_run(
+        results_root,
+        "model-beta_scaffolding_rigor_latency_20260817",
+        "model-beta",
+        "scaffolding_rigor",
+    )
+    stale = results_root / "model-beta_scaffolding_rigor_latency_20260817"
+    block = json.loads((stale / "latency.json").read_text("utf-8"))
+    block["subsample"]["subsample_id"] = "84b4ad5615876a3e"
+    (stale / "latency.json").write_text(json.dumps(block), encoding="utf-8")
+
+    with caplog.at_level(logging.WARNING):
+        main(
+            [
+                "report",
+                "--results-root",
+                str(results_root),
+                "--out",
+                str(tmp_path / "leaderboard"),
+            ]
+        )
+
+    assert "mix 2 latency subsamples" in caplog.text
+
+
 # ---------------------------------------------------------------------------
 # Test 8: view subcommand writes non-empty HTML
 # ---------------------------------------------------------------------------
