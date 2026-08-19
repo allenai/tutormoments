@@ -7,7 +7,7 @@ import logging
 from dataclasses import asdict, dataclass, field, fields
 from types import SimpleNamespace
 
-from tutormoments.moments import Moment, _build_reference_transcript
+from tutormoments.moments import Moment
 from tutormoments.student import build_student_system_prompt, resolve_student
 from tutormoments.tutor import build_tutor_system_prompt, resolve_tutor
 
