@@ -415,8 +415,6 @@ Conversations also share one `ModelClient` per model
 paying a fresh TLS handshake on its first request — which landed squarely on the cold-cache
 turn, inflating exactly the figure we report.
 
-Batch mode records no latency at all: the batch APIs expose none. The probe requires a sync run.
-
 ### The student is a free drift control
 
 Student turns are streamed and timed like tutor turns, and `latency.json` carries a
