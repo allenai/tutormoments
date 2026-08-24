@@ -811,7 +811,12 @@ def test_run_batch_gemini_thinking_budget_defaults(monkeypatch):
     assert gen_config["thinking_config"]["thinking_budget"] == 16384
 
 
-def test_run_batch_gemini_omits_thinking_config_when_off(monkeypatch):
+def test_run_batch_gemini_disables_thinking_when_off(monkeypatch):
+    """thinking=False sends an explicit 0 budget, not an omitted block.
+
+    Most current Gemini models think by default, so omitting thinking_config
+    would silently contradict a configured `thinking: false`.
+    """
     result = {
         "key": "kA",
         "response": {"candidates": [{"content": {"parts": [{"text": "A"}]}}]},
@@ -819,7 +824,32 @@ def test_run_batch_gemini_omits_thinking_config_when_off(monkeypatch):
     _, submitted = _run_gemini_batch(
         monkeypatch, [build_batch_entry("kA", "pA")], [result], thinking=False
     )
-    assert "thinking_config" not in submitted[0]["request"]["generation_config"]
+    assert submitted[0]["request"]["generation_config"]["thinking_config"] == {
+        "include_thoughts": False,
+        "thinking_budget": 0,
+    }
+
+
+def test_generate_gemini_disables_thinking_when_off(monkeypatch):
+    monkeypatch.setenv("GEMINI_API_KEY", "key-test")
+    with patch("google.genai.Client") as MockGenai:
+        client_obj = MagicMock()
+        response = MagicMock()
+        response.text = "answer"
+        response.usage_metadata.prompt_token_count = 4
+        response.usage_metadata.candidates_token_count = 6
+        response.usage_metadata.thoughts_token_count = 0
+        response.usage_metadata.total_token_count = 10
+        client_obj.models.generate_content.return_value = response
+        MockGenai.return_value = client_obj
+
+        ModelClient("gemini-3.1-pro-preview").generate("p", thinking=False)
+
+    config = client_obj.models.generate_content.call_args.kwargs["config"]
+    assert config["thinking_config"] == {
+        "include_thoughts": False,
+        "thinking_budget": 0,
+    }
 
 
 def test_run_batch_gemini_skips_thought_parts(monkeypatch):

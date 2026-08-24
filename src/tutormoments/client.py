@@ -133,18 +133,24 @@ def _anthropic_thinking_param(model: str, thinking_budget: int) -> dict:
     return {"type": "adaptive"}
 
 
-def _gemini_thinking_config(thinking: bool, thinking_budget: int) -> dict | None:
-    """Return the `thinking_config` block for a Gemini request, or None.
+def _gemini_thinking_config(thinking: bool, thinking_budget: int) -> dict:
+    """Return the `thinking_config` block for a Gemini request.
 
-    thinking_budget = -1 means "dynamic" (the model self-paces). 0/None means
-    unset, in which case we fall back to a fixed 16384-token budget. Positive
-    values are used as-is. Returns None when thinking is off, which leaves the
-    model on its own default behaviour (we never send thinking_budget: 0).
+    thinking off sends an explicit thinking_budget of 0, which disables
+    thinking rather than leaving the model on its own default -- most current
+    Gemini models think by default, so omitting the block would silently
+    contradict a configured `thinking: false`. Note that models which cannot
+    disable thinking (the 2.5 Pro and 3 Pro tiers) reject a 0 budget outright;
+    that surfaces as an API error rather than a silent config mismatch.
+
+    With thinking on: thinking_budget = -1 means "dynamic" (the model
+    self-paces), 0/None means unset and falls back to a fixed 16384-token
+    budget, and positive values are used as-is.
 
     Shared by the sync and batch Gemini paths so the two stay in step.
     """
     if not thinking:
-        return None
+        return {"include_thoughts": False, "thinking_budget": 0}
     if thinking_budget is None or thinking_budget == 0:
         budget = 16384
     else:
@@ -345,9 +351,7 @@ class ModelClient:
         }
         if json_mode:
             config["response_mime_type"] = "application/json"
-        thinking_config = _gemini_thinking_config(thinking, thinking_budget)
-        if thinking_config is not None:
-            config["thinking_config"] = thinking_config
+        config["thinking_config"] = _gemini_thinking_config(thinking, thinking_budget)
 
         # Gemini has no server-side prompt cache wired here; the cacheable
         # head is concatenated into the prompt, which is semantically
@@ -1061,8 +1065,7 @@ def _run_batch_gemini(
                 # Copy: the entry belongs to the caller and is reused when a
                 # batch is resumed, so the thinking config must not be baked in.
                 gen_config = dict(entry["request"].get("generation_config", {}))
-                if thinking_config is not None:
-                    gen_config["thinking_config"] = thinking_config
+                gen_config["thinking_config"] = thinking_config
                 gem_entry = {
                     "key": key,
                     "request": {
