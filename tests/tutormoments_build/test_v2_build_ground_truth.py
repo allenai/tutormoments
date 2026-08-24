@@ -213,10 +213,11 @@ def test_inference_needs_the_tutor_to_actually_scaffold():
     assert inferred is False
 
 
-def test_inference_is_per_annotator_not_post_union():
-    # One annotator saw scaffolding where they judged none was needed. Post-union
-    # the situation label is True (union of appropriate), so the rule would never
-    # fire there; applied per annotator it does.
+def test_inference_reads_the_resolved_labels_not_one_annotator():
+    # One annotator saw scaffolding where they judged none was needed; the other
+    # judged it called for. Union resolves scaffolding_appropriate to True, so
+    # the rule's premise does not hold and it must not fire -- a label inferred
+    # here would contradict the moment's own resolved situation label.
     labels, _, inferred = G.resolve_labels(
         [
             _annotation(
@@ -233,8 +234,75 @@ def test_inference_is_per_annotator_not_post_union():
         ]
     )
     assert labels["scaffolding_appropriate"] is True
+    assert labels["over_scaffolding_present"] is False
+    assert inferred is False
+
+
+def test_inference_fires_when_both_annotators_say_not_appropriate():
+    # Agreed "not called for", and one of them saw scaffolding delivered: the
+    # rule's premise survives the union, so it still fires.
+    labels, _, inferred = G.resolve_labels(
+        [
+            _annotation(
+                scaffolding_appropriate=False,
+                scaffolding_present=True,
+                scaffolding_amount="appropriate",
+            ),
+            _annotation(
+                role="reannotator",
+                name="Anita",
+                scaffolding_appropriate=False,
+                scaffolding_present=False,
+            ),
+        ]
+    )
     assert labels["over_scaffolding_present"] is True
     assert inferred is True
+
+
+def test_a_declared_amount_still_wins_whatever_the_situation_labels_say():
+    # The inference only ever adds; an annotator who declared over-scaffolding
+    # outright is never overridden by resolving the situation labels to
+    # "appropriate".
+    labels, _, inferred = G.resolve_labels(
+        [
+            _annotation(
+                scaffolding_appropriate=True,
+                scaffolding_present=True,
+                scaffolding_amount="over_scaffolding",
+            ),
+            _annotation(
+                role="reannotator",
+                name="Anita",
+                scaffolding_appropriate=True,
+                scaffolding_present=True,
+                scaffolding_amount="appropriate",
+            ),
+        ]
+    )
+    assert labels["over_scaffolding_present"] is True
+    assert inferred is False
+
+
+# ===========================================================================
+# Staff exclusion
+# ===========================================================================
+
+
+@pytest.mark.parametrize(
+    "name", ["Lucy", "lucy", "Lucy Li", "REBECCA", "Albert", "Kajal"]
+)
+def test_staff_annotations_are_excluded(name):
+    assert G.is_excluded({"annotator_name": name}) is True
+
+
+@pytest.mark.parametrize("name", ["Carla", "Emily", "Jessica-Lyn", "", "Lucinda"])
+def test_everyone_else_is_kept(name):
+    assert G.is_excluded({"annotator_name": name}) is False
+
+
+def test_a_missing_name_is_not_excluded():
+    assert G.is_excluded({}) is False
 
 
 def test_declared_over_scaffolding_is_not_marked_inferred():
@@ -415,6 +483,60 @@ def test_moment_without_reannotator_is_dropped(tmp_path):
     out, dropped = G.build(*_fixture(tmp_path, rows, {"t1": "iterate"}))
     assert out["iteration"] == []
     assert dropped["not_doubly_annotated"] == 1
+
+
+def test_a_moment_annotated_by_staff_and_one_teacher_is_dropped(tmp_path):
+    """Removing the staff pass leaves one annotator, so the moment falls out
+    through the doubly-annotated requirement rather than being resolved alone."""
+    rows = [
+        _row("t1", "m1", [_annotation(), _annotation(role="reannotator", name="Lucy")]),
+        _row("t1", "m2", _both()),
+    ]
+    out, dropped = G.build(*_fixture(tmp_path, rows, {"t1": "iterate"}))
+
+    assert [r["moment_id"] for r in out["iteration"]] == ["m2"]
+    assert dropped["staff_annotations_removed"] == 1
+    assert dropped["not_doubly_annotated"] == 1
+
+
+def test_a_staff_pass_alongside_two_teachers_is_dropped_but_the_moment_survives(
+    tmp_path,
+):
+    rows = [
+        _row(
+            "t1",
+            "m1",
+            [
+                _annotation(),
+                _annotation(role="reannotator", name="Anita"),
+                _annotation(role="reannotator", name="Rebecca"),
+            ],
+        )
+    ]
+    out, dropped = G.build(*_fixture(tmp_path, rows, {"t1": "iterate"}))
+
+    assert [r["moment_id"] for r in out["iteration"]] == ["m1"]
+    assert dropped["staff_annotations_removed"] == 1
+    assert out["iteration"][0]["n_annotators"] == 2
+
+
+def test_staff_labels_do_not_reach_the_resolved_moment(tmp_path):
+    """The staff pass is the only True on rigor_present; it must not survive the
+    union, which would otherwise carry any single annotator's True through."""
+    rows = [
+        _row(
+            "t1",
+            "m1",
+            [
+                _annotation(rigor_present=False),
+                _annotation(role="reannotator", name="Anita", rigor_present=False),
+                _annotation(role="reannotator", name="Albert", rigor_present=True),
+            ],
+        )
+    ]
+    out, _ = G.build(*_fixture(tmp_path, rows, {"t1": "iterate"}))
+
+    assert out["iteration"][0]["labels"]["rigor_present"] is False
 
 
 def test_thrown_out_moments_are_dropped_by_default(tmp_path):

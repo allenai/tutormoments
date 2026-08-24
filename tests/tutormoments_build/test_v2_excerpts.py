@@ -200,9 +200,9 @@ class TestRenderExcerpt:
 
     def test_pre_cut_context_is_the_same_whatever_the_moment_length(self):
         """Two moments sharing a cut but opening at different rows see identical
-        text before it -- the window is the cut's, not the moment's. (Both
-        pre-cut runs fit inside the window; a longer one would widen it, per
-        test_window_never_opens_past_the_moment_start.)"""
+        text before it -- the window is the cut's, not the moment's. This holds
+        in both directions: a longer pre-cut run does not widen the window
+        either, per test_window_may_open_inside_the_moment."""
         opens_late, _ = E.render_excerpt(
             SAMPLE, _boundaries(5, 7, 7, 4, 5, 5), context_turns=2
         )
@@ -216,14 +216,24 @@ class TestRenderExcerpt:
         assert before_cut(opens_late) == before_cut(opens_earlier)
         assert before_cut(opens_late).startswith("Turn 3. TUTOR:")
 
-    def test_window_never_opens_past_the_moment_start(self):
-        """A moment whose pre-cut run is longer than the window is still whole:
-        the cut-anchored window would open at row 7, but start_index wins."""
+    def test_window_may_open_inside_the_moment(self):
+        """A moment whose pre-cut run is longer than the window opens mid-moment:
+        the width is counted from the cut, and the annotated start does not hold
+        it open. Rows 1-6 are inside this moment and none of them is rendered."""
         text, first = E.render_excerpt(
             SAMPLE, _boundaries(1, 7, 7, 2, 5, 5), context_turns=0
         )
-        assert first == 1
-        assert text.startswith("Turn 2. STUDENT: Three?")
+        assert first == 7
+        assert text.startswith("Turn 5. TUTOR: Nice work.")
+        assert "Turn 2. STUDENT: Three?" not in text
+
+    def test_a_width_wider_than_the_moment_still_reaches_back_before_it(self):
+        """Opening inside the moment is a consequence of the width, not a new
+        ceiling: the same moment at a wide enough width opens before its start."""
+        _, first = E.render_excerpt(
+            SAMPLE, _boundaries(1, 7, 7, 2, 5, 5), context_turns=99
+        )
+        assert first == 0
 
     def test_out_of_range_boundaries_raise(self):
         with pytest.raises(IndexError, match="outside the transcript"):
@@ -259,7 +269,8 @@ class TestBuildRecord:
 
         rendered = record["excerpts"]["2"]
         assert rendered["context_start_index"] == 2
-        assert rendered["context_rows"] == 3
+        assert rendered["context_rows"] == 4  # rows 2-5, everything before the cut
+        assert rendered["opens_inside_moment"] is False
         assert rendered["excerpt"].startswith("Turn 3. TUTOR:")
         assert "omitted" not in rendered["excerpt"]
 
@@ -278,6 +289,16 @@ class TestBuildRecord:
         assert narrow["context_rows"] < wide["context_rows"]
         assert len(narrow["excerpt"]) < len(wide["excerpt"])
 
+    def test_a_window_opening_inside_the_moment_is_recorded_as_such(self):
+        """The flag is what a later round reads to tell how much of the
+        annotated moment a given prompt actually saw."""
+        moment = self._moment(**_boundaries(1, 7, 7, 2, 5, 5))
+        record = E.build_record(moment, SAMPLE, "conv-1", context_widths=(1, 99))
+
+        assert record["excerpts"]["1"]["opens_inside_moment"] is True
+        assert record["excerpts"]["99"]["opens_inside_moment"] is False
+        assert record["excerpts"]["1"]["context_rows"] >= 0
+
     def test_width_independent_fields_are_not_repeated_per_width(self):
         record = E.build_record(self._moment(), SAMPLE, "conv-1", context_widths=(2, 1))
 
@@ -286,6 +307,36 @@ class TestBuildRecord:
         for rendered in record["excerpts"].values():
             assert "labels" not in rendered
             assert "moment_rows" not in rendered
+
+
+# ===========================================================================
+# Reporting
+# ===========================================================================
+
+
+class TestInsideMomentReport:
+    def _record(self, *flags):
+        return {
+            "excerpts": {
+                str(width): {"opens_inside_moment": flag}
+                for width, flag in zip((20, 5), flags)
+            }
+        }
+
+    def test_counts_per_width_across_every_split(self):
+        out = {
+            "iteration": [self._record(False, True), self._record(False, False)],
+            "test": [self._record(True, True)],
+        }
+
+        lines = E._inside_moment_lines(out, [20, 5])
+
+        assert "windows opening inside the moment:" in lines[1]
+        assert lines[2].split() == ["@20", "1", "of", "3", "(33%)"]
+        assert lines[3].split() == ["@5", "2", "of", "3", "(67%)"]
+
+    def test_no_records_no_section(self):
+        assert E._inside_moment_lines({"iteration": []}, [20]) == []
 
 
 # ===========================================================================

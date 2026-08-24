@@ -1,44 +1,52 @@
-"""Run the v2 classification prompts over rendered human-human moment excerpts.
+"""Run the v2 classification prompts over human-human moment excerpts.
 
-``excerpts.py`` writes what a reader sees at a moment: lead-up, the moment, a
-``>>> CUT POINT <<<`` marker, and nothing after the moment's last row. The two
-prompts in ``tutormoments_build/prompts/v2/`` read exactly that text and each
-ask for one judgment about the tutor's first strategy after the cut:
+``excerpts.py`` creates excerpts. 
+
+Using
+prompts in ``tutormoments_build/prompts/v2/``: 
 
   action_direction.md    scaffolding yes/no, rigor yes/no, plus a description
   over-scaffolding.md    over-scaffolding yes/no, plus a description
 
-Together they predict three of the five booleans the human annotators supplied
-(``scaffolding_present``, ``rigor_present``, ``over_scaffolding_present``), so a
-prediction file lines up field-for-field with ``labels`` in the ground truth.
-The gold labels ride along in each output record, as they do in the excerpt
-files, so a prediction file is usable on its own.
+Together they predict ``scaffolding_present``, ``rigor_present``, ``over_scaffolding_present``,
+in a manner that lines up for direct comparison with gold labels. 
 
-**The over-scaffolding pass is gated on the gold label.** Its prompt opens "You
-are given a tutoring moment containing a cut point, after which a tutor
-scaffolds" -- the premise is that scaffolding happened. It is therefore sent
-only where the annotators marked ``scaffolding_present``, which measures that
-prompt on its own rather than compounding its errors with the action-direction
-pass's. Moments where the annotators saw no scaffolding get no over-scaffolding
-call at all: the field is ``null``, not ``false``, so "not asked" stays
-distinguishable from "asked and told no". Re-gating on the model's own
-prediction would need this script's action-direction output as its input, and
-is deliberately not what this file does.
+**The over-scaffolding pass is gated on the gold labels**. 
+It is sent only where the annotators marked
+``scaffolding_appropriate`` *and* ``scaffolding_present``. 
 
-**Both passes ride in one batch.** Because the gate reads gold labels rather
-than pass-1 output, every request is known before anything is submitted, so the
-whole round is a single batch job -- one queue wait, not two.
+What is left is the question the prompt was written for: scaffolding was called
+for, the tutor scaffolded, did they scaffold too much? 
 
-Model and thinking come from the ``v2`` block in the runtime config
-(``claude-opus-5``, adaptive thinking). There is no ``--model`` flag, matching
-the rest of the build CLI: which model produced a label is a property of the
-config a run was made against, not of the command line.
+Moments outside the gate get no over-scaffolding call at all: the field is
+``null``. 
+
+Both passes ride in one batch.
+
+Model and thinking default to the ``v2`` block in the runtime config. 
+``--model`` sets the model, with hyperparameters 
+(thinking, effort, reasoning_effort, thinking_budget) from
+that model's entry under ``v2.models`` in the config. Falling back to the
+top-level ``models`` tutor roster for an id already configured there.
+
+Predictions are written per model: ``<out-dir>/<model>/<split>.jsonl``. 
+
+Only the ``iteration`` split runs by default. The ``test`` split is held out
+while the prompts are still changing, and is classified with an explicit
+``--splits test`` once they are frozen.
+
+Examples of models it could run with:
+- claude-opus-5
+- gemini-3.5-flash
+- gpt-5.6-sol
 
 Usage::
 
     python -m tutormoments_build.v2.classify_excerpts --dry-run
-    python -m tutormoments_build.v2.classify_excerpts --splits iteration --limit 20
+    python -m tutormoments_build.v2.classify_excerpts --limit 20
     python -m tutormoments_build.v2.classify_excerpts
+    python -m tutormoments_build.v2.classify_excerpts --splits test
+    python -m tutormoments_build.v2.classify_excerpts --model claude-opus-5
     python -m tutormoments_build.v2.classify_excerpts --print
     python -m tutormoments_build.v2.classify_excerpts --print 02e89625
     python -m tutormoments_build.v2.classify_excerpts --batch-id msgbatch_01ABC...
@@ -64,6 +72,12 @@ DEFAULT_OUT_DIR = "outputs/v2_predictions"
 # Excerpt file stems, which are also the prediction output stems.
 SPLIT_STEMS = ("iteration", "test")
 
+# Only the iteration split is classified unless the test split is asked for by
+# name. The test split is the held-out half: every prediction run over it while
+# the prompts are still being revised turns it into a second iteration set. It
+# is classified once the prompts are frozen, with `--splits test`.
+DEFAULT_SPLITS = ("iteration",)
+
 ACTION_DIRECTION_PROMPT = "prompts/v2/action_direction.md"
 OVER_SCAFFOLDING_PROMPT = "prompts/v2/over-scaffolding.md"
 
@@ -86,6 +100,7 @@ OVER_SCAFFOLDING_PREFIX = "overscaffold"
 FALLBACK_SPEC = {
     "model": "claude-opus-5",
     "thinking": "adaptive",
+    "effort": "xhigh",
     "poll_interval": 60,
 }
 
@@ -100,8 +115,54 @@ RANDOM = object()
 # ===========================================================================
 
 
-def phase_config(config_path=None) -> dict:
-    """Return the v2 classification phase config (model/thinking/poll_interval)."""
+# Per-model knobs read off a `v2.models` (or tutor roster) entry when --model
+# names one. poll_interval is not among them: it is a property of the round, not
+# the model, so it stays whatever the v2 block says.
+ROSTER_KEYS = ("thinking", "thinking_budget", "reasoning_effort", "effort")
+
+
+def model_knobs(model: str, scoped: dict, config_path=None) -> dict:
+    """Generation knobs for a --model id: ``v2.models`` first, tutor roster second.
+
+    Scoring models for this round belong under the v2 block: they classify
+    moments and are never replayed as tutors, while the top-level ``models``
+    roster is the candidate list `tutormoments run` draws from. Ids already on
+    that roster still resolve, so a model configured there needs no second
+    entry.
+
+    Either lookup missing raises rather than defaulting: an unconfigured model
+    has no declared thinking config, and guessing one would misreport how a
+    label was made.
+    """
+    from tutormoments.client import infer_provider
+    from tutormoments.config import resolve_model
+
+    if model in scoped:
+        # The tutor roster path gets this check from resolve_model. An id no
+        # client can route has to fail here rather than at batch submission.
+        infer_provider(model)
+        return scoped[model] or {}
+
+    try:
+        return resolve_model(model, config_path)["kwargs"]
+    except ValueError as exc:
+        # Name both places a comparison model can be configured, so the fix is
+        # obvious from the error.
+        raise ValueError(
+            f"{exc} Models under the config `v2.models`: "
+            f"{', '.join(scoped) or '(none)'}"
+        ) from exc
+
+
+def phase_config(config_path=None, model: str | None = None) -> dict:
+    """Return the v2 classification phase config (model/thinking/poll_interval).
+
+    ``model`` overrides the v2 block's model. Its generation knobs then come
+    from ``model_knobs``, so a comparison run is configured in the config file
+    rather than on the command line; anything that entry does not set keeps the
+    v2 block's value. The v2 block's own model needs no entry -- it is already
+    fully specified there.
+    """
     from tutormoments.config import load_config
 
     cfg = dict(FALLBACK_SPEC)
@@ -112,6 +173,26 @@ def phase_config(config_path=None) -> dict:
         )
     else:
         cfg.update(block)
+
+    # `v2.models` is a lookup table for --model, not a setting of the round, so
+    # it must not ride along in the returned spec (which is recorded per
+    # prediction and passed to the batch).
+    scoped = cfg.pop("models", None) or {}
+
+    if model and model != cfg["model"]:
+        kwargs = model_knobs(model, scoped, config_path)
+        cfg["model"] = model
+        # The entry is the override's *complete* generation config, so every
+        # per-model knob is cleared before it is applied. Inheriting them would
+        # cross vendors -- an OpenAI model carrying the baseline's Anthropic
+        # `effort` -- and misreport the depth a label was made at. `thinking`
+        # then defaults off rather than to the v2 block's adaptive: a configured
+        # model that sets no thinking key means thinking off.
+        for key in ROSTER_KEYS:
+            cfg.pop(key, None)
+        cfg["thinking"] = False
+        cfg.update({k: v for k, v in kwargs.items() if k in ROSTER_KEYS})
+
     return cfg
 
 
@@ -131,7 +212,7 @@ def use_thinking(cfg: dict) -> bool:
 # ===========================================================================
 
 
-def load_excerpts(excerpt_dir: str, stems=SPLIT_STEMS) -> dict[str, list[dict]]:
+def load_excerpts(excerpt_dir: str, stems=DEFAULT_SPLITS) -> dict[str, list[dict]]:
     """Return {split stem: [excerpt record, ...]} in file order.
 
     A missing split file is not an error -- a round may have produced only one.
@@ -196,11 +277,29 @@ def excerpt_at(record: dict, context_turns: int) -> str:
 def wants_over_scaffolding(record: dict) -> bool:
     """Whether the over-scaffolding prompt applies to this moment.
 
-    Gold-gated -- see the module docstring. The prompt presupposes the tutor
-    scaffolds after the cut point, so it is only asked about moments the
-    annotators marked as containing scaffolding.
+    Gold-gated on both halves of the premise -- see the module docstring. The
+    prompt asks whether a tutor who *should* have scaffolded scaffolded too
+    much, so it is asked only where the annotators marked both
+    ``scaffolding_appropriate`` and ``scaffolding_present``.
     """
-    return bool((record.get("labels") or {}).get("scaffolding_present"))
+    labels = record.get("labels") or {}
+    return bool(labels.get("scaffolding_appropriate")) and bool(
+        labels.get("scaffolding_present")
+    )
+
+
+def skip_reason(record: dict) -> str:
+    """Which half of the over-scaffolding premise this moment fails.
+
+    Reported separately because the two are different situations, not one
+    exclusion: "no scaffolding" is a moment the prompt has nothing to weigh in,
+    while "not appropriate" is one the ground truth already labels
+    over-scaffolding by rule.
+    """
+    labels = record.get("labels") or {}
+    if not labels.get("scaffolding_present"):
+        return "no_scaffolding"
+    return "not_appropriate"
 
 
 def has_post_cut_content(record: dict) -> bool:
@@ -212,9 +311,10 @@ def has_post_cut_content(record: dict) -> bool:
     Tutor writes 3x7 on the board" is a pedagogical move, so a moment whose
     post-cut span is all enrichment is still classified.
 
-    No moment in the current release is excluded by this -- all 474 have at
-    least one post-cut row. It is a guard for future annotation rounds, where a
-    redrawn boundary could put the cut on a moment's last row.
+    This has excluded nothing so far -- every annotated moment has had at least
+    one post-cut row. It is a guard for later rounds, where a redrawn boundary
+    could put the cut on a moment's last row. The run report counts what it
+    actually excludes.
 
     Excerpt files built before ``post_cut_rows`` existed have no field to read;
     those moments are classified, and the caller warns.
@@ -264,6 +364,7 @@ def build_entries(records: list[dict]) -> tuple[list[dict], Counter]:
             counts["over_scaffolding"] += 1
         else:
             counts["over_scaffolding_not_asked"] += 1
+            counts[f"over_scaffolding_skip_{skip_reason(record)}"] += 1
 
     if counts["post_cut_field_missing"]:
         logger.warning(
@@ -405,6 +506,7 @@ def run_entries(entries: list[dict], cfg: dict, batch_id: str | None = None) -> 
         thinking=use_thinking(cfg),
         thinking_budget=cfg.get("thinking_budget", 0),
         reasoning_effort=cfg.get("reasoning_effort", ""),
+        effort=cfg.get("effort", ""),
         existing_batch_id=batch_id,
         on_batch_created=_created,
     )
@@ -481,6 +583,15 @@ def build_record(excerpt_record: dict, raw_entries: dict, cfg: dict) -> dict:
         "split": excerpt_record["split"],
         "model": cfg["model"],
         "thinking": cfg.get("thinking"),
+        # The reasoning-depth knobs the round actually ran with, under the names
+        # the two APIs use (`effort` is Anthropic's, `reasoning_effort` OpenAI's;
+        # a model uses one or neither). Recorded because they are part of how a
+        # label was produced: the same model at a pinned effort and at the API
+        # default can answer a borderline moment differently, and without these
+        # two rounds write identical-looking metadata.
+        "effort": cfg.get("effort") or None,
+        "reasoning_effort": cfg.get("reasoning_effort") or None,
+        "thinking_budget": cfg.get("thinking_budget") or None,
         "prompts": {
             "action_direction": ACTION_DIRECTION_PROMPT,
             "over_scaffolding": OVER_SCAFFOLDING_PROMPT,
@@ -533,6 +644,17 @@ def classify(
     return out, counts
 
 
+def model_dir(out_dir: str, model: str) -> str:
+    """The output directory for one model's predictions.
+
+    Predictions are filed under the model that made them so a comparison run
+    does not overwrite the round before it. Model ids can carry a vendor prefix
+    ("deepseek-ai/DeepSeek-V4-Pro"), which would otherwise nest a directory;
+    the separator is flattened so every model gets exactly one level.
+    """
+    return os.path.join(out_dir, model.replace("/", "_"))
+
+
 def write_split(out_dir: str, stem: str, records: list[dict]) -> str:
     """Write one split's predictions JSONL atomically. Returns the path written."""
     os.makedirs(out_dir, exist_ok=True)
@@ -550,6 +672,22 @@ def write_split(out_dir: str, stem: str, records: list[dict]) -> str:
 # ===========================================================================
 
 
+# Why a moment fell outside the over-scaffolding gate, in report wording.
+_SKIP_LABELS = {
+    "no_scaffolding": "gold says no scaffolding here",
+    "not_appropriate": "scaffolding not called for (gold labels it over-scaffolding by rule)",
+}
+
+
+def _skip_breakdown(counts: Counter) -> list[str]:
+    """Per-reason lines for the moments the over-scaffolding gate excluded."""
+    return [
+        f"      {counts[f'over_scaffolding_skip_{reason}']} {label}"
+        for reason, label in _SKIP_LABELS.items()
+        if counts[f"over_scaffolding_skip_{reason}"]
+    ]
+
+
 def _yes_no_counts(records: list[dict], pass_name: str, field: str) -> str:
     """``yes / no / unparsed`` tally for one predicted field."""
     values = [
@@ -563,7 +701,30 @@ def _yes_no_counts(records: list[dict], pass_name: str, field: str) -> str:
     return f"{yes} / {no} / {bad}"
 
 
-def report(out: dict[str, list[dict]], counts: Counter, dry_run: bool) -> str:
+def _model_line(cfg: dict | None) -> list[str]:
+    """The model the round ran (or would run) against, and its reasoning settings.
+
+    The effort knobs are shown only when set, so a dry run reports the depth the
+    round will actually be submitted at rather than leaving it to be inferred
+    from the config file.
+    """
+    if not cfg:
+        return []
+    knobs = [f"thinking: {cfg.get('thinking')}"]
+    knobs += [
+        f"{name}: {cfg[name]}"
+        for name in ("effort", "reasoning_effort", "thinking_budget")
+        if cfg.get(name)
+    ]
+    return [f"  model: {cfg['model']} ({', '.join(knobs)})", ""]
+
+
+def report(
+    out: dict[str, list[dict]],
+    counts: Counter,
+    dry_run: bool,
+    cfg: dict | None = None,
+) -> str:
     lines = [
         "",
         "DRY RUN -- no API calls made, nothing written"
@@ -571,6 +732,7 @@ def report(out: dict[str, list[dict]], counts: Counter, dry_run: bool) -> str:
         else "Predictions written",
         "",
     ]
+    lines += _model_line(cfg)
 
     if dry_run:
         if counts["no_post_cut_content"]:
@@ -586,6 +748,7 @@ def report(out: dict[str, list[dict]], counts: Counter, dry_run: bool) -> str:
             f"    {'(over-scaffolding not asked)':<28}"
             f"{counts['over_scaffolding_not_asked']:>5}"
         )
+        lines += _skip_breakdown(counts)
         lines.append("")
         return "\n".join(lines)
 
@@ -617,9 +780,9 @@ def report(out: dict[str, list[dict]], counts: Counter, dry_run: bool) -> str:
     asked = counts["over_scaffolding"]
     not_asked = counts["over_scaffolding_not_asked"]
     lines.append(
-        f"  over-scaffolding asked on {asked} moment(s); "
-        f"{not_asked} not asked (no scaffolding in the gold labels)"
+        f"  over-scaffolding asked on {asked} moment(s); {not_asked} not asked"
     )
+    lines += _skip_breakdown(counts)
 
     unparsed = counts["action_direction_unparsed"] + counts["over_scaffolding_unparsed"]
     if unparsed:
@@ -653,11 +816,22 @@ def build_parser() -> argparse.ArgumentParser:
     parser.add_argument("--excerpt-dir", default=DEFAULT_EXCERPT_DIR, metavar="DIR")
     parser.add_argument("--out-dir", default=DEFAULT_OUT_DIR, metavar="DIR")
     parser.add_argument(
+        "--model",
+        default=None,
+        metavar="MODEL",
+        help="Scoring model to classify with, for comparing models on the same "
+        "excerpts. Must be configured under `v2.models` in the config (or on "
+        "the `models` tutor roster), which is where its thinking/effort "
+        "settings come from. Default: the config's v2 model. Predictions land "
+        "in <out-dir>/<model>/.",
+    )
+    parser.add_argument(
         "--splits",
         nargs="+",
         choices=SPLIT_STEMS,
-        default=list(SPLIT_STEMS),
-        help="Which excerpt splits to classify",
+        default=list(DEFAULT_SPLITS),
+        help="Which excerpt splits to classify. Defaults to the iteration "
+        "split alone; pass `test` explicitly to spend the held-out split.",
     )
     parser.add_argument(
         "--limit",
@@ -730,7 +904,7 @@ def _print_prompts(excerpts: dict[str, list[dict]], prefix: str) -> int:
     else:
         print(
             f"\n\n===== {OVER_SCAFFOLDING_PROMPT} =====\n\n"
-            "not asked: the gold labels record no scaffolding at this moment"
+            f"not asked: {_SKIP_LABELS[skip_reason(record)]}"
         )
     return 0
 
@@ -746,14 +920,17 @@ def main(argv: list[str] | None = None) -> int:
     if args.print_moment:
         return _print_prompts(excerpts, args.print_moment)
 
+    # Resolved before the dry run too, so an unknown --model fails there rather
+    # than only once a real round is submitted.
+    cfg = phase_config(model=args.model)
+
     if args.dry_run:
         _, counts = build_entries(
             [record for records in excerpts.values() for record in records]
         )
-        print(report({}, counts, dry_run=True))
+        print(report({}, counts, dry_run=True, cfg=cfg))
         return 0
 
-    cfg = phase_config()
     logger.info(
         "classifying %d moment(s) with model=%s thinking=%s",
         sum(len(records) for records in excerpts.values()),
@@ -763,14 +940,15 @@ def main(argv: list[str] | None = None) -> int:
 
     out, counts = classify(excerpts, cfg, batch_id=args.batch_id)
 
+    out_dir = model_dir(args.out_dir, cfg["model"])
     for stem, records in out.items():
         logger.info(
             "wrote %d prediction(s) to %s",
             len(records),
-            write_split(args.out_dir, stem, records),
+            write_split(out_dir, stem, records),
         )
 
-    print(report(out, counts, dry_run=False))
+    print(report(out, counts, dry_run=False, cfg=cfg))
     return 0
 
 

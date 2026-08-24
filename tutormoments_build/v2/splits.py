@@ -1,12 +1,7 @@
 """Assign v2-annotated transcripts to the `iterate` / `heldout` splits.
 
-Splits are **append-only**. Every assignment ever made is recorded in a JSON
-manifest (default: ``tutormoments_build/v2/splits.json``) that is committed to
-git and treated as the source of truth. Re-running this script never moves a
-transcript that is already in the manifest -- it only assigns transcript ids it
-has not seen before. That is what lets annotation continue over time: a later
-round adds new rows to the ledger instead of redrawing the split, so results
-measured on an earlier heldout set stay comparable.
+Splits are **append-only**. Re-running this script only assigns transcript ids it
+has not seen before, and preserves previous assignments. 
 
 Assignment is deterministic given (seed, manifest, new transcript ids):
 
@@ -21,23 +16,11 @@ Assignment is deterministic given (seed, manifest, new transcript ids):
    ratio on target as rounds accumulate, instead of letting per-round sampling
    noise pile up.
 
-The unit balanced by ``--balance-by`` defaults to ``transcripts``: the split is
-an even division of the annotated transcripts, which keeps the two halves
-comparable as units of tutoring and leaves transcripts annotated as having no
-key moments spread across both. Because transcripts here carry between 1 and 15
-moments, the resulting moment counts are only approximately even -- pass
-``--balance-by moments`` to target those instead, at the cost of an uneven
-transcript count.
-
-Usage::
-
-    # preview without touching the manifest -- always do this first
+Usage:
+    # preview without touching the manifest 
     python -m tutormoments_build.v2.splits --dry-run
 
     # write/extend the manifest
-    python -m tutormoments_build.v2.splits
-
-    # later rounds: same command, only newly annotated transcripts are assigned
     python -m tutormoments_build.v2.splits
 """
 

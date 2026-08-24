@@ -46,13 +46,24 @@ execution: { replay_concurrency: 4 }
 # v2 annotation-round classification (dev-only
 # `python -m tutormoments_build.v2.classify_excerpts`). Runs the
 # tutormoments_build/prompts/v2 prompts over rendered human-human moment
-# excerpts. Pinned to opus-5 with adaptive thinking. Note this is a newer model
+# excerpts. Pinned to opus-5 with adaptive thinking at xhigh effort -- effort is
+# pinned rather than left at the API default so the baseline is effort-matched
+# to the xhigh comparison models below. Note this is a newer model
 # than the opus-4-8 the v1 ground truth was built on, so v2 labels are not
-# directly comparable to v1 ones.
+# directly comparable to v1 ones. `--model <id>` classifies with another scoring
+# model for comparison; its thinking/effort settings are read from `v2.models`
+# below, falling back to the `models` tutor roster above for an id already
+# configured there.
 v2:
   model: claude-opus-5
   poll_interval: 60
   thinking: adaptive
+  effort: xhigh
+  # Comparison scoring models for this round. Kept here rather than on the tutor
+  # roster: these classify moments, they are never replayed as tutors, and
+  # `tutormoments run` draws its candidates from that roster.
+  models:
+    gpt-5.6-sol: { thinking: true, reasoning_effort: xhigh }
 
 # Ground-truth build phase (dev-only `tutormoments dataset build-ground-truth`).
 # opus-4-8 uses adaptive thinking only: the Anthropic client sends {type: adaptive}

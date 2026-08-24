@@ -15,6 +15,13 @@ def test_packaged_default_config_parses_and_has_expected_roster():
         "gpt-5.5-2026-04-23",
         "deepseek-ai/DeepSeek-V4-Pro",
     }
+    # v2 comparison scoring models are configured under the v2 block, not on the
+    # tutor roster: `tutormoments run` must not draw a scorer as a tutor.
+    assert "gpt-5.6-sol" not in cfg["models"]
+    assert cfg["v2"]["models"]["gpt-5.6-sol"] == {
+        "thinking": True,
+        "reasoning_effort": "xhigh",
+    }
     assert cfg["models"]["claude-opus-4-8"] == {"thinking": True, "effort": "xhigh"}
     assert cfg["models"]["claude-sonnet-5"] == {
         "thinking": "adaptive",

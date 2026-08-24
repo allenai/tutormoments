@@ -1,14 +1,9 @@
 """Build iteration/test ground-truth JSONL from doubly annotated v2 moments.
 
-A v2 moment is annotated twice: a *selector* marks it and fills in the rubric,
-then a *reannotator* independently fills in the same rubric and may redraw the
-moment's boundaries or flag it for removal. This script keeps the moments that
-carry both passes, resolves the two (occasionally more) annotators into one
-label set, and writes them to ``data/ground_truth/`` split by the append-only
-assignment in ``splits.json`` -- ``iterate`` -> ``iteration.jsonl``, ``heldout``
--> ``test.jsonl``.
+This script takes doubly-annotated moments, resolves the two annotators into one
+label set, and writes them to ``data/ground_truth/`` split by ``splits.json``
 
-Five booleans are emitted per moment:
+Each moment has five booleans:
 
   situation  scaffolding_appropriate   scaffolding was called for here
              rigor_appropriate         a push for rigor was called for here
@@ -17,32 +12,16 @@ Five booleans are emitted per moment:
              over_scaffolding_present  the tutor scaffolded too much
 
 **Disagreements are resolved by union**: a field is True when *any* annotator
-marked it True. Both annotators are experienced teachers reading the same
-exchange, so a label only one of them saw is treated as a genuine reading of the
-moment rather than as noise to be voted away -- with two annotators there is no
-majority to take, and intersection would systematically under-count. Per-field
-agreement is recorded alongside the label so the disagreement rate stays
-measurable rather than being silently folded in.
+marked it True.
 
-``over_scaffolding_present`` reads ``action.scaffolding_amount ==
-"over_scaffolding"``, which the interface only offers once an annotator has
-marked scaffolding present; union over that field therefore always implies
-``scaffolding_present``.
+If ``scaffolding_present and not scaffolding_appropriate``, it counts as
+over-scaffolding.
 
-It also carries an inferred case: scaffolding delivered where that annotator
-said none was called for (``scaffolding_present and not
-scaffolding_appropriate``) counts as over-scaffolding whatever amount they
-picked, because supporting a student who did not need supporting is
-over-scaffolding by definition. The rule is applied to each annotator's own
-payload before the union, so it reads one teacher's judgment of the moment
-rather than mixing two. It overrides rather than fills a gap -- the amount is
-never left unset once scaffolding is marked present -- and where it changes the
-outcome the record is tagged ``over_scaffolding_inferred``, so a label that
-rests only on the rule stays separable from one an annotator declared outright.
+Project staff (``EXCLUDED_ANNOTATORS``) are filtered out before anything is
+resolved. 
 
-Moments the reannotator flagged ``meta.throw_out`` are dropped (they are
-mis-selected moments, not hard cases) -- pass ``--keep-thrown-out`` to retain
-them. Where the reannotator redrew boundaries, the redrawn values are emitted
+Moments the reannotator flagged ``meta.throw_out`` are dropped. 
+Where the reannotator redrew boundaries, the redrawn values are emitted
 and the originals preserved under ``original_boundaries``.
 
 Usage::
@@ -68,6 +47,15 @@ from tutormoments_build.v2.splits import (
 logger = logging.getLogger("tutormoments_build.v2.build_ground_truth")
 
 DEFAULT_OUT_DIR = "data/ground_truth"
+
+# Project staff, excluded from the ground truth. They annotate to pilot the
+# rubric and the interface, not as expert raters, so their passes must not reach
+# the labels -- a moment left with fewer than two annotators after they are
+# removed falls out through the usual doubly-annotated requirement. Matched on
+# the first name, since that is what the export carries; the build logs every
+# name it drops, so a teacher who happens to share one is visible rather than
+# silently discarded.
+EXCLUDED_ANNOTATORS = frozenset({"lucy", "rebecca", "albert", "kajal"})
 DEFAULT_ANNOTATOR_LABELS = "data/v2_annotations/annotator_labels.json"
 
 # split name in splits.json -> output file stem
@@ -83,6 +71,13 @@ BOOLEAN_FIELDS = (
 )
 LABEL_FIELDS = tuple(name for name, _, _ in BOOLEAN_FIELDS) + (
     "over_scaffolding_present",
+)
+
+# What is unioned across annotators: the four they answer directly, plus their
+# literal over-scaffolding choice. over_scaffolding_present is not here -- it is
+# derived from these after the union, not voted on.
+RESOLVED_FIELDS = tuple(name for name, _, _ in BOOLEAN_FIELDS) + (
+    "over_scaffolding_declared",
 )
 
 OVER_SCAFFOLDING = "over_scaffolding"
@@ -103,6 +98,23 @@ BOUNDARY_FIELDS = (
 # ===========================================================================
 
 
+def normalise_name(name: str) -> str:
+    """Annotator name in the form the label map and the exclusion list are keyed on."""
+    return (name or "").strip().lower().replace(" ", "-")
+
+
+def is_excluded(annotation: dict) -> bool:
+    """Whether this annotation is project staff's (see ``EXCLUDED_ANNOTATORS``).
+
+    Matches the whole normalised name and its first part, so "Lucy" and
+    "Lucy Li" are both caught.
+    """
+    name = normalise_name(annotation.get("annotator_name", ""))
+    return bool(name) and (
+        name in EXCLUDED_ANNOTATORS or name.split("-")[0] in EXCLUDED_ANNOTATORS
+    )
+
+
 def load_annotator_labels(path: str) -> dict[str, str]:
     """Return {normalised annotator name: de-identified label}, e.g. {"paul": "A02"}."""
     if not os.path.exists(path):
@@ -121,9 +133,9 @@ def annotator_label(annotation: dict, labels: dict[str, str]) -> str:
     label map falls back to their annotator_id, which is already a de-identified
     UUID and is stable across runs.
     """
-    name = annotation.get("annotator_name", "")
     return (
-        labels.get(name.strip().lower().replace(" ", "-")) or annotation["annotator_id"]
+        labels.get(normalise_name(annotation.get("annotator_name", "")))
+        or annotation["annotator_id"]
     )
 
 
@@ -133,24 +145,21 @@ def annotator_label(annotation: dict, labels: dict[str, str]) -> str:
 
 
 def _annotator_labels_for(annotation: dict) -> dict[str, bool]:
-    """Pull one annotator's five booleans out of their payload.
+    """Pull one annotator's raw booleans out of their payload.
 
-    ``over_scaffolding_declared`` is the annotator's literal amount choice;
-    ``over_scaffolding_present`` adds the inferred case (scaffolding where this
-    annotator said none was called for). Both are returned so a label resting
-    only on the inference stays distinguishable downstream.
+    These are only what the annotator actually answered:
+    ``over_scaffolding_declared`` is their literal amount choice. The inferred
+    case is not applied here -- it is derived from the *resolved* labels, in
+    ``resolve_labels``.
     """
     payload = annotation["payload"]
     out = {}
     for name, section, key in BOOLEAN_FIELDS:
         out[name] = bool((payload.get(section) or {}).get(key))
 
-    declared = (payload.get("action") or {}).get(
+    out["over_scaffolding_declared"] = (payload.get("action") or {}).get(
         "scaffolding_amount"
     ) == OVER_SCAFFOLDING
-    inferred = out["scaffolding_present"] and not out["scaffolding_appropriate"]
-    out["over_scaffolding_declared"] = declared
-    out["over_scaffolding_present"] = declared or inferred
     return out
 
 
@@ -164,18 +173,36 @@ def resolve_labels(
     over_scaffolding_inferred marks a True over-scaffolding label that no
     annotator declared outright -- it rests entirely on the inference rule, and
     would be False without it.
+
+    **The inference rule is applied after the union, not before.** It reads the
+    resolved ``scaffolding_present``/``scaffolding_appropriate``, so it fires
+    only where the annotators *agreed* no scaffolding was called for. Applied
+    per annotator instead, it fired on one annotator's "not appropriate" even
+    where the other said the scaffolding was called for -- which the union has
+    already resolved to appropriate. That left moments labelled over-scaffolding
+    by a rule whose premise the resolved labels contradict. Every label the rule
+    still infers is one both annotators' situation judgments support; nothing it
+    used to infer from an agreed "not appropriate" is lost.
+
+    ``agreement["over_scaffolding_present"]`` is agreement on the declared
+    amount, which is the only over-scaffolding question annotators answer -- the
+    inferred case is derived, so there is no per-annotator value to compare.
     """
     per_annotator = [_annotator_labels_for(a) for a in annotations]
     labels, agreement = {}, {}
-    for field in LABEL_FIELDS:
+    for field in RESOLVED_FIELDS:
         values = [a[field] for a in per_annotator]
         labels[field] = any(values)
         agreement[field] = len(set(values)) == 1
 
-    inferred = labels["over_scaffolding_present"] and not any(
-        a["over_scaffolding_declared"] for a in per_annotator
+    declared = labels.pop("over_scaffolding_declared")
+    agreement["over_scaffolding_present"] = agreement.pop("over_scaffolding_declared")
+    inferred_case = (
+        labels["scaffolding_present"] and not labels["scaffolding_appropriate"]
     )
-    return labels, agreement, inferred
+    labels["over_scaffolding_present"] = declared or inferred_case
+
+    return labels, agreement, labels["over_scaffolding_present"] and not declared
 
 
 # ===========================================================================
@@ -273,6 +300,7 @@ def build(
     out: dict[str, list[dict]] = {stem: [] for stem in SPLIT_FILES.values()}
     dropped: Counter = Counter()
     unmapped: set[str] = set()
+    excluded_names: set[str] = set()
 
     with open(annotations_path, encoding="utf-8") as fh:
         for line in fh:
@@ -285,6 +313,13 @@ def build(
                 continue
 
             annotations = row["annotations"]
+            staff = [a for a in annotations if is_excluded(a)]
+            if staff:
+                excluded_names.update(a.get("annotator_name", "") for a in staff)
+                dropped["staff_annotations_removed"] += len(staff)
+                annotations = [a for a in annotations if not is_excluded(a)]
+                row = {**row, "annotations": annotations}
+
             if _reannotator(annotations) is None or len(annotations) < 2:
                 dropped["not_doubly_annotated"] += 1
                 continue
@@ -306,10 +341,17 @@ def build(
 
             for annotation in annotations:
                 name = annotation.get("annotator_name", "")
-                if name.strip().lower().replace(" ", "-") not in labels_map:
+                if normalise_name(name) not in labels_map:
                     unmapped.add(name)
 
             out[record["split"]].append(record)
+
+    if excluded_names:
+        logger.info(
+            "removed %d staff annotation(s) from %s",
+            dropped["staff_annotations_removed"],
+            ", ".join(sorted(excluded_names)),
+        )
 
     if unmapped:
         logger.warning(

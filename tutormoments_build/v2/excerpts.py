@@ -1,48 +1,22 @@
 """Render transcript excerpts for the v2 ground-truth moments.
 
-A ground-truth record (``data/ground_truth/{iteration,test}.jsonl``) says *where*
-a moment sits; the transcripts export
-(``data/v2_annotations/source/*_v2_transcripts.jsonl``) holds *what was said and
-done* there. This module joins the two and writes the text an annotator or a
-model would read: a lead-up window, then the moment itself, and nothing after it.
+This script combines ``data/ground_truth/{iteration,test}.jsonl`` with transcripts in
+``data/v2_annotations/source/*_v2_transcripts.jsonl``.
+The output is used to format transcript excerpts for action classification.
 
-**Excerpts are cut on ``*_index``, not ``*_turn``.** The two numberings in a
-ground-truth record are not interchangeable. ``start_turn``/``end_turn`` count
-dialogue only; ``start_index``/``end_index`` are positions in the rendered row
-list the annotator actually selected in -- dialogue *and* enrichments (screen
-interactions, screen updates, pauses, problem changes) interleaved. The index
-span is what the annotator drew; the turn span is a lossy projection of it, and
-for 7 of the 474 released moments it is lossy enough to be wrong: those moments
-lie entirely inside a silent stretch of screen activity, so all three of their
-turn numbers collapse onto the one adjacent dialogue turn while their indices
-carry the real extent. Cutting those on turns yields a single unrelated
-utterance in place of the moment.
+**Excerpts are cut on ``*_index``, not ``*_turn``.**
+- ``start_turn``/``end_turn`` count dialogue only
+- ``start_index``/``end_index`` are positions in the rendered row
 
-**Enrichments are content here, not decoration.** 384 of the 474 moments contain
-at least one enrichment row inside their span, and the moments above contain
-nothing else. They are rendered in place, keeping the ``[SCREEN INTERACTION]``
--style tag their text already carries.
+The lead-up window is measured in *dialogue turns* (``context_turns``).
+The window is measured back from the cut point, and from nothing else: it may
+reach back past the moment's start, and on a long moment it may open *inside*
+the moment, after ``start_index``. Every excerpt at a given width therefore
+carries the same amount of lead-up, however the moment was drawn.
 
-The lead-up window is measured in *dialogue turns* (``context_turns``), not
-rows: it reaches back to the first row of the Nth preceding dialogue turn, so
-every enrichment interleaved with those turns comes along. That keeps the window
-meaningful where screen activity is dense -- but it also means a small
-``context_turns`` can pull in many rows, so ``max_context_rows`` can cap it.
+The excerpt stops at the moment's last row.
 
-**The window is measured back from the cut point, not the moment start.** The
-cut is the decision point the prompts ask about, so anchoring there gives every
-moment the same amount of conversation before it, whatever the length of the
-moment's own pre-cut run. Anchoring on the moment start instead would hand a
-long-lead-in moment more pre-cut context than a short one purely as an artifact
-of where the annotator opened the span. The window never opens past the moment
-start: a moment whose pre-cut portion already exceeds ``context_turns`` is still
-rendered whole, just with no extra lead-up.
-
-Nothing after ``end_index`` is ever emitted: the excerpt stops at the moment's
-last row, by design.
-
-Usage::
-
+Usage:
     python -m tutormoments_build.v2.excerpts --dry-run
     python -m tutormoments_build.v2.excerpts --context-turns 8
     python -m tutormoments_build.v2.excerpts --print 02e89625-9d6b-5e00-b40d-5d38a6adb2b3
@@ -208,9 +182,15 @@ def render_excerpt(
     The window runs from the lead-up through ``end_index`` and stops there --
     no trailing context, because for this benchmark the moment's last row is
     where the transcript ends. Its opening is measured back from ``cut_index``
-    (see the module docstring), clamped so it never begins past ``start_index``. Elided lead-up is not announced either: the
-    excerpt simply opens where the window opens. The returned first-row index
-    still records how much came before, for the excerpt record.
+    (see the module docstring) and from nothing else: ``context_turns`` turns
+    before the cut is the whole rule, whether that reaches back past
+    ``start_index`` or opens inside the moment. The teacher-drawn start is an
+    annotation boundary, not a unit of context -- holding the window open to it
+    would hand a long moment more lead-up than a short one at the same width,
+    which is exactly the confound the cut-anchored window exists to remove.
+    Elided lead-up is not announced either: the excerpt simply opens where the
+    window opens. The returned first-row index still records how much came
+    before, for the excerpt record.
     """
     start_row = boundaries["start_index"]
     end_row = boundaries["end_index"]
@@ -221,10 +201,8 @@ def render_excerpt(
             f"{len(rows)} row(s)"
         )
 
-    # Anchored on the cut, then clamped so it never opens past the moment start.
-    first = min(
-        context_start(rows, cut_row, context_turns, max_context_rows), start_row
-    )
+    # Anchored on the cut alone. May land after start_row, inside the moment.
+    first = context_start(rows, cut_row, context_turns, max_context_rows)
 
     lines = []
     for index in range(first, end_row + 1):
@@ -271,7 +249,15 @@ def build_record(
             "excerpt": text,
             "context_turns": width,
             "context_start_index": first,
-            "context_rows": moment["start_index"] - first,
+            # Rows rendered before the cut -- the lead-up as the prompt sees it.
+            # Measured from the cut, not the moment start, because the window is
+            # the cut's: against start_index this count would go negative on a
+            # window that opens inside the moment.
+            "context_rows": moment["cut_index"] - first,
+            # Whether the width was narrower than the moment's own pre-cut run.
+            # Recorded per width so a later round can tell how much of the
+            # annotated moment a given prompt actually saw.
+            "opens_inside_moment": first > moment["start_index"],
         }
     span = rows[moment["start_index"] : moment["end_index"] + 1]
     enrichments = sum(1 for row in span if row["turn_number"] is None)
@@ -410,6 +396,28 @@ def write_split(out_dir: str, stem: str, records: list[dict]) -> str:
 # ===========================================================================
 
 
+def _inside_moment_lines(out: dict[str, list[dict]], widths: list[int]) -> list[str]:
+    """How often each width opened inside the moment rather than before it.
+
+    Worth surfacing per run: it is the share of moments where the prompt saw
+    less than the annotator drew, and it moves with the width, so a width that
+    lands inside nearly every moment is a signal the window is too narrow to
+    judge the question being asked.
+    """
+    records = [r for records in out.values() for r in records]
+    if not records:
+        return []
+    lines = []
+    for width in widths:
+        inside = sum(
+            1 for r in records if r["excerpts"][str(width)]["opens_inside_moment"]
+        )
+        lines.append(
+            f"    @{width:<4}{inside:>5} of {len(records)} ({inside / len(records):.0%})"
+        )
+    return ["", "  windows opening inside the moment:", *lines] if lines else []
+
+
 def report(out: dict[str, list[dict]], dropped: Counter, dry_run: bool) -> str:
     lines = [
         "",
@@ -447,7 +455,12 @@ def report(out: dict[str, list[dict]], dropped: Counter, dry_run: bool) -> str:
         )
 
     lines.append("")
-    lines.append("  (row counts are means per moment; lead-up @N is the N-turn window)")
+    lines.append(
+        "  (row counts are means per moment; lead-up @N is the N-turn window, "
+        "counted back from the cut)"
+    )
+
+    lines += _inside_moment_lines(out, widths)
 
     if dropped:
         lines += ["", "  moments not emitted:"]
@@ -481,10 +494,11 @@ def build_parser() -> argparse.ArgumentParser:
         default=list(DEFAULT_CONTEXT_WIDTHS),
         metavar="N",
         help="Dialogue turns of lead-up before the CUT POINT (0 for none). "
-        "Enrichments interleaved with those turns are included. The window "
-        "never opens past the moment start, so a moment with a long pre-cut "
-        "run is still rendered whole. Pass several widths to render an excerpt "
-        "at each; consumers pick the one their prompt calls for.",
+        "Enrichments interleaved with those turns are included. The window is "
+        "measured from the cut alone: on a moment with a long pre-cut run it "
+        "opens inside the moment, so every excerpt at a width carries the same "
+        "lead-up. Pass several widths to render an excerpt at each; consumers "
+        "pick the one their prompt calls for.",
     )
     parser.add_argument(
         "--max-context-rows",

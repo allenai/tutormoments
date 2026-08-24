@@ -1,13 +1,17 @@
 """Tests for the v2 excerpt classification round."""
 
 import json
+import os
+from collections import Counter
 
 import pytest
 
 from tutormoments_build.v2 import classify_excerpts as C
 
 
-def _excerpt(moment_id, *, scaffolding_present, split="iteration"):
+def _excerpt(
+    moment_id, *, scaffolding_present, scaffolding_appropriate=True, split="iteration"
+):
     return {
         "moment_id": moment_id,
         "transcript_id": f"t-{moment_id}",
@@ -32,7 +36,7 @@ def _excerpt(moment_id, *, scaffolding_present, split="iteration"):
             },
         },
         "labels": {
-            "scaffolding_appropriate": True,
+            "scaffolding_appropriate": scaffolding_appropriate,
             "rigor_appropriate": False,
             "scaffolding_present": scaffolding_present,
             "rigor_present": False,
@@ -43,6 +47,9 @@ def _excerpt(moment_id, *, scaffolding_present, split="iteration"):
 
 SCAFFOLDED = _excerpt("aaa", scaffolding_present=True)
 UNSCAFFOLDED = _excerpt("bbb", scaffolding_present=False)
+# Scaffolding delivered where none was called for: the ground truth labels this
+# over-scaffolding by rule, so the prompt is not asked about it either.
+UNCALLED_FOR = _excerpt("ccc", scaffolding_present=True, scaffolding_appropriate=False)
 
 
 # ===========================================================================
@@ -72,23 +79,31 @@ def test_over_scaffolding_prompt_carries_the_excerpt():
 # ===========================================================================
 
 
-def test_over_scaffolding_gated_on_the_gold_scaffolding_label():
+def test_over_scaffolding_needs_scaffolding_both_present_and_appropriate():
     assert C.wants_over_scaffolding(SCAFFOLDED) is True
     assert C.wants_over_scaffolding(UNSCAFFOLDED) is False
+    assert C.wants_over_scaffolding(UNCALLED_FOR) is False
 
 
 def test_missing_labels_do_not_trigger_the_over_scaffolding_pass():
     assert C.wants_over_scaffolding({"moment_id": "x"}) is False
 
 
-def test_build_entries_asks_action_of_all_and_over_scaffolding_of_scaffolded_only():
-    entries, counts = C.build_entries([SCAFFOLDED, UNSCAFFOLDED])
+def test_skip_reason_separates_the_two_halves_of_the_premise():
+    assert C.skip_reason(UNSCAFFOLDED) == "no_scaffolding"
+    assert C.skip_reason(UNCALLED_FOR) == "not_appropriate"
+
+
+def test_build_entries_asks_action_of_all_and_over_scaffolding_of_gated_only():
+    entries, counts = C.build_entries([SCAFFOLDED, UNSCAFFOLDED, UNCALLED_FOR])
     keys = {entry["key"] for entry in entries}
 
-    assert keys == {"action__aaa", "action__bbb", "overscaffold__aaa"}
-    assert counts["action_direction"] == 2
+    assert keys == {"action__aaa", "action__bbb", "action__ccc", "overscaffold__aaa"}
+    assert counts["action_direction"] == 3
     assert counts["over_scaffolding"] == 1
-    assert counts["over_scaffolding_not_asked"] == 1
+    assert counts["over_scaffolding_not_asked"] == 2
+    assert counts["over_scaffolding_skip_no_scaffolding"] == 1
+    assert counts["over_scaffolding_skip_not_appropriate"] == 1
 
 
 def test_entry_keys_split_back_on_the_first_separator():
@@ -243,6 +258,15 @@ def test_ungated_moment_gets_null_over_scaffolding_not_false():
     assert record["usage"]["total_tokens"] == 10
 
 
+def test_scaffolding_where_none_was_called_for_is_not_asked_either():
+    """The ground truth labels it over-scaffolding by rule, so the model is not
+    scored on an answer that was fixed before it saw the text."""
+    record = C.build_record(UNCALLED_FOR, RAW, CFG)
+
+    assert record["over_scaffolding"] is None
+    assert record["over_scaffolding_asked"] is False
+
+
 def test_build_record_keeps_the_raw_response():
     record = C.build_record(SCAFFOLDED, RAW, CFG)
 
@@ -296,6 +320,37 @@ def test_classify_counts_unparsed_responses(monkeypatch):
     assert counts["over_scaffolding_unparsed"] == 1
 
 
+def test_run_entries_forwards_the_models_generation_knobs(monkeypatch):
+    """thinking/effort/reasoning_effort have to reach the batch, or a comparison
+    model runs on the wrong settings while the record claims otherwise."""
+    import tutormoments.client as client
+
+    seen = {}
+
+    monkeypatch.setattr(
+        client, "ModelClient", lambda model: seen.setdefault("model", model)
+    )
+    monkeypatch.setattr(
+        client, "run_batch", lambda c, entries, **kwargs: seen.update(kwargs) or {}
+    )
+
+    C.run_entries(
+        [],
+        {
+            "model": "gpt-5.5-2026-04-23",
+            "thinking": True,
+            "reasoning_effort": "high",
+            "poll_interval": 30,
+        },
+    )
+
+    assert seen["model"] == "gpt-5.5-2026-04-23"
+    assert seen["thinking"] is True
+    assert seen["reasoning_effort"] == "high"
+    assert seen["effort"] == ""
+    assert seen["poll_interval"] == 30
+
+
 # ===========================================================================
 # Config
 # ===========================================================================
@@ -320,6 +375,123 @@ def test_phase_config_reads_the_v2_block():
 
     assert cfg["model"] == "claude-opus-5"
     assert cfg["thinking"] == "adaptive"
+    # Pinned, not left at the API default, so the baseline is effort-matched to
+    # the xhigh comparison models and reproducible across rounds.
+    assert cfg["effort"] == "xhigh"
+
+
+def test_the_fallback_spec_matches_the_shipped_v2_block():
+    """The fallback stands in for the v2 block when a stripped custom config has
+    none. Drifting from the shipped block would run the baseline at a different
+    reasoning depth than the default config does, silently."""
+    shipped = C.phase_config()
+
+    for key, value in C.FALLBACK_SPEC.items():
+        assert shipped[key] == value
+
+
+def test_model_override_takes_its_knobs_from_the_roster():
+    """A comparison model is configured in the config file, not on the CLI."""
+    cfg = C.phase_config(model="claude-sonnet-5")
+
+    assert cfg["model"] == "claude-sonnet-5"
+    assert cfg["thinking"] == "adaptive"
+    assert cfg["effort"] == "xhigh"
+    assert cfg["poll_interval"] == 60  # a round property, not a model one
+
+
+def test_a_rostered_model_without_thinking_does_not_inherit_adaptive():
+    """Otherwise a model configured thinking-off would silently run with the
+    v2 block's adaptive thinking, and the record would name the wrong setting."""
+    cfg = C.phase_config(model="deepseek-ai/DeepSeek-V4-Pro")
+
+    assert cfg["thinking"] is False
+    assert C.use_thinking(cfg) is False
+
+
+def test_the_v2_model_needs_no_roster_entry():
+    """It is fully specified by the v2 block; naming it explicitly must work
+    even though it is not on the tutor roster."""
+    assert C.phase_config(model="claude-opus-5")["model"] == "claude-opus-5"
+
+
+def test_the_openai_comparison_model_resolves_and_can_be_batched():
+    """gpt-5.6-sol is one of the cross-vendor comparison models for this round.
+    Its `v2.models` entry has to resolve to an OpenAI reasoning config, and
+    OpenAI has to be a provider run_batch supports -- either failure surfaces
+    only after a whole round has been built and submitted."""
+    from tutormoments.client import infer_provider
+
+    cfg = C.phase_config(model="gpt-5.6-sol")
+
+    assert cfg["model"] == "gpt-5.6-sol"
+    assert C.use_thinking(cfg) is True
+    assert cfg["reasoning_effort"] == "xhigh"
+    # `effort` is the Anthropic knob; sending it to OpenAI would be rejected.
+    assert cfg.get("effort", "") == ""
+    assert infer_provider(cfg["model"]) == "openai"
+
+
+def test_the_record_names_the_reasoning_depth_the_round_ran_at():
+    """Without these, an effort-pinned round and one at the API default write
+    identical metadata, and a prediction file cannot say how its labels were
+    made."""
+    record = C.build_record(
+        SCAFFOLDED,
+        RAW,
+        {"model": "gpt-5.6-sol", "thinking": True, "reasoning_effort": "xhigh"},
+    )
+
+    assert record["reasoning_effort"] == "xhigh"
+    # The Anthropic knob was not in play, and must not read as if it were.
+    assert record["effort"] is None
+    assert record["thinking_budget"] is None
+
+
+def test_the_report_names_the_effort_it_will_submit_at(capsys):
+    cfg = {"model": "gpt-5.6-sol", "thinking": True, "reasoning_effort": "xhigh"}
+
+    out = C.report({}, Counter(), dry_run=True, cfg=cfg)
+
+    assert "model: gpt-5.6-sol (thinking: True, reasoning_effort: xhigh)" in out
+
+
+def test_the_scoped_model_table_does_not_leak_into_the_spec():
+    """`v2.models` is a lookup table, not a setting of the round. Left in, it
+    would be recorded in every prediction record and passed to the batch."""
+    assert "models" not in C.phase_config()
+    assert "models" not in C.phase_config(model="gpt-5.6-sol")
+
+
+def test_a_scoped_model_shadows_nothing_on_the_tutor_roster():
+    """Both lookups have to keep working: the roster is where an id already
+    configured for `tutormoments run` gets its knobs from."""
+    cfg = C.phase_config(model="claude-sonnet-5")
+
+    assert cfg["effort"] == "xhigh"
+    assert cfg["thinking"] == "adaptive"
+
+
+def test_model_knobs_rejects_an_unroutable_scoped_id():
+    """A `v2.models` entry skips resolve_model, so provider inference is the only
+    thing standing between a typo'd id and a failed batch submission."""
+    with pytest.raises(ValueError, match="Cannot infer provider"):
+        C.model_knobs("gtp-5.6-sol", {"gtp-5.6-sol": {"thinking": True}})
+
+
+def test_an_unknown_model_error_names_both_config_places():
+    """The id is missing from two tables; the error has to say so, or the fix
+    looks like it belongs on the tutor roster."""
+    with pytest.raises(ValueError, match="not in roster") as exc:
+        C.phase_config(model="gpt-5.6-sol-typo")
+
+    assert "v2.models" in str(exc.value)
+    assert "gpt-5.6-sol" in str(exc.value)
+
+
+def test_an_unrostered_model_is_refused_with_the_roster_listed():
+    with pytest.raises(ValueError, match="not in roster"):
+        C.phase_config(model="claude-opus-5-typo")
 
 
 # ===========================================================================
@@ -342,6 +514,13 @@ def test_load_excerpts_raises_when_nothing_is_there(tmp_path):
         C.load_excerpts(str(tmp_path))
 
 
+def test_model_dir_flattens_a_vendor_prefixed_id():
+    """A vendor-prefixed id must not nest two directories."""
+    assert C.model_dir("out", "deepseek-ai/DeepSeek-V4-Pro") == os.path.join(
+        "out", "deepseek-ai_DeepSeek-V4-Pro"
+    )
+
+
 def test_write_split_round_trips(tmp_path):
     record = C.build_record(SCAFFOLDED, RAW, CFG)
     path = C.write_split(str(tmp_path), "iteration", [record])
@@ -361,6 +540,31 @@ def _write_excerpts(tmp_path):
         encoding="utf-8",
     )
     return str(tmp_path)
+
+
+def test_the_test_split_is_held_out_unless_asked_for_by_name(tmp_path, monkeypatch):
+    """The default run must not spend the held-out split on prompt iteration."""
+    excerpt_dir = _write_excerpts(tmp_path)
+    (tmp_path / "test.jsonl").write_text(
+        json.dumps(dict(UNSCAFFOLDED, moment_id="ccc", split="test")) + "\n",
+        encoding="utf-8",
+    )
+    monkeypatch.setattr(C, "run_entries", lambda entries, cfg, batch_id=None: RAW)
+    out_dir = tmp_path / "out"
+
+    assert C.main(["--excerpt-dir", excerpt_dir, "--out-dir", str(out_dir)]) == 0
+    assert [p.name for p in sorted(out_dir.glob("*/*.jsonl"))] == ["iteration.jsonl"]
+
+    assert (
+        C.main(
+            ["--excerpt-dir", excerpt_dir, "--out-dir", str(out_dir), "--splits", "test"]
+        )
+        == 0
+    )
+    assert [p.name for p in sorted(out_dir.glob("*/*.jsonl"))] == [
+        "iteration.jsonl",
+        "test.jsonl",
+    ]
 
 
 def test_dry_run_makes_no_api_calls_and_writes_nothing(tmp_path, monkeypatch, capsys):
@@ -410,6 +614,116 @@ def test_limit_truncates_each_split(tmp_path, monkeypatch):
     )
 
     assert seen["keys"] == ["action__aaa", "overscaffold__aaa"]
+
+
+def test_predictions_are_filed_under_the_model_that_made_them(tmp_path, monkeypatch):
+    """A second model must not overwrite the first round's predictions."""
+    monkeypatch.setattr(C, "run_entries", lambda entries, cfg, batch_id=None: RAW)
+    out_dir = tmp_path / "out"
+
+    code = C.main(
+        [
+            "--excerpt-dir",
+            _write_excerpts(tmp_path),
+            "--out-dir",
+            str(out_dir),
+            "--splits",
+            "iteration",
+            "--model",
+            "claude-sonnet-5",
+        ]
+    )
+
+    assert code == 0
+    path = out_dir / "claude-sonnet-5" / "iteration.jsonl"
+    assert path.exists()
+    record = json.loads(path.read_text(encoding="utf-8").splitlines()[0])
+    assert record["model"] == "claude-sonnet-5"
+
+
+def test_the_default_model_gets_its_own_directory_too(tmp_path, monkeypatch):
+    monkeypatch.setattr(C, "run_entries", lambda entries, cfg, batch_id=None: RAW)
+    out_dir = tmp_path / "out"
+
+    C.main(
+        [
+            "--excerpt-dir",
+            _write_excerpts(tmp_path),
+            "--out-dir",
+            str(out_dir),
+            "--splits",
+            "iteration",
+        ]
+    )
+
+    assert (out_dir / "claude-opus-5" / "iteration.jsonl").exists()
+
+
+def test_the_chosen_model_reaches_the_batch(tmp_path, monkeypatch):
+    seen = {}
+
+    def _capture(entries, cfg, batch_id=None):
+        seen["cfg"] = cfg
+        return RAW
+
+    monkeypatch.setattr(C, "run_entries", _capture)
+
+    C.main(
+        [
+            "--excerpt-dir",
+            _write_excerpts(tmp_path),
+            "--out-dir",
+            str(tmp_path / "out"),
+            "--splits",
+            "iteration",
+            "--model",
+            "claude-sonnet-5",
+        ]
+    )
+
+    assert seen["cfg"]["model"] == "claude-sonnet-5"
+    assert seen["cfg"]["effort"] == "xhigh"
+
+
+def test_an_unknown_model_fails_on_the_dry_run(tmp_path, monkeypatch):
+    """The typo should surface before a real round is ever submitted."""
+
+    def _boom(*args, **kwargs):
+        raise AssertionError("--dry-run must not call the API")
+
+    monkeypatch.setattr(C, "run_entries", _boom)
+
+    with pytest.raises(ValueError, match="not in roster"):
+        C.main(
+            [
+                "--excerpt-dir",
+                _write_excerpts(tmp_path),
+                "--out-dir",
+                str(tmp_path / "out"),
+                "--dry-run",
+                "--model",
+                "claude-sonnet-5-typo",
+            ]
+        )
+
+
+def test_the_report_names_the_model_that_ran(tmp_path, monkeypatch, capsys):
+    monkeypatch.setattr(C, "run_entries", lambda entries, cfg, batch_id=None: RAW)
+
+    C.main(
+        [
+            "--excerpt-dir",
+            _write_excerpts(tmp_path),
+            "--out-dir",
+            str(tmp_path / "out"),
+            "--splits",
+            "iteration",
+            "--model",
+            "claude-sonnet-5",
+        ]
+    )
+
+    assert "model: claude-sonnet-5" in capsys.readouterr().out
 
 
 def test_print_shows_both_prompts_for_a_scaffolded_moment(tmp_path, capsys):
@@ -539,6 +853,19 @@ def test_report_names_the_skipped_moments(monkeypatch, capsys):
     out, counts = C.classify({"iteration": [SCAFFOLDED, EMPTY_POST_CUT]}, CFG)
 
     assert "1 moment(s) not classified" in C.report(out, counts, dry_run=False)
+
+
+def test_report_breaks_the_over_scaffolding_skips_down_by_reason(monkeypatch, capsys):
+    monkeypatch.setattr(C, "run_entries", lambda entries, cfg, batch_id=None: RAW)
+
+    out, counts = C.classify(
+        {"iteration": [SCAFFOLDED, UNSCAFFOLDED, UNCALLED_FOR]}, CFG
+    )
+    text = C.report(out, counts, dry_run=False)
+
+    assert "2 not asked" in text
+    assert "1 gold says no scaffolding here" in text
+    assert "1 scaffolding not called for" in text
 
 
 def test_missing_field_warns_with_the_rebuild_command(caplog):

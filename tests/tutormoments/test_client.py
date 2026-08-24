@@ -689,6 +689,60 @@ def test_run_batch_openai_parses_results(monkeypatch):
     assert out["kA"]["usage"]["output_tokens"] == 3
 
 
+def test_run_batch_openai_submits_the_reasoning_and_json_knobs(monkeypatch):
+    """The request body is the only place a reasoning model's effort is set, so
+    a dropped reasoning_effort would run the round on the API default and the
+    prediction record would name a setting the model never used. json_mode has
+    to reach the body too: the v2 prompts are parsed as JSON objects."""
+    monkeypatch.setenv("OPENAI_API_KEY", "sk-test")
+    submitted = []
+    with patch("openai.OpenAI") as MockOpenAI, patch("tutormoments.client.time.sleep"):
+        client_obj = MagicMock()
+        uploaded = MagicMock()
+        uploaded.id = "file-1"
+
+        # The JSONL is read here rather than off the path: run_batch unlinks the
+        # temp file before returning.
+        def _capture(file, purpose):
+            submitted.extend(
+                json.loads(line)
+                for line in file.read().decode("utf-8").strip().split("\n")
+            )
+            return uploaded
+
+        client_obj.files.create.side_effect = _capture
+        batch = MagicMock()
+        batch.id = "ob1"
+        batch.status = "completed"
+        batch.output_file_id = "out-1"
+        client_obj.batches.create.return_value = batch
+        client_obj.batches.retrieve.return_value = batch
+        content_obj = MagicMock()
+        content_obj.content = b""
+        client_obj.files.content.return_value = content_obj
+        MockOpenAI.return_value = client_obj
+
+        c = ModelClient("gpt-5.6-sol")
+        run_batch(
+            c,
+            [build_batch_entry("kA", "pA", json_mode=True)],
+            json_mode=True,
+            poll_interval=0,
+            thinking=True,
+            reasoning_effort="high",
+        )
+
+    assert len(submitted) == 1
+    line = submitted[0]
+    assert line["custom_id"] == "kA"
+    assert line["url"] == "/v1/chat/completions"
+    body = line["body"]
+    assert body["model"] == "gpt-5.6-sol"
+    assert body["reasoning_effort"] == "high"
+    assert body["response_format"] == {"type": "json_object"}
+    assert body["max_completion_tokens"] > 0
+
+
 def test_run_batch_gemini_parses_results(monkeypatch):
     monkeypatch.setenv("GEMINI_API_KEY", "key-test")
     with (
