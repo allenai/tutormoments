@@ -14,12 +14,15 @@ updates:
         applies-to: security-updates
         patterns: ["*"]
 
-  # Python dependencies: group minor/patch bumps into one PR. MAJOR version
-  # bumps are intentionally left ungrouped so each lands as its own PR and gets
-  # isolated review -- a major SDK bump (e.g. anthropic) can change model/batch
-  # behavior, which per AGENTS.md must not change without deliberate review.
-  # Security fixes are grouped separately so CVE patches arrive as one batch.
-  - package-ecosystem: "pip"
+  # Python dependencies: the "uv" ecosystem manages uv.lock, where all our
+  # pinning actually lives -- the old "pip" config only saw pyproject.toml,
+  # whose deps are deliberately unpinned, so it never found anything to bump.
+  # Group minor/patch bumps into one PR. MAJOR version bumps are intentionally
+  # left ungrouped so each lands as its own PR and gets isolated review -- a
+  # major SDK bump (e.g. anthropic) can change model/batch behavior, which per
+  # AGENTS.md must not change without deliberate review. Security fixes are
+  # grouped separately so CVE patches arrive as one batch.
+  - package-ecosystem: "uv"
     directory: "/"
     schedule:
       interval: "weekly"

@@ -39,8 +39,7 @@ imports them.
   should get) a regeneration command; both stay auditable via tests that
   recompute them against the released dataset. The *selection rule* stays
   build-side in `tutormoments_build/latency_subsample.py`.
-- The `src/tutormoments` runtime consumes released datasets only. It never constructs, filters, or regenerates benchmark data (including student traits — those are frozen
-  in the release).
+- The `src/tutormoments` runtime consumes released datasets only. It never constructs, filters, or regenerates benchmark data (including student traits — those are frozen in the release).
 - `data/` and `results/` are gitignored and must stay that way. Never commit
   datasets, transcripts, or run outputs. The datasets are de-identified, but still take care to never commit anything containing student data.
 - All LLM prompts live under consolidated `prompts/{my prompt}.md` directories as standalone markdown files, never inline in Python source. Templates are loaded from disk and filled at call time.
@@ -52,6 +51,7 @@ imports them.
   response, which is recorded as `"..."` and scored as if the tutor said it.
   Never reintroduce a cap to save tokens.
 - Never make choices about which language model to use or language model configuration for any API call without consulting the user; this is a language model benchmark, the choice of model matters
+- This repo is public. PR commits are public. Before pushing anything to remote, think about whether it could expose unnecessary information.
 
 ## Tests
 
