@@ -736,6 +736,152 @@ def test_run_batch_gemini_parses_results(monkeypatch):
     assert out["kA"]["usage"]["output_tokens"] == 6
 
 
+def _run_gemini_batch(monkeypatch, entries, result_lines, **batch_kwargs):
+    """Drive run_batch against a mocked Gemini client.
+
+    Returns (parsed_results, submitted_jsonl_entries). The submitted JSONL is
+    read inside the upload stub because run_batch unlinks the temp file before
+    returning.
+    """
+    monkeypatch.setenv("GEMINI_API_KEY", "key-test")
+    submitted = []
+    with (
+        patch("google.genai.Client") as MockGenai,
+        patch("tutormoments.client.time.sleep"),
+    ):
+        client_obj = MagicMock()
+        uploaded = MagicMock()
+        uploaded.name = "files/up1"
+
+        def _capture(file, config):
+            with open(file, encoding="utf-8") as fh:
+                submitted.extend(
+                    json.loads(line) for line in fh.read().strip().split("\n")
+                )
+            return uploaded
+
+        client_obj.files.upload.side_effect = _capture
+        batch = MagicMock()
+        batch.name = "batches/gb1"
+        batch.state.name = "JOB_STATE_SUCCEEDED"
+        batch.dest.file_name = "files/out1"
+        client_obj.batches.create.return_value = batch
+        client_obj.batches.get.return_value = batch
+        client_obj.files.download.return_value = "\n".join(
+            json.dumps(line) for line in result_lines
+        ).encode("utf-8")
+        MockGenai.return_value = client_obj
+
+        c = ModelClient("gemini-3.1-pro-preview")
+        out = run_batch(c, entries, poll_interval=0, **batch_kwargs)
+    return out, submitted
+
+
+def test_run_batch_gemini_sends_thinking_config(monkeypatch):
+    entry = build_batch_entry("kA", "pA")
+    result = {
+        "key": "kA",
+        "response": {"candidates": [{"content": {"parts": [{"text": "A"}]}}]},
+    }
+    _, submitted = _run_gemini_batch(
+        monkeypatch, [entry], [result], thinking=True, thinking_budget=-1
+    )
+
+    gen_config = submitted[0]["request"]["generation_config"]
+    assert gen_config["thinking_config"] == {
+        "include_thoughts": True,
+        "thinking_budget": -1,
+    }
+    # max_output_tokens etc. must survive alongside it.
+    assert gen_config["max_output_tokens"] > 0
+    # The caller's entry must not be mutated (it is reused on batch resume).
+    assert "thinking_config" not in entry["request"]["generation_config"]
+
+
+def test_run_batch_gemini_thinking_budget_defaults(monkeypatch):
+    """thinking=True with no budget falls back to a fixed budget, not 0."""
+    result = {
+        "key": "kA",
+        "response": {"candidates": [{"content": {"parts": [{"text": "A"}]}}]},
+    }
+    _, submitted = _run_gemini_batch(
+        monkeypatch, [build_batch_entry("kA", "pA")], [result], thinking=True
+    )
+    gen_config = submitted[0]["request"]["generation_config"]
+    assert gen_config["thinking_config"]["thinking_budget"] == 16384
+
+
+def test_run_batch_gemini_omits_thinking_config_when_off(monkeypatch):
+    result = {
+        "key": "kA",
+        "response": {"candidates": [{"content": {"parts": [{"text": "A"}]}}]},
+    }
+    _, submitted = _run_gemini_batch(
+        monkeypatch, [build_batch_entry("kA", "pA")], [result], thinking=False
+    )
+    assert "thinking_config" not in submitted[0]["request"]["generation_config"]
+
+
+def test_run_batch_gemini_skips_thought_parts(monkeypatch):
+    """Thought summaries are not answer text; multi-part answers are joined."""
+    result = {
+        "key": "kA",
+        "response": {
+            "candidates": [
+                {
+                    "content": {
+                        "parts": [
+                            {"text": "planning my answer", "thought": True},
+                            {"text": "real "},
+                            {"text": "answer"},
+                        ]
+                    }
+                }
+            ],
+            "usageMetadata": {
+                "promptTokenCount": 4,
+                "candidatesTokenCount": 6,
+                "thoughtsTokenCount": 90,
+                "totalTokenCount": 100,
+            },
+        },
+    }
+    out, _ = _run_gemini_batch(
+        monkeypatch, [build_batch_entry("kA", "pA")], [result], thinking=True
+    )
+
+    assert out["kA"]["text"] == "real answer"
+    # Thinking tokens are billed as output and counted in the total.
+    usage = out["kA"]["usage"]
+    assert usage["output_tokens"] == 96
+    assert usage["input_tokens"] + usage["output_tokens"] == usage["total_tokens"]
+
+
+def test_generate_gemini_counts_thought_tokens(monkeypatch):
+    monkeypatch.setenv("GEMINI_API_KEY", "key-test")
+    with patch("google.genai.Client") as MockGenai:
+        client_obj = MagicMock()
+        response = MagicMock()
+        response.text = "answer"
+        response.usage_metadata.prompt_token_count = 4
+        response.usage_metadata.candidates_token_count = 6
+        response.usage_metadata.thoughts_token_count = 90
+        response.usage_metadata.total_token_count = 100
+        client_obj.models.generate_content.return_value = response
+        MockGenai.return_value = client_obj
+
+        c = ModelClient("gemini-3.1-pro-preview")
+        out = c.generate("p", thinking=True, thinking_budget=-1)
+
+    config = client_obj.models.generate_content.call_args.kwargs["config"]
+    assert config["thinking_config"] == {
+        "include_thoughts": True,
+        "thinking_budget": -1,
+    }
+    assert out.usage["output_tokens"] == 96
+    assert out.usage["total_tokens"] == 100
+
+
 def test_run_batch_unsupported_provider_raises(monkeypatch):
     monkeypatch.setenv("TOGETHER_API_KEY", "key-test")
     with patch("openai.OpenAI") as MockOpenAI:

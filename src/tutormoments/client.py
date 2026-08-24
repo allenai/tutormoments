@@ -133,6 +133,39 @@ def _anthropic_thinking_param(model: str, thinking_budget: int) -> dict:
     return {"type": "adaptive"}
 
 
+def _gemini_thinking_config(thinking: bool, thinking_budget: int) -> dict | None:
+    """Return the `thinking_config` block for a Gemini request, or None.
+
+    thinking_budget = -1 means "dynamic" (the model self-paces). 0/None means
+    unset, in which case we fall back to a fixed 16384-token budget. Positive
+    values are used as-is. Returns None when thinking is off, which leaves the
+    model on its own default behaviour (we never send thinking_budget: 0).
+
+    Shared by the sync and batch Gemini paths so the two stay in step.
+    """
+    if not thinking:
+        return None
+    if thinking_budget is None or thinking_budget == 0:
+        budget = 16384
+    else:
+        budget = thinking_budget  # may be -1 (dynamic) or positive
+    return {"include_thoughts": True, "thinking_budget": budget}
+
+
+def _gemini_text_from_parts(parts: list[dict]) -> str:
+    """Join the answer text from a Gemini candidate's parts.
+
+    Parts flagged `thought: true` are thought summaries, not answer text, and
+    are skipped -- they are present whenever thinking_config asks for them.
+    A response can also split its answer across several text parts, so every
+    remaining part is concatenated. Mirrors what the SDK's `response.text`
+    does on the sync path.
+    """
+    return "".join(
+        part.get("text", "") for part in parts if not part.get("thought", False)
+    )
+
+
 class ModelClient:
     """Provider-agnostic synchronous model client.
 
@@ -312,17 +345,9 @@ class ModelClient:
         }
         if json_mode:
             config["response_mime_type"] = "application/json"
-        if thinking:
-            # thinking_budget = -1 means "dynamic" (model self-paces).
-            # 0 = no thinking. Positive = fixed budget. None/unset = default 16384.
-            if thinking_budget is None or thinking_budget == 0:
-                budget = 16384
-            else:
-                budget = thinking_budget  # may be -1 (dynamic) or positive
-            config["thinking_config"] = {
-                "include_thoughts": True,
-                "thinking_budget": budget,
-            }
+        thinking_config = _gemini_thinking_config(thinking, thinking_budget)
+        if thinking_config is not None:
+            config["thinking_config"] = thinking_config
 
         # Gemini has no server-side prompt cache wired here; the cacheable
         # head is concatenated into the prompt, which is semantically
@@ -347,9 +372,13 @@ class ModelClient:
 
         text = response.text or ""
         usage_meta = response.usage_metadata
+        # candidates_token_count excludes thinking tokens, but they are billed
+        # as output and counted in total_token_count -- fold them in so the
+        # three numbers stay consistent and the cost tracking is not short.
         usage = {
             "input_tokens": getattr(usage_meta, "prompt_token_count", 0) or 0,
-            "output_tokens": getattr(usage_meta, "candidates_token_count", 0) or 0,
+            "output_tokens": (getattr(usage_meta, "candidates_token_count", 0) or 0)
+            + (getattr(usage_meta, "thoughts_token_count", 0) or 0),
             "total_tokens": getattr(usage_meta, "total_token_count", 0) or 0,
         }
         return ModelResponse(text=text, usage=usage)
@@ -992,6 +1021,10 @@ def _run_batch_gemini(
 ):
     """Gemini batch: upload JSONL, submit, poll, download.
 
+    thinking/thinking_budget are resolved by _gemini_thinking_config and written
+    into each request's generation_config, so a batch run is configured the same
+    way as the equivalent sync call.
+
     If existing_batch_id is set, skip upload+submit and retrieve that job.
     """
     import tempfile
@@ -1000,6 +1033,7 @@ def _run_batch_gemini(
 
     gemini_client = client._client
     jsonl_path = None
+    thinking_config = _gemini_thinking_config(thinking, thinking_budget)
 
     if existing_batch_id:
         batch_job = gemini_client.batches.get(name=existing_batch_id)
@@ -1024,13 +1058,16 @@ def _run_batch_gemini(
                     )
                 else:
                     parts = [{"text": effective_prompt}]
+                # Copy: the entry belongs to the caller and is reused when a
+                # batch is resumed, so the thinking config must not be baked in.
+                gen_config = dict(entry["request"].get("generation_config", {}))
+                if thinking_config is not None:
+                    gen_config["thinking_config"] = thinking_config
                 gem_entry = {
                     "key": key,
                     "request": {
                         "contents": [{"parts": parts, "role": "user"}],
-                        "generation_config": entry["request"].get(
-                            "generation_config", {}
-                        ),
+                        "generation_config": gen_config,
                     },
                 }
                 f.write(json.dumps(gem_entry, ensure_ascii=False) + "\n")
@@ -1101,14 +1138,16 @@ def _run_batch_gemini(
                 text = ""
                 if candidates:
                     parts = candidates[0].get("content", {}).get("parts", [])
-                    if parts:
-                        text = parts[0].get("text", "")
+                    text = _gemini_text_from_parts(parts)
                 usage = response.get("usageMetadata", {})
                 raw_entries[key] = {
                     "text": text,
+                    # thoughtsTokenCount is billed as output and included in
+                    # totalTokenCount, but not in candidatesTokenCount.
                     "usage": {
                         "input_tokens": usage.get("promptTokenCount", 0),
-                        "output_tokens": usage.get("candidatesTokenCount", 0),
+                        "output_tokens": usage.get("candidatesTokenCount", 0)
+                        + usage.get("thoughtsTokenCount", 0),
                         "total_tokens": usage.get("totalTokenCount", 0),
                     },
                 }
