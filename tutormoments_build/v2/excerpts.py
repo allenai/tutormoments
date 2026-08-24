@@ -27,8 +27,16 @@ The lead-up window is measured in *dialogue turns* (``context_turns``), not
 rows: it reaches back to the first row of the Nth preceding dialogue turn, so
 every enrichment interleaved with those turns comes along. That keeps the window
 meaningful where screen activity is dense -- but it also means a small
-``context_turns`` can pull in many rows (median 6 rows at N=5, but 88 in the
-worst case), so ``max_context_rows`` can cap it.
+``context_turns`` can pull in many rows, so ``max_context_rows`` can cap it.
+
+**The window is measured back from the cut point, not the moment start.** The
+cut is the decision point the prompts ask about, so anchoring there gives every
+moment the same amount of conversation before it, whatever the length of the
+moment's own pre-cut run. Anchoring on the moment start instead would hand a
+long-lead-in moment more pre-cut context than a short one purely as an artifact
+of where the annotator opened the span. The window never opens past the moment
+start: a moment whose pre-cut portion already exceeds ``context_turns`` is still
+rendered whole, just with no extra lead-up.
 
 Nothing after ``end_index`` is ever emitted: the excerpt stops at the moment's
 last row, by design.
@@ -61,11 +69,19 @@ DEFAULT_OUT_DIR = "data/excerpts"
 # Ground-truth split stems, which are also the excerpt output stems.
 SPLIT_STEMS = ("iteration", "test")
 
-DEFAULT_CONTEXT_TURNS = 5
+DEFAULT_CONTEXT_TURNS = 20
 
-MOMENT_START = ">>> MOMENT START (row {row}, turn {turn}) <<<"
-CUT_POINT = ">>> CUT POINT (row {row}, turn {turn}) <<<"
-MOMENT_END = ">>> MOMENT END (row {row}, turn {turn}) <<<"
+# Lead-up widths every excerpt is rendered at. One moment yields one excerpt per
+# width, and a consumer picks the one its prompt calls for -- the v2
+# action-direction prompt reads 5 turns, over-scaffolding reads 20, and asking
+# them to share a width would mean rebuilding this file to change either.
+DEFAULT_CONTEXT_WIDTHS = (20, 5)
+
+# The excerpt's one marker, and the literal string both v2 prompts name. It is
+# bare: its position in the text is the whole signal. Row indices are a
+# build-side artifact and turn numbers a lossy projection of them (see above),
+# so printing either would add noise a reader cannot act on.
+CUT_POINT = ">>> CUT POINT <<<"
 
 
 # ===========================================================================
@@ -106,11 +122,11 @@ def load_ground_truth(ground_truth_dir: str) -> dict[str, list[dict]]:
 
 def context_start(
     rows: list[dict],
-    start_row: int,
+    anchor_row: int,
     context_turns: int,
     max_context_rows: int | None = None,
 ) -> int:
-    """First row of the lead-up window before ``start_row``.
+    """First row of the lead-up window before ``anchor_row``.
 
     Reaches back to the first row of the ``context_turns``-th preceding dialogue
     turn, which carries every enrichment interleaved with those turns along with
@@ -120,13 +136,16 @@ def context_start(
 
     ``max_context_rows`` clamps the result, for the dense-screen-activity case
     where a few turns of lead-up span a great many rows.
+
+    ``render_excerpt`` anchors this on the *cut point*, not the moment start --
+    see there for why.
     """
     if context_turns <= 0:
-        first = start_row
+        first = anchor_row
     else:
         seen = 0
         first = 0
-        for index in range(start_row - 1, -1, -1):
+        for index in range(anchor_row - 1, -1, -1):
             if rows[index]["turn_number"] is None:
                 continue
             seen += 1
@@ -134,7 +153,7 @@ def context_start(
             if seen == context_turns:
                 break
     if max_context_rows is not None:
-        first = max(first, start_row - max_context_rows)
+        first = max(first, anchor_row - max_context_rows)
     return first
 
 
@@ -174,13 +193,24 @@ def render_excerpt(
 ) -> tuple[str, int]:
     """Render one moment's excerpt. Returns (text, first row rendered).
 
-    ``boundaries`` supplies ``start_index``/``cut_index``/``end_index`` (the row
-    positions that are cut on) and ``start_turn``/``cut_turn``/``end_turn``
-    (printed in the markers, so a reader can find the moment in the export).
+    ``boundaries`` supplies ``start_index``/``cut_index``/``end_index``, the row
+    positions the excerpt is cut on. The ``*_turn`` values are not read here:
+    the markers are bare, so what they mark is carried by where they sit in the
+    text rather than by any number printed in them.
+
+    The cut point is the only thing marked, because it is the only landmark
+    either v2 prompt refers to. ``start_index`` and ``end_index`` still bound the
+    window and the range check, but neither boundary is announced: the prompts
+    ask only about what the tutor does *after* the cut, so where the annotated
+    moment opened is not a distinction they act on, and its close needs no marker
+    because nothing is rendered past it -- the excerpt simply ends there.
 
     The window runs from the lead-up through ``end_index`` and stops there --
-    there is no trailing context and no trailing elision marker, because for
-    this benchmark the moment's last row is where the transcript ends.
+    no trailing context, because for this benchmark the moment's last row is
+    where the transcript ends. Its opening is measured back from ``cut_index``
+    (see the module docstring), clamped so it never begins past ``start_index``. Elided lead-up is not announced either: the
+    excerpt simply opens where the window opens. The returned first-row index
+    still records how much came before, for the excerpt record.
     """
     start_row = boundaries["start_index"]
     end_row = boundaries["end_index"]
@@ -191,22 +221,16 @@ def render_excerpt(
             f"{len(rows)} row(s)"
         )
 
-    first = context_start(rows, start_row, context_turns, max_context_rows)
+    # Anchored on the cut, then clamped so it never opens past the moment start.
+    first = min(
+        context_start(rows, cut_row, context_turns, max_context_rows), start_row
+    )
 
     lines = []
-    if first > 0:
-        lines += [f"[... {first} earlier row(s) omitted ...]", ""]
-
     for index in range(first, end_row + 1):
-        if index == start_row:
-            lines.append(
-                MOMENT_START.format(row=start_row, turn=boundaries["start_turn"])
-            )
         lines.append(format_row(rows[index]))
         if index == cut_row:
-            lines.append(CUT_POINT.format(row=cut_row, turn=boundaries["cut_turn"]))
-        if index == end_row:
-            lines.append(MOMENT_END.format(row=end_row, turn=boundaries["end_turn"]))
+            lines.append(CUT_POINT)
 
     return "\n".join(lines), first
 
@@ -221,22 +245,43 @@ def build_record(
     rows: list[dict],
     conversation_id: str,
     *,
-    context_turns: int = DEFAULT_CONTEXT_TURNS,
+    context_widths: "tuple[int, ...]" = DEFAULT_CONTEXT_WIDTHS,
     max_context_rows: int | None = None,
 ) -> dict:
     """Assemble one excerpt record from a ground-truth record and its rows.
 
     The labels ride along so an excerpt file is usable on its own; everything
     else about the moment is recoverable by joining on ``moment_id``.
+
+    ``excerpts`` holds one rendering per width in ``context_widths``, keyed by
+    the width as a string (JSON object keys are strings, and round-tripping the
+    file must not turn the key into something else). Only the lead-up differs
+    between them, so everything width-independent -- boundaries, row counts,
+    labels -- stays at the top level rather than being repeated per width.
     """
-    excerpt, first = render_excerpt(
-        rows,
-        moment,
-        context_turns=context_turns,
-        max_context_rows=max_context_rows,
-    )
+    excerpts = {}
+    for width in context_widths:
+        text, first = render_excerpt(
+            rows,
+            moment,
+            context_turns=width,
+            max_context_rows=max_context_rows,
+        )
+        excerpts[str(width)] = {
+            "excerpt": text,
+            "context_turns": width,
+            "context_start_index": first,
+            "context_rows": moment["start_index"] - first,
+        }
     span = rows[moment["start_index"] : moment["end_index"] + 1]
     enrichments = sum(1 for row in span if row["turn_number"] is None)
+
+    # What lies after the cut is what a v2 prompt is actually asked to classify.
+    # Screen activity counts: "[SCREEN INTERACTION] Tutor writes 3x7 on the
+    # board" is a pedagogical move, so the two are counted separately rather
+    # than folded together.
+    post_cut = rows[moment["cut_index"] + 1 : moment["end_index"] + 1]
+    post_cut_dialogue = sum(1 for row in post_cut if row["turn_number"] is not None)
 
     return {
         "moment_id": moment["moment_id"],
@@ -249,14 +294,13 @@ def build_record(
         "start_index": moment["start_index"],
         "cut_index": moment["cut_index"],
         "end_index": moment["end_index"],
-        "context_turns": context_turns,
-        "context_start_index": first,
-        "context_rows": moment["start_index"] - first,
         "moment_rows": len(span),
         "moment_dialogue_rows": len(span) - enrichments,
         "moment_enrichment_rows": enrichments,
+        "post_cut_rows": len(post_cut),
+        "post_cut_dialogue_rows": post_cut_dialogue,
         "labels": moment["labels"],
-        "excerpt": excerpt,
+        "excerpts": excerpts,
     }
 
 
@@ -286,7 +330,7 @@ def build(
     ground_truth_dir: str,
     transcripts_path: str,
     *,
-    context_turns: int = DEFAULT_CONTEXT_TURNS,
+    context_widths: "tuple[int, ...]" = DEFAULT_CONTEXT_WIDTHS,
     max_context_rows: int | None = None,
 ) -> tuple[dict[str, list[dict]], Counter]:
     """Return ({output stem: [excerpt record, ...]}, per-reason drop counts)."""
@@ -328,7 +372,7 @@ def build(
                     moment,
                     rows,
                     index.conversation_id(transcript_id) or transcript_id,
-                    context_turns=context_turns,
+                    context_widths=context_widths,
                     max_context_rows=max_context_rows,
                 )
             except IndexError as error:
@@ -371,27 +415,39 @@ def report(out: dict[str, list[dict]], dropped: Counter, dry_run: bool) -> str:
         "",
         "DRY RUN -- nothing written" if dry_run else "Excerpts written",
         "",
-        f"  {'split':<12}{'moments':>9}{'lead-up rows':>15}{'moment rows':>14}"
-        f"{'enrichment rows':>18}{'with enrichments':>19}",
     ]
-    lines.append(f"  {'-' * (len(lines[-1]) - 2)}")
+    widths = sorted(
+        (int(w) for records in out.values() for r in records for w in r["excerpts"]),
+        reverse=True,
+    )
+    widths = list(dict.fromkeys(widths))
+
+    lead_up = "".join(f"{f'lead-up @{w}':>15}" for w in widths)
+    header = (
+        f"  {'split':<12}{'moments':>9}{lead_up}{'moment rows':>14}"
+        f"{'enrichment rows':>18}{'with enrichments':>19}"
+    )
+    lines += [header, f"  {'-' * (len(header) - 2)}"]
 
     for stem, records in out.items():
         if not records:
             lines.append(f"  {stem:<12}{0:>9}")
             continue
-        context = sum(r["context_rows"] for r in records) / len(records)
+        per_width = "".join(
+            f"{sum(r['excerpts'][str(w)]['context_rows'] for r in records) / len(records):>15.1f}"
+            for w in widths
+        )
         moment = sum(r["moment_rows"] for r in records) / len(records)
         enrich = sum(r["moment_enrichment_rows"] for r in records) / len(records)
         with_enrich = sum(1 for r in records if r["moment_enrichment_rows"])
         share = f"{with_enrich / len(records):.0%}"
         lines.append(
-            f"  {stem:<12}{len(records):>9}{context:>15.1f}{moment:>14.1f}"
+            f"  {stem:<12}{len(records):>9}{per_width}{moment:>14.1f}"
             f"{enrich:>18.1f}{f'{with_enrich} ({share})':>19}"
         )
 
     lines.append("")
-    lines.append("  (row counts are means per moment)")
+    lines.append("  (row counts are means per moment; lead-up @N is the N-turn window)")
 
     if dropped:
         lines += ["", "  moments not emitted:"]
@@ -421,10 +477,14 @@ def build_parser() -> argparse.ArgumentParser:
     parser.add_argument(
         "--context-turns",
         type=int,
-        default=DEFAULT_CONTEXT_TURNS,
+        nargs="+",
+        default=list(DEFAULT_CONTEXT_WIDTHS),
         metavar="N",
-        help="Dialogue turns of lead-up before the moment (0 for none). "
-        "Enrichments interleaved with those turns are included.",
+        help="Dialogue turns of lead-up before the CUT POINT (0 for none). "
+        "Enrichments interleaved with those turns are included. The window "
+        "never opens past the moment start, so a moment with a long pre-cut "
+        "run is still rendered whole. Pass several widths to render an excerpt "
+        "at each; consumers pick the one their prompt calls for.",
     )
     parser.add_argument(
         "--max-context-rows",
@@ -452,7 +512,7 @@ def main(argv: list[str] | None = None) -> int:
     out, dropped = build(
         args.ground_truth,
         args.transcripts,
-        context_turns=args.context_turns,
+        context_widths=tuple(args.context_turns),
         max_context_rows=args.max_context_rows,
     )
 
@@ -460,7 +520,10 @@ def main(argv: list[str] | None = None) -> int:
         for records in out.values():
             for record in records:
                 if record["moment_id"].startswith(args.print_moment):
-                    print(record["excerpt"])
+                    for width, rendered in record["excerpts"].items():
+                        print(f"===== {width}-turn window =====\n")
+                        print(rendered["excerpt"])
+                        print()
                     return 0
         print(f"no moment matching {args.print_moment!r}", file=sys.stderr)
         return 1

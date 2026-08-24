@@ -64,6 +64,7 @@ tutormoments_build = [
     "prompts/classify/situation_labeller/*.md",
     "prompts/trait_generator/*.txt",
     "prompts/trait_generator/dimensions/*.txt",
+    "prompts/v2/*.md",
 ]
 
 [tool.pytest.ini_options]

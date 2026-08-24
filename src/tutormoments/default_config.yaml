@@ -43,6 +43,17 @@ batch:    { timeout: 86400 }
 # overrides. Lower it on smaller API tiers that hit rate limits.
 execution: { replay_concurrency: 4 }
 
+# v2 annotation-round classification (dev-only
+# `python -m tutormoments_build.v2.classify_excerpts`). Runs the
+# tutormoments_build/prompts/v2 prompts over rendered human-human moment
+# excerpts. Pinned to opus-5 with adaptive thinking. Note this is a newer model
+# than the opus-4-8 the v1 ground truth was built on, so v2 labels are not
+# directly comparable to v1 ones.
+v2:
+  model: claude-opus-5
+  poll_interval: 60
+  thinking: adaptive
+
 # Ground-truth build phase (dev-only `tutormoments dataset build-ground-truth`).
 # opus-4-8 uses adaptive thinking only: the Anthropic client sends {type: adaptive}
 # and ignores thinking_budget/reasoning_effort. The paper's ground truth was built

@@ -40,7 +40,7 @@ Now, examine the following tutoring moment. Respond with valid JSON only:
   "rigor": "yes or no"
 }
 
-The following excerpt contains a tutoring moment. There, >>> CUT POINT <<< is the turn before the tutor's pedagogical strategy that you should focus on. If there are multiple strategies that occur after the cut point, focus on the classifying the first one.
+The following excerpt contains a tutoring moment. There, >>> CUT POINT <<< is immediately before the tutor's pedagogical strategy that you should focus on describing and analyzing. If there are multiple strategies that occur after the cut point, focus on the classifying the first one.
 
 EXCERPT: 
 {excerpt}

@@ -124,32 +124,37 @@ class TestFormatRow:
 class TestRenderExcerpt:
     def test_window_runs_from_lead_up_to_end_and_stops(self):
         text, first = E.render_excerpt(
-            SAMPLE, _boundaries(5, 6, 7, 4, 4, 5), context_turns=1
+            SAMPLE, _boundaries(5, 6, 7, 4, 4, 5), context_turns=2
         )
         assert first == 2
         assert text.splitlines() == [
-            "[... 2 earlier row(s) omitted ...]",
-            "",
             "Turn 3. TUTOR: How did you get that?",
             "[SCREEN INTERACTION] Student selects 3.",
             "[SCREEN UPDATE] The option turns green.",
-            ">>> MOMENT START (row 5, turn 4) <<<",
             "Turn 4. STUDENT: I split it in two.",
             "[PAUSE] The student is thinking.",
-            ">>> CUT POINT (row 6, turn 4) <<<",
+            ">>> CUT POINT <<<",
             "Turn 5. TUTOR: Nice work.",
-            ">>> MOMENT END (row 7, turn 5) <<<",
         ]
 
     def test_nothing_after_the_end_row(self):
         """Row 8 exists but is never rendered -- there is no trailing window."""
         text, _ = E.render_excerpt(
-            SAMPLE, _boundaries(5, 6, 7, 4, 4, 5), context_turns=1
+            SAMPLE, _boundaries(5, 6, 7, 4, 4, 5), context_turns=2
         )
         assert "PROBLEM CHANGE" not in text
-        assert text.endswith(">>> MOMENT END (row 7, turn 5) <<<")
+        assert text.endswith("Turn 5. TUTOR: Nice work.")
 
-    def test_no_omission_header_when_context_reaches_the_start(self):
+    def test_elided_lead_up_is_not_announced(self):
+        """The excerpt opens where the window opens, with no omission header."""
+        text, first = E.render_excerpt(
+            SAMPLE, _boundaries(5, 6, 7, 4, 4, 5), context_turns=2
+        )
+        assert first == 2
+        assert "omitted" not in text
+        assert text.startswith("Turn 3. TUTOR:")
+
+    def test_full_context_opens_on_the_first_row(self):
         text, first = E.render_excerpt(
             SAMPLE, _boundaries(5, 5, 7, 4, 4, 5), context_turns=99
         )
@@ -163,23 +168,62 @@ class TestRenderExcerpt:
             SAMPLE, _boundaries(3, 3, 4, 3, 3, 3), context_turns=0
         )
         assert text.splitlines() == [
-            "[... 3 earlier row(s) omitted ...]",
-            "",
-            ">>> MOMENT START (row 3, turn 3) <<<",
             "[SCREEN INTERACTION] Student selects 3.",
-            ">>> CUT POINT (row 3, turn 3) <<<",
+            ">>> CUT POINT <<<",
             "[SCREEN UPDATE] The option turns green.",
-            ">>> MOMENT END (row 4, turn 3) <<<",
         ]
 
-    def test_cut_at_the_end_emits_both_markers_in_order(self):
+    def test_cut_on_the_last_row_leaves_the_marker_trailing(self):
+        """A moment whose cut is its final row has no post-cut content at all,
+        so the excerpt ends on the marker with nothing under it."""
         text, _ = E.render_excerpt(
             SAMPLE, _boundaries(5, 7, 7, 4, 5, 5), context_turns=0
         )
         assert text.splitlines()[-2:] == [
-            ">>> CUT POINT (row 7, turn 5) <<<",
-            ">>> MOMENT END (row 7, turn 5) <<<",
+            "Turn 5. TUTOR: Nice work.",
+            ">>> CUT POINT <<<",
         ]
+
+    def test_window_is_measured_back_from_the_cut_not_the_moment_start(self):
+        """Moment opens at row 5 (turn 4) and cuts at row 7 (turn 5). One turn of
+        lead-up counts back from the CUT, reaching turn 4 -- the moment's own
+        first turn -- so nothing before the moment is pulled in."""
+        text, first = E.render_excerpt(
+            SAMPLE, _boundaries(5, 7, 7, 4, 5, 5), context_turns=1
+        )
+        assert first == 5
+        assert text.startswith("Turn 4. STUDENT: I split it in two.")
+
+        # Anchored on the moment start instead, the same N reaches a turn further
+        # back. That difference is the whole point of the change.
+        assert E.context_start(SAMPLE, 5, 1) == 2
+
+    def test_pre_cut_context_is_the_same_whatever_the_moment_length(self):
+        """Two moments sharing a cut but opening at different rows see identical
+        text before it -- the window is the cut's, not the moment's. (Both
+        pre-cut runs fit inside the window; a longer one would widen it, per
+        test_window_never_opens_past_the_moment_start.)"""
+        opens_late, _ = E.render_excerpt(
+            SAMPLE, _boundaries(5, 7, 7, 4, 5, 5), context_turns=2
+        )
+        opens_earlier, _ = E.render_excerpt(
+            SAMPLE, _boundaries(3, 7, 7, 3, 5, 5), context_turns=2
+        )
+
+        def before_cut(text):
+            return text.split(">>> CUT POINT <<<")[0]
+
+        assert before_cut(opens_late) == before_cut(opens_earlier)
+        assert before_cut(opens_late).startswith("Turn 3. TUTOR:")
+
+    def test_window_never_opens_past_the_moment_start(self):
+        """A moment whose pre-cut run is longer than the window is still whole:
+        the cut-anchored window would open at row 7, but start_index wins."""
+        text, first = E.render_excerpt(
+            SAMPLE, _boundaries(1, 7, 7, 2, 5, 5), context_turns=0
+        )
+        assert first == 1
+        assert text.startswith("Turn 2. STUDENT: Three?")
 
     def test_out_of_range_boundaries_raise(self):
         with pytest.raises(IndexError, match="outside the transcript"):
@@ -204,19 +248,44 @@ class TestBuildRecord:
         return moment
 
     def test_counts_and_labels(self):
-        record = E.build_record(self._moment(), SAMPLE, "conv-1", context_turns=1)
+        record = E.build_record(self._moment(), SAMPLE, "conv-1", context_widths=(2,))
         assert record["conversation_id"] == "conv-1"
-        assert record["context_start_index"] == 2
-        assert record["context_rows"] == 3
         assert record["moment_rows"] == 3
         assert record["moment_dialogue_rows"] == 2
         assert record["moment_enrichment_rows"] == 1
+        assert record["post_cut_rows"] == 1
+        assert record["post_cut_dialogue_rows"] == 1
         assert record["labels"] == {"scaffolding_present": True}
-        assert record["excerpt"].startswith("[... 2 earlier row(s) omitted ...]")
 
-    def test_context_turns_recorded(self):
-        record = E.build_record(self._moment(), SAMPLE, "conv-1", context_turns=3)
-        assert record["context_turns"] == 3
+        rendered = record["excerpts"]["2"]
+        assert rendered["context_start_index"] == 2
+        assert rendered["context_rows"] == 3
+        assert rendered["excerpt"].startswith("Turn 3. TUTOR:")
+        assert "omitted" not in rendered["excerpt"]
+
+    def test_one_rendering_per_width_keyed_by_width(self):
+        record = E.build_record(self._moment(), SAMPLE, "conv-1", context_widths=(2, 1))
+
+        assert sorted(record["excerpts"]) == ["1", "2"]
+        assert record["excerpts"]["2"]["context_turns"] == 2
+        assert record["excerpts"]["1"]["context_turns"] == 1
+
+    def test_a_narrower_width_opens_later(self):
+        record = E.build_record(self._moment(), SAMPLE, "conv-1", context_widths=(2, 1))
+        wide, narrow = record["excerpts"]["2"], record["excerpts"]["1"]
+
+        assert narrow["context_start_index"] > wide["context_start_index"]
+        assert narrow["context_rows"] < wide["context_rows"]
+        assert len(narrow["excerpt"]) < len(wide["excerpt"])
+
+    def test_width_independent_fields_are_not_repeated_per_width(self):
+        record = E.build_record(self._moment(), SAMPLE, "conv-1", context_widths=(2, 1))
+
+        assert "excerpt" not in record
+        assert "context_rows" not in record
+        for rendered in record["excerpts"].values():
+            assert "labels" not in rendered
+            assert "moment_rows" not in rendered
 
 
 # ===========================================================================

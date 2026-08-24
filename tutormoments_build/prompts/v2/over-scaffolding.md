@@ -26,7 +26,7 @@ Examine the following tutoring moment. Respond with valid JSON only:
   "over-scaffolding": "yes or no"
 }
 
-The following excerpt contains a tutoring moment. There, >>> CUT POINT <<< is the turn before the tutor's scaffolding strategy that you should focus on analyzing. 
+The following excerpt contains a tutoring moment. There, >>> CUT POINT <<< is immediately before the tutor's scaffolding strategy that you should focus on analyzing. 
 
 EXCERPT: 
 {excerpt}
