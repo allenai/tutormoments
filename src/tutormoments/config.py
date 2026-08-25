@@ -7,7 +7,7 @@ from typing import Optional
 
 import yaml
 
-from tutormoments.client import infer_provider
+from tutormoments.client import infer_provider, validate_thinking_config
 from tutormoments.resources import resource_text
 
 _CONFIG_CACHE = {}
@@ -337,6 +337,18 @@ def build_run_config(
     # Get student and scorer specs
     student = student_spec(config_path)
     scorer = scorer_spec(config_path)
+
+    # Fail fast on an unsatisfiable `thinking: false` (a model that cannot
+    # disable thinking): a scorer or student misconfiguration must surface
+    # here, not after hours of tutor conversations have already been paid for.
+    # The client chokepoints (generate/run_batch) re-check for paths that
+    # bypass RunConfig (taxonomy, ground-truth build, direct callers).
+    for tutor_id, tutor_kwargs in resolved_tutors.items():
+        validate_thinking_config(tutor_id, tutor_kwargs.get("thinking"))
+    student_model = student.get("model")
+    if student_model and get_registered_student(student_model) is None:
+        validate_thinking_config(student_model, student.get("thinking"))
+    validate_thinking_config(scorer["model"], scorer.get("thinking"))
 
     return RunConfig(
         tutors=tutors,

@@ -13,6 +13,7 @@ from tutormoments.client import (
     infer_provider,
     run_batch,
     run_sync_entries,
+    validate_thinking_config,
     write_jsonl,
 )
 
@@ -736,7 +737,9 @@ def test_run_batch_gemini_parses_results(monkeypatch):
     assert out["kA"]["usage"]["output_tokens"] == 6
 
 
-def _run_gemini_batch(monkeypatch, entries, result_lines, **batch_kwargs):
+def _run_gemini_batch(
+    monkeypatch, entries, result_lines, model="gemini-3.1-pro-preview", **batch_kwargs
+):
     """Drive run_batch against a mocked Gemini client.
 
     Returns (parsed_results, submitted_jsonl_entries). The submitted JSONL is
@@ -772,7 +775,7 @@ def _run_gemini_batch(monkeypatch, entries, result_lines, **batch_kwargs):
         ).encode("utf-8")
         MockGenai.return_value = client_obj
 
-        c = ModelClient("gemini-3.1-pro-preview")
+        c = ModelClient(model)
         out = run_batch(c, entries, poll_interval=0, **batch_kwargs)
     return out, submitted
 
@@ -815,14 +818,20 @@ def test_run_batch_gemini_disables_thinking_when_off(monkeypatch):
     """thinking=False sends an explicit 0 budget, not an omitted block.
 
     Most current Gemini models think by default, so omitting thinking_config
-    would silently contradict a configured `thinking: false`.
+    would silently contradict a configured `thinking: false`. Runs on the 2.5
+    Flash tier: models that cannot honor a 0 budget are rejected up front by
+    validate_thinking_config (tested separately).
     """
     result = {
         "key": "kA",
         "response": {"candidates": [{"content": {"parts": [{"text": "A"}]}}]},
     }
     _, submitted = _run_gemini_batch(
-        monkeypatch, [build_batch_entry("kA", "pA")], [result], thinking=False
+        monkeypatch,
+        [build_batch_entry("kA", "pA")],
+        [result],
+        model="gemini-2.5-flash",
+        thinking=False,
     )
     assert submitted[0]["request"]["generation_config"]["thinking_config"] == {
         "include_thoughts": False,
@@ -843,7 +852,7 @@ def test_generate_gemini_disables_thinking_when_off(monkeypatch):
         client_obj.models.generate_content.return_value = response
         MockGenai.return_value = client_obj
 
-        ModelClient("gemini-3.1-pro-preview").generate("p", thinking=False)
+        ModelClient("gemini-2.5-flash").generate("p", thinking=False)
 
     config = client_obj.models.generate_content.call_args.kwargs["config"]
     assert config["thinking_config"] == {
@@ -919,3 +928,130 @@ def test_run_batch_unsupported_provider_raises(monkeypatch):
         c = ModelClient("deepseek-ai/DeepSeek-V3")
         with pytest.raises(ValueError, match="Batch API not supported"):
             run_batch(c, [build_batch_entry("k", "p")], poll_interval=0)
+
+
+# ===================================================================
+# validate_thinking_config: the `thinking: false` contract
+# ===================================================================
+
+
+@pytest.mark.parametrize(
+    "model",
+    [
+        "gemini-2.5-pro",
+        "gemini-3.1-pro-preview",
+        "gemini-3.5-flash",  # 3.x floor is thinking_level=minimal, not off
+        "o1-preview",
+        "o3-mini",
+    ],
+)
+def test_validate_thinking_config_rejects_explicit_off(model):
+    with pytest.raises(ValueError, match="cannot run with thinking disabled"):
+        validate_thinking_config(model, False)
+
+
+@pytest.mark.parametrize(
+    "model,thinking",
+    [
+        ("gemini-2.5-pro", True),  # on: satisfiable
+        ("gemini-2.5-pro", None),  # unspecified: no condition stated
+        ("gemini-2.5-flash", False),  # 2.5 Flash tier honors thinking_budget=0
+        ("claude-opus-4-6", False),  # Anthropic models default to off
+        ("gpt-5.5-2026-04-23", False),  # GPT-5 line honors reasoning_effort=none
+        ("gpt-5.5-2026-04-23", "adaptive"),  # truthy string counts as on
+    ],
+)
+def test_validate_thinking_config_accepts(model, thinking):
+    validate_thinking_config(model, thinking)
+
+
+def test_generate_rejects_thinking_off_on_always_thinking_model(monkeypatch):
+    """The contract error fires before any API call and is not retried."""
+    monkeypatch.setenv("GEMINI_API_KEY", "k")
+    with patch("google.genai.Client") as MockGenai:
+        client_obj = MagicMock()
+        MockGenai.return_value = client_obj
+        c = ModelClient("gemini-3.1-pro-preview")
+        with pytest.raises(ValueError, match="cannot run with thinking disabled"):
+            c.generate("Q", thinking=False)
+    client_obj.models.generate_content.assert_not_called()
+
+
+def test_run_batch_rejects_thinking_off_on_always_thinking_model(monkeypatch):
+    monkeypatch.setenv("GEMINI_API_KEY", "k")
+    with patch("google.genai.Client") as MockGenai:
+        client_obj = MagicMock()
+        MockGenai.return_value = client_obj
+        c = ModelClient("gemini-3.1-pro-preview")
+        with pytest.raises(ValueError, match="cannot run with thinking disabled"):
+            run_batch(c, [build_batch_entry("kA", "pA")], thinking=False)
+    client_obj.files.upload.assert_not_called()
+
+
+def test_generate_gemini_unspecified_thinking_omits_config(monkeypatch):
+    """thinking=None states no condition: the provider default is left alone."""
+    monkeypatch.setenv("GEMINI_API_KEY", "key-test")
+    with patch("google.genai.Client") as MockGenai:
+        client_obj = MagicMock()
+        response = MagicMock()
+        response.text = "answer"
+        response.usage_metadata.prompt_token_count = 4
+        response.usage_metadata.candidates_token_count = 6
+        response.usage_metadata.thoughts_token_count = 0
+        response.usage_metadata.total_token_count = 10
+        client_obj.models.generate_content.return_value = response
+        MockGenai.return_value = client_obj
+
+        ModelClient("gemini-3.1-pro-preview").generate("p")
+
+    config = client_obj.models.generate_content.call_args.kwargs["config"]
+    assert "thinking_config" not in config
+
+
+def test_generate_gpt5_thinking_off_maps_to_reasoning_effort_none(monkeypatch):
+    """thinking=False on the GPT-5 line is honored via reasoning_effort=none."""
+    from types import SimpleNamespace
+
+    monkeypatch.setenv("OPENAI_API_KEY", "sk-test")
+    response = SimpleNamespace(
+        choices=[SimpleNamespace(message=SimpleNamespace(content="hi"))],
+        usage=SimpleNamespace(prompt_tokens=5, completion_tokens=2, total_tokens=7),
+    )
+    with patch("openai.OpenAI") as MockOpenAI:
+        client_obj = MagicMock()
+        client_obj.chat.completions.create.return_value = response
+        MockOpenAI.return_value = client_obj
+        ModelClient("gpt-5.5-2026-04-23").generate(
+            "Q", json_mode=False, thinking=False
+        )
+    kwargs = client_obj.chat.completions.create.call_args.kwargs
+    assert kwargs["reasoning_effort"] == "none"
+
+
+def test_generate_gpt5_unspecified_thinking_leaves_effort_alone(monkeypatch):
+    from types import SimpleNamespace
+
+    monkeypatch.setenv("OPENAI_API_KEY", "sk-test")
+    response = SimpleNamespace(
+        choices=[SimpleNamespace(message=SimpleNamespace(content="hi"))],
+        usage=SimpleNamespace(prompt_tokens=5, completion_tokens=2, total_tokens=7),
+    )
+    with patch("openai.OpenAI") as MockOpenAI:
+        client_obj = MagicMock()
+        client_obj.chat.completions.create.return_value = response
+        MockOpenAI.return_value = client_obj
+        ModelClient("gpt-5.5-2026-04-23").generate("Q", json_mode=False)
+    kwargs = client_obj.chat.completions.create.call_args.kwargs
+    assert "reasoning_effort" not in kwargs
+
+
+def test_generate_gpt5_thinking_off_with_effort_is_contradiction(monkeypatch):
+    """thinking=False plus a real reasoning_effort raises before any API call."""
+    monkeypatch.setenv("OPENAI_API_KEY", "sk-test")
+    with patch("openai.OpenAI") as MockOpenAI:
+        client_obj = MagicMock()
+        MockOpenAI.return_value = client_obj
+        c = ModelClient("gpt-5.5-2026-04-23")
+        with pytest.raises(ValueError, match="Contradictory config"):
+            c.generate("Q", thinking=False, reasoning_effort="high")
+    client_obj.chat.completions.create.assert_not_called()

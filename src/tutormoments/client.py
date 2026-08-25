@@ -133,15 +133,96 @@ def _anthropic_thinking_param(model: str, thinking_budget: int) -> dict:
     return {"type": "adaptive"}
 
 
-def _gemini_thinking_config(thinking: bool, thinking_budget: int) -> dict:
-    """Return the `thinking_config` block for a Gemini request.
+# Models that cannot run with thinking guaranteed off. Gemini 2.5 Pro rejects
+# an explicit thinking_budget of 0, and the entire Gemini 3.x line replaced
+# thinking_budget with thinking_level, whose floor (`minimal`) "does not
+# guarantee that thinking is off" per the Gemini API docs -- so no 3.x model
+# qualifies, Flash tiers included. The OpenAI o-series exposes only a depth
+# knob (reasoning_effort low/medium/high), never an off switch. On all of
+# these a configured `thinking: false` is unsatisfiable, and running anyway
+# would silently violate the stated benchmark condition -- so it is rejected
+# up front by validate_thinking_config instead. NOT listed: the Gemini 2.5
+# Flash tier (thinking_budget=0 genuinely disables), the GPT-5 line
+# (reasoning_effort="none" is a real off switch, which
+# _openai_reasoning_effort maps thinking=False onto), and Anthropic models
+# (thinking-off is their default).
+_ALWAYS_THINKING_MODEL_PREFIXES = (
+    "gemini-2.5-pro",
+    "gemini-3",
+    "o1",
+    "o3",
+    "o4",
+)
 
-    thinking off sends an explicit thinking_budget of 0, which disables
-    thinking rather than leaving the model on its own default -- most current
-    Gemini models think by default, so omitting the block would silently
-    contradict a configured `thinking: false`. Note that models which cannot
-    disable thinking (the 2.5 Pro and 3 Pro tiers) reject a 0 budget outright;
-    that surfaces as an API error rather than a silent config mismatch.
+
+def validate_thinking_config(model: str, thinking) -> None:
+    """Reject an explicit thinking-off on a model that cannot disable thinking.
+
+    thinking=None means unspecified: no condition was stated, so the provider
+    default (which may be thinking-on) is acceptable and nothing is checked.
+    An explicit falsy value is a stated benchmark condition; on a model in
+    _ALWAYS_THINKING_MODEL_PREFIXES it cannot be honored, so this raises
+    rather than letting the run quietly proceed with thinking on.
+    """
+    if thinking is None or thinking:
+        return
+    if not (
+        model
+        and any(model.startswith(p) for p in _ALWAYS_THINKING_MODEL_PREFIXES)
+    ):
+        return
+    if infer_provider(model) == "gemini":
+        reason = (
+            "Gemini 2.5 Pro rejects a thinking_budget of 0, and the 3.x "
+            "line's floor is thinking_level=minimal, which does not "
+            "guarantee thinking is off"
+        )
+    else:
+        reason = (
+            "the OpenAI o-series has no thinking off switch, only the "
+            "reasoning_effort depth knob"
+        )
+    raise ValueError(
+        f"Model '{model}' cannot run with thinking disabled ({reason}). "
+        "The configured `thinking: false` is unsatisfiable; enable thinking "
+        "for this model or pick one that supports disabling it."
+    )
+
+
+def _openai_reasoning_effort(model: str, thinking, reasoning_effort: str) -> str:
+    """Resolve the reasoning_effort to actually send for an OpenAI call.
+
+    The GPT-5 line has no boolean thinking switch; its off state is
+    reasoning_effort="none" (supported across the line per the OpenAI model
+    docs), so an explicit thinking=False maps to "none" there. Paired with a
+    conflicting reasoning_effort it is a contradiction and raises rather than
+    silently picking a winner. Other models pass through untouched: the
+    o-series cannot disable thinking at all (validate_thinking_config already
+    rejects that), and non-reasoning models reject the parameter outright.
+    """
+    if thinking is None or thinking:
+        return reasoning_effort
+    if not model.startswith("gpt-5"):
+        return reasoning_effort
+    if reasoning_effort and reasoning_effort != "none":
+        raise ValueError(
+            f"Contradictory config for '{model}': thinking is disabled but "
+            f"reasoning_effort='{reasoning_effort}' was requested. Use "
+            "reasoning_effort='none' (or drop it) to disable thinking, or "
+            "enable thinking."
+        )
+    return "none"
+
+
+def _gemini_thinking_config(thinking, thinking_budget: int) -> dict | None:
+    """Return the `thinking_config` block for a Gemini request, or None.
+
+    thinking=None means unspecified: no condition was stated, so None is
+    returned, the block is omitted, and the model keeps its provider default.
+    An explicit thinking-off sends thinking_budget=0, which genuinely
+    disables thinking on the 2.5 Flash tier; models that cannot honor it
+    (2.5 Pro and the 3.x line) are rejected upstream by
+    validate_thinking_config before any request is built.
 
     With thinking on: thinking_budget = -1 means "dynamic" (the model
     self-paces), 0/None means unset and falls back to a fixed 16384-token
@@ -149,6 +230,8 @@ def _gemini_thinking_config(thinking: bool, thinking_budget: int) -> dict:
 
     Shared by the sync and batch Gemini paths so the two stay in step.
     """
+    if thinking is None:
+        return None
     if not thinking:
         return {"include_thoughts": False, "thinking_budget": 0}
     if thinking_budget is None or thinking_budget == 0:
@@ -229,7 +312,7 @@ class ModelClient:
         json_mode: bool = True,
         max_tokens: int = 0,
         timeout: int = 120,
-        thinking: bool = False,
+        thinking: bool | None = None,
         thinking_budget: int = 0,
         reasoning_effort: str = "",
         effort: str = "",
@@ -240,6 +323,10 @@ class ModelClient:
     ) -> "ModelResponse":
         """Generate a response from the model with retry logic.
 
+        thinking: None (unspecified) leaves the provider default in place; an
+        explicit falsy value is a stated no-thinking condition and is rejected
+        via validate_thinking_config on models that cannot honor it.
+
         output_schema: optional JSON Schema for structured output. When set,
         the Anthropic path constrains the response via output_config.format
         (json_schema). Only supported on the anthropic provider today.
@@ -249,6 +336,13 @@ class ModelClient:
         if output_schema is not None and self.provider != "anthropic":
             raise ValueError(
                 "output_schema is only supported on the anthropic provider"
+            )
+
+        # Before the retry loop: a config error must fail once, not 5 times.
+        validate_thinking_config(self.model, thinking)
+        if self.provider == "openai":
+            reasoning_effort = _openai_reasoning_effort(
+                self.model, thinking, reasoning_effort
             )
 
         if max_tokens <= 0:
@@ -351,7 +445,9 @@ class ModelClient:
         }
         if json_mode:
             config["response_mime_type"] = "application/json"
-        config["thinking_config"] = _gemini_thinking_config(thinking, thinking_budget)
+        thinking_config = _gemini_thinking_config(thinking, thinking_budget)
+        if thinking_config is not None:
+            config["thinking_config"] = thinking_config
 
         # Gemini has no server-side prompt cache wired here; the cacheable
         # head is concatenated into the prompt, which is semantically
@@ -930,7 +1026,7 @@ def run_batch(
     json_mode: bool = True,
     display_name: str = "batch",
     poll_interval: int = 60,
-    thinking: bool = False,
+    thinking: bool | None = None,
     thinking_budget: int = 0,
     reasoning_effort: str = "",
     effort: str = "",
@@ -940,6 +1036,10 @@ def run_batch(
 ) -> dict:
     """Run entries as a batch job via the provider's batch API.
 
+    thinking follows the same contract as ModelClient.generate: None leaves
+    the provider default in place, an explicit falsy value is validated via
+    validate_thinking_config.
+
     Resume support: if `existing_batch_id` is set, skip submission and resume
     polling on that batch (the entries list still drives result parsing, so
     the caller must pass the same entries that were submitted with the batch).
@@ -947,6 +1047,11 @@ def run_batch(
     a fresh submission succeeds, before the poll loop starts -- callers use
     this to persist the id for ctrl-C recovery.
     """
+    validate_thinking_config(client.model, thinking)
+    if client.provider == "openai":
+        reasoning_effort = _openai_reasoning_effort(
+            client.model, thinking, reasoning_effort
+        )
     provider = client.provider
     if existing_batch_id:
         logger.info(
@@ -1065,7 +1170,8 @@ def _run_batch_gemini(
                 # Copy: the entry belongs to the caller and is reused when a
                 # batch is resumed, so the thinking config must not be baked in.
                 gen_config = dict(entry["request"].get("generation_config", {}))
-                gen_config["thinking_config"] = thinking_config
+                if thinking_config is not None:
+                    gen_config["thinking_config"] = thinking_config
                 gem_entry = {
                     "key": key,
                     "request": {

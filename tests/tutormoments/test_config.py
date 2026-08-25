@@ -195,3 +195,61 @@ def test_get_labeller_config_routes_by_type():
         "scaffolding": "classify_scaffolding",
         "rapport": "classify_rapport",
     }
+
+
+def _thinking_contract_config(tmp_path, roster_line, scorer_line):
+    config_path = tmp_path / "custom.yaml"
+    config_path.write_text(
+        f"""
+providers:
+  anthropic: {{ env: ANTHROPIC_API_KEY }}
+  openai:    {{ env: OPENAI_API_KEY }}
+  gemini:    {{ env: GEMINI_API_KEY }}
+  together:  {{ env: TOGETHER_API_KEY }}
+models:
+  {roster_line}
+student: {{ model: claude-opus-4-6, mode: oracle, thinking: false }}
+scorer:  {scorer_line}
+defaults: {{ trials: 1, max_turns: 2 }}
+retry:    {{ max_retries: 1, base_delay: 1 }}
+batch:    {{ timeout: 123 }}
+""",
+        encoding="utf-8",
+    )
+    cfgmod._reset_config_cache()
+    return config_path
+
+
+def test_build_run_config_rejects_tutor_unsatisfiable_thinking_false(tmp_path):
+    import pytest
+
+    config_path = _thinking_contract_config(
+        tmp_path,
+        roster_line="gemini-2.5-pro: { thinking: false }",
+        scorer_line="{ model: claude-opus-4-6, thinking: adaptive }",
+    )
+    with pytest.raises(ValueError, match="cannot run with thinking disabled"):
+        cfgmod.build_run_config(tutors=["gemini-2.5-pro"], config_path=config_path)
+
+
+def test_build_run_config_rejects_scorer_unsatisfiable_thinking_false(tmp_path):
+    import pytest
+
+    config_path = _thinking_contract_config(
+        tmp_path,
+        roster_line="claude-opus-4-8: { thinking: true }",
+        scorer_line="{ model: o3-mini, thinking: false }",
+    )
+    with pytest.raises(ValueError, match="cannot run with thinking disabled"):
+        cfgmod.build_run_config(tutors=["claude-opus-4-8"], config_path=config_path)
+
+
+def test_build_run_config_allows_thinking_false_where_disableable(tmp_path):
+    """thinking: false on models that honor it (Claude, Gemini 2.5 Flash) is fine."""
+    config_path = _thinking_contract_config(
+        tmp_path,
+        roster_line="gemini-2.5-flash: { thinking: false }",
+        scorer_line="{ model: claude-opus-4-6, thinking: false }",
+    )
+    rc = cfgmod.build_run_config(tutors=["gemini-2.5-flash"], config_path=config_path)
+    assert rc.resolved_tutors["gemini-2.5-flash"]["thinking"] is False
