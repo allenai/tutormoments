@@ -98,6 +98,14 @@ class TestContextStart:
         """The cap is a ceiling; it never reaches further back than the turns do."""
         assert E.context_start(SAMPLE, 7, 1, max_context_rows=99) == 5
 
+    def test_full_opens_on_row_zero(self):
+        assert E.context_start(SAMPLE, 7, E.FULL) == 0
+
+    def test_full_ignores_the_row_cap(self):
+        """An unbounded lead-up is the point of the width; a cap would quietly
+        turn it back into a window."""
+        assert E.context_start(SAMPLE, 7, E.FULL, max_context_rows=2) == 0
+
 
 # ===========================================================================
 # Row formatting
@@ -235,6 +243,22 @@ class TestRenderExcerpt:
         )
         assert first == 0
 
+    def test_full_renders_the_transcript_from_its_first_row(self):
+        """No window at all: everything before the cut is there, and the excerpt
+        still stops at the moment's last row."""
+        text, first = E.render_excerpt(
+            SAMPLE, _boundaries(5, 6, 7, 4, 4, 5), context_turns=E.FULL
+        )
+        assert first == 0
+        assert text.startswith("Turn 1. TUTOR:")
+        assert text.splitlines()[-1] == E.format_row(SAMPLE[7])
+
+    def test_full_opens_before_a_moment_a_window_would_open_inside(self):
+        _, first = E.render_excerpt(
+            SAMPLE, _boundaries(1, 7, 7, 2, 5, 5), context_turns=E.FULL
+        )
+        assert first == 0
+
     def test_out_of_range_boundaries_raise(self):
         with pytest.raises(IndexError, match="outside the transcript"):
             E.render_excerpt(SAMPLE, _boundaries(5, 6, 99, 4, 4, 5))
@@ -280,6 +304,24 @@ class TestBuildRecord:
         assert sorted(record["excerpts"]) == ["1", "2"]
         assert record["excerpts"]["2"]["context_turns"] == 2
         assert record["excerpts"]["1"]["context_turns"] == 1
+
+    def test_full_is_keyed_by_name_not_a_turn_count(self):
+        record = E.build_record(
+            self._moment(), SAMPLE, "conv-1", context_widths=(E.FULL, 1)
+        )
+        rendered = record["excerpts"]["full"]
+
+        assert sorted(record["excerpts"]) == ["1", "full"]
+        assert rendered["context_turns"] is None
+        assert rendered["context_start_index"] == 0
+        assert rendered["opens_inside_moment"] is False
+        assert rendered["excerpt"].startswith("Turn 1. TUTOR:")
+
+    def test_full_is_built_by_default(self):
+        """classify_excerpts reads this rendering and nothing else."""
+        assert E.FULL in E.DEFAULT_CONTEXT_WIDTHS
+        record = E.build_record(self._moment(), SAMPLE, "conv-1")
+        assert "full" in record["excerpts"]
 
     def test_a_narrower_width_opens_later(self):
         record = E.build_record(self._moment(), SAMPLE, "conv-1", context_widths=(2, 1))
@@ -329,14 +371,21 @@ class TestInsideMomentReport:
             "test": [self._record(True, True)],
         }
 
-        lines = E._inside_moment_lines(out, [20, 5])
+        lines = E._inside_moment_lines(out, ["20", "5"])
 
         assert "windows opening inside the moment:" in lines[1]
         assert lines[2].split() == ["@20", "1", "of", "3", "(33%)"]
         assert lines[3].split() == ["@5", "2", "of", "3", "(67%)"]
 
+    def test_full_is_reported_widest_first(self):
+        out = {"iteration": [self._record(False, True)]}
+        widths = E.sort_widths(["5", "full", "20"])
+
+        assert widths == ["full", "20", "5"]
+        assert E._inside_moment_lines(out, ["20"])[2].split()[0] == "@20"
+
     def test_no_records_no_section(self):
-        assert E._inside_moment_lines({"iteration": []}, [20]) == []
+        assert E._inside_moment_lines({"iteration": []}, ["20"]) == []
 
 
 # ===========================================================================
@@ -384,3 +433,20 @@ def test_write_split_is_atomic_and_roundtrips(tmp_path):
     assert not (out / "iteration.jsonl.tmp").exists()
     with open(path, encoding="utf-8") as fh:
         assert [json.loads(line) for line in fh] == [{"moment_id": "a", "excerpt": "x"}]
+
+
+# ===========================================================================
+# CLI
+# ===========================================================================
+
+
+class TestContextWidthArg:
+    def test_full_parses_to_the_sentinel(self):
+        args = E.build_parser().parse_args(["--context-turns", "full", "20"])
+        assert args.context_turns == [E.FULL, 20]
+
+    def test_a_non_width_is_rejected(self):
+        import argparse
+
+        with pytest.raises(argparse.ArgumentTypeError, match="turn count"):
+            E.context_width("wide")

@@ -19,9 +19,15 @@ def _excerpt(
         "split": split,
         "post_cut_rows": 2,
         "post_cut_dialogue_rows": 1,
-        # One rendering per width, as excerpts.py writes them. The two differ so
-        # a test can tell which window a prompt was actually filled from.
+        # One rendering per width, as excerpts.py writes them. They differ so a
+        # test can tell which rendering a prompt was actually filled from.
         "excerpts": {
+            "full": {
+                "excerpt": f"whole transcript\nTurn 1. TUTOR: hello ({moment_id})",
+                "context_turns": None,
+                "context_start_index": 0,
+                "context_rows": 9,
+            },
             "20": {
                 "excerpt": f"wide lead-up\nTurn 1. TUTOR: hello ({moment_id})",
                 "context_turns": 20,
@@ -59,7 +65,7 @@ UNCALLED_FOR = _excerpt("ccc", scaffolding_present=True, scaffolding_appropriate
 
 def test_fill_substitutes_excerpt_and_keeps_literal_json_braces():
     """str.format would choke on the output-format block; str.replace must not."""
-    template = C.resource_text(C.ACTION_DIRECTION_PROMPT)
+    template = PROMPTS.templates["action_direction"]
     filled = C.fill(template, "Turn 1. TUTOR: hi")
 
     assert "Turn 1. TUTOR: hi" in filled
@@ -68,7 +74,7 @@ def test_fill_substitutes_excerpt_and_keeps_literal_json_braces():
 
 
 def test_over_scaffolding_prompt_carries_the_excerpt():
-    filled = C.fill(C.resource_text(C.OVER_SCAFFOLDING_PROMPT), "Turn 9. TUTOR: so")
+    filled = C.fill(PROMPTS.templates["over_scaffolding"], "Turn 9. TUTOR: so")
 
     assert "Turn 9. TUTOR: so" in filled
     assert "{excerpt}" not in filled
@@ -95,7 +101,7 @@ def test_skip_reason_separates_the_two_halves_of_the_premise():
 
 
 def test_build_entries_asks_action_of_all_and_over_scaffolding_of_gated_only():
-    entries, counts = C.build_entries([SCAFFOLDED, UNSCAFFOLDED, UNCALLED_FOR])
+    entries, counts = C.build_entries([SCAFFOLDED, UNSCAFFOLDED, UNCALLED_FOR], PROMPTS)
     keys = {entry["key"] for entry in entries}
 
     assert keys == {"action__aaa", "action__bbb", "action__ccc", "overscaffold__aaa"}
@@ -108,7 +114,7 @@ def test_build_entries_asks_action_of_all_and_over_scaffolding_of_gated_only():
 
 def test_entry_keys_split_back_on_the_first_separator():
     """The key scheme has to survive round-tripping to a moment_id."""
-    entries, _ = C.build_entries([SCAFFOLDED])
+    entries, _ = C.build_entries([SCAFFOLDED], PROMPTS)
     prefix, moment_id = entries[0]["key"].split("__", 1)
 
     assert prefix == C.ACTION_PREFIX
@@ -212,6 +218,12 @@ def test_parse_over_scaffolding_reports_unparseable_output_as_none():
 
 CFG = {"model": "test-model", "thinking": "adaptive"}
 
+# The real prompt set, loaded once. The tests assert on how the templates are
+# filled and recorded, so a stub would only be asserting against itself.
+PROMPTS = C.load_prompt_set(C.latest_prompt_version())
+ACTION_PROMPT_PATH = PROMPTS.paths["action_direction"]
+OVER_PROMPT_PATH = PROMPTS.paths["over_scaffolding"]
+
 RAW = {
     "action__aaa": {
         "text": json.dumps({"description": "d", "scaffolding": "yes", "rigor": "no"}),
@@ -229,7 +241,7 @@ RAW = {
 
 
 def test_build_record_carries_both_passes_and_the_gold_labels():
-    record = C.build_record(SCAFFOLDED, RAW, CFG)
+    record = C.build_record(SCAFFOLDED, RAW, CFG, PROMPTS)
 
     assert record["moment_id"] == "aaa"
     assert record["model"] == "test-model"
@@ -240,7 +252,7 @@ def test_build_record_carries_both_passes_and_the_gold_labels():
 
 
 def test_build_record_sums_usage_across_both_passes():
-    record = C.build_record(SCAFFOLDED, RAW, CFG)
+    record = C.build_record(SCAFFOLDED, RAW, CFG, PROMPTS)
 
     assert record["usage"] == {
         "input_tokens": 15,
@@ -251,7 +263,7 @@ def test_build_record_sums_usage_across_both_passes():
 
 def test_ungated_moment_gets_null_over_scaffolding_not_false():
     """ "Not asked" has to stay distinguishable from "asked and told no"."""
-    record = C.build_record(UNSCAFFOLDED, RAW, CFG)
+    record = C.build_record(UNSCAFFOLDED, RAW, CFG, PROMPTS)
 
     assert record["over_scaffolding"] is None
     assert record["over_scaffolding_asked"] is False
@@ -261,30 +273,30 @@ def test_ungated_moment_gets_null_over_scaffolding_not_false():
 def test_scaffolding_where_none_was_called_for_is_not_asked_either():
     """The ground truth labels it over-scaffolding by rule, so the model is not
     scored on an answer that was fixed before it saw the text."""
-    record = C.build_record(UNCALLED_FOR, RAW, CFG)
+    record = C.build_record(UNCALLED_FOR, RAW, CFG, PROMPTS)
 
     assert record["over_scaffolding"] is None
     assert record["over_scaffolding_asked"] is False
 
 
 def test_build_record_keeps_the_raw_response():
-    record = C.build_record(SCAFFOLDED, RAW, CFG)
+    record = C.build_record(SCAFFOLDED, RAW, CFG, PROMPTS)
 
     assert record["action_direction"]["raw"] == RAW["action__aaa"]["text"]
 
 
 def test_build_record_records_a_batch_entry_error():
     raw = {"action__aaa": {"text": "", "error": "overloaded"}}
-    record = C.build_record(UNSCAFFOLDED, raw, CFG)
+    record = C.build_record(UNSCAFFOLDED, raw, CFG, PROMPTS)
 
     assert record["action_direction"]["error"] is None  # bbb has no entry in raw
-    record = C.build_record(SCAFFOLDED, raw, CFG)
+    record = C.build_record(SCAFFOLDED, raw, CFG, PROMPTS)
     assert record["action_direction"]["error"] == "overloaded"
     assert record["action_direction"]["parse_error"] is True
 
 
 def test_missing_batch_result_degrades_to_a_parse_error():
-    record = C.build_record(SCAFFOLDED, {}, CFG)
+    record = C.build_record(SCAFFOLDED, {}, CFG, PROMPTS)
 
     assert record["action_direction"]["scaffolding"] is None
     assert record["action_direction"]["parse_error"] is True
@@ -299,7 +311,9 @@ def test_missing_batch_result_degrades_to_a_parse_error():
 def test_classify_splits_results_back_apart(monkeypatch):
     monkeypatch.setattr(C, "run_entries", lambda entries, cfg, batch_id=None: RAW)
 
-    out, counts = C.classify({"iteration": [SCAFFOLDED], "test": [UNSCAFFOLDED]}, CFG)
+    out, counts = C.classify(
+        {"iteration": [SCAFFOLDED], "test": [UNSCAFFOLDED]}, CFG, PROMPTS
+    )
 
     assert [r["moment_id"] for r in out["iteration"]] == ["aaa"]
     assert [r["moment_id"] for r in out["test"]] == ["bbb"]
@@ -314,7 +328,7 @@ def test_classify_counts_unparsed_responses(monkeypatch):
         lambda entries, cfg, batch_id=None: {"action__aaa": {"text": "nope"}},
     )
 
-    _, counts = C.classify({"iteration": [SCAFFOLDED]}, CFG)
+    _, counts = C.classify({"iteration": [SCAFFOLDED]}, CFG, PROMPTS)
 
     assert counts["action_direction_unparsed"] == 1
     assert counts["over_scaffolding_unparsed"] == 1
@@ -440,6 +454,7 @@ def test_the_record_names_the_reasoning_depth_the_round_ran_at():
         SCAFFOLDED,
         RAW,
         {"model": "gpt-5.6-sol", "thinking": True, "reasoning_effort": "xhigh"},
+        PROMPTS,
     )
 
     assert record["reasoning_effort"] == "xhigh"
@@ -514,15 +529,79 @@ def test_load_excerpts_raises_when_nothing_is_there(tmp_path):
         C.load_excerpts(str(tmp_path))
 
 
-def test_model_dir_flattens_a_vendor_prefixed_id():
+def test_prediction_dir_flattens_a_vendor_prefixed_id():
     """A vendor-prefixed id must not nest two directories."""
-    assert C.model_dir("out", "deepseek-ai/DeepSeek-V4-Pro") == os.path.join(
-        "out", "deepseek-ai_DeepSeek-V4-Pro"
+    assert C.prediction_dir("out", "deepseek-ai/DeepSeek-V4-Pro", "1") == os.path.join(
+        "out", "deepseek-ai_DeepSeek-V4-Pro", "1"
+    )
+
+
+# ===========================================================================
+# Prompt versions
+# ===========================================================================
+
+
+def test_load_prompt_set_reads_the_version_asked_for():
+    prompts = C.load_prompt_set("1")
+
+    assert prompts.version == "1"
+    assert prompts.paths["action_direction"] == "prompts/v2/1/action_direction.md"
+    assert set(prompts.templates) == {"action_direction", "over_scaffolding"}
+    assert all(text.strip() for text in prompts.templates.values())
+
+
+def test_an_unknown_prompt_version_names_the_ones_that_exist():
+    """The error has to be actionable: a typo'd version should say what is there."""
+    with pytest.raises(FileNotFoundError, match="versions available: 1"):
+        C.load_prompt_set("nope")
+
+
+def test_a_record_names_the_prompt_version_that_made_it():
+    """A prediction file has to say which prompts wrote its labels."""
+    record = C.build_record(SCAFFOLDED, RAW, CFG, PROMPTS)
+
+    assert record["prompt_version"] == PROMPTS.version
+    assert record["prompts"]["action_direction"] == PROMPTS.paths["action_direction"]
+
+
+def test_the_default_prompt_version_is_the_newest_one_present(monkeypatch):
+    """A bare run must classify with the newest prompts, not a pinned number.
+
+    A default pinned to a version would leave an edit unexercised: the run would
+    file predictions under the old version and the comparison the edit was made
+    to settle would never be made.
+    """
+    monkeypatch.setattr(C, "available_prompt_versions", lambda: ["1", "2", "3"])
+
+    assert C.latest_prompt_version() == "3"
+    assert C.build_parser().parse_args([]).prompt_version == "3"
+
+
+def test_the_newest_prompt_version_is_numeric_not_alphabetical(monkeypatch):
+    """v10 is newer than v9, and a scratch directory is not a version at all."""
+    monkeypatch.setattr(
+        C, "available_prompt_versions", lambda: ["1", "9", "10", "scratch"]
+    )
+
+    assert C.latest_prompt_version() == "10"
+
+
+def test_an_unreadable_prompt_root_falls_back_to_a_version(monkeypatch):
+    """With nothing to read, load_prompt_set reports the failure, not this."""
+    monkeypatch.setattr(C, "available_prompt_versions", list)
+
+    assert C.latest_prompt_version() == C.FALLBACK_PROMPT_VERSION
+
+
+def test_prediction_dir_files_a_prompt_version_apart_from_its_predecessor():
+    """Two prompt versions of one model must not share a file."""
+    assert C.prediction_dir("out", "claude-opus-5", "1") != C.prediction_dir(
+        "out", "claude-opus-5", "2"
     )
 
 
 def test_write_split_round_trips(tmp_path):
-    record = C.build_record(SCAFFOLDED, RAW, CFG)
+    record = C.build_record(SCAFFOLDED, RAW, CFG, PROMPTS)
     path = C.write_split(str(tmp_path), "iteration", [record])
 
     with open(path, encoding="utf-8") as fh:
@@ -553,7 +632,7 @@ def test_the_test_split_is_held_out_unless_asked_for_by_name(tmp_path, monkeypat
     out_dir = tmp_path / "out"
 
     assert C.main(["--excerpt-dir", excerpt_dir, "--out-dir", str(out_dir)]) == 0
-    assert [p.name for p in sorted(out_dir.glob("*/*.jsonl"))] == ["iteration.jsonl"]
+    assert [p.name for p in sorted(out_dir.glob("*/*/*.jsonl"))] == ["iteration.jsonl"]
 
     assert (
         C.main(
@@ -561,7 +640,7 @@ def test_the_test_split_is_held_out_unless_asked_for_by_name(tmp_path, monkeypat
         )
         == 0
     )
-    assert [p.name for p in sorted(out_dir.glob("*/*.jsonl"))] == [
+    assert [p.name for p in sorted(out_dir.glob("*/*/*.jsonl"))] == [
         "iteration.jsonl",
         "test.jsonl",
     ]
@@ -631,11 +710,14 @@ def test_predictions_are_filed_under_the_model_that_made_them(tmp_path, monkeypa
             "iteration",
             "--model",
             "claude-sonnet-5",
+            # Pinned: this test is about the model directory, not the version.
+            "--prompt-version",
+            "1",
         ]
     )
 
     assert code == 0
-    path = out_dir / "claude-sonnet-5" / "iteration.jsonl"
+    path = out_dir / "claude-sonnet-5" / "1" / "iteration.jsonl"
     assert path.exists()
     record = json.loads(path.read_text(encoding="utf-8").splitlines()[0])
     assert record["model"] == "claude-sonnet-5"
@@ -653,10 +735,12 @@ def test_the_default_model_gets_its_own_directory_too(tmp_path, monkeypatch):
             str(out_dir),
             "--splits",
             "iteration",
+            "--prompt-version",
+            "1",
         ]
     )
 
-    assert (out_dir / "claude-opus-5" / "iteration.jsonl").exists()
+    assert (out_dir / "claude-opus-5" / "1" / "iteration.jsonl").exists()
 
 
 def test_the_chosen_model_reaches_the_batch(tmp_path, monkeypatch):
@@ -731,7 +815,7 @@ def test_print_shows_both_prompts_for_a_scaffolded_moment(tmp_path, capsys):
     out = capsys.readouterr().out
 
     assert code == 0
-    assert C.ACTION_DIRECTION_PROMPT in out
+    assert ACTION_PROMPT_PATH in out
     assert "Turn 1. TUTOR: hello (aaa)" in out
     assert "not asked" not in out
 
@@ -758,7 +842,7 @@ def test_bare_print_picks_a_random_moment(tmp_path, monkeypatch, capsys):
 
     assert code == 0
     assert "moment bbb (iteration)" in out
-    assert C.ACTION_DIRECTION_PROMPT in out
+    assert ACTION_PROMPT_PATH in out
 
 
 def test_random_pick_draws_from_every_loaded_split():
@@ -821,14 +905,14 @@ def test_an_excerpt_predating_the_field_is_classified():
 
 
 def test_no_entries_are_built_for_an_empty_post_cut_moment():
-    entries, counts = C.build_entries([SCAFFOLDED, EMPTY_POST_CUT])
+    entries, counts = C.build_entries([SCAFFOLDED, EMPTY_POST_CUT], PROMPTS)
 
     assert {e["key"] for e in entries} == {"action__aaa", "overscaffold__aaa"}
     assert counts["no_post_cut_content"] == 1
 
 
 def test_skipped_moment_still_gets_a_record_naming_the_reason():
-    record = C.build_record(EMPTY_POST_CUT, RAW, CFG)
+    record = C.build_record(EMPTY_POST_CUT, RAW, CFG, PROMPTS)
 
     assert record["classified"] is False
     assert record["skipped"] == "no_post_cut_content"
@@ -841,7 +925,7 @@ def test_skipped_moment_still_gets_a_record_naming_the_reason():
 def test_skipped_moments_are_not_counted_as_parse_failures(monkeypatch):
     monkeypatch.setattr(C, "run_entries", lambda entries, cfg, batch_id=None: {})
 
-    out, counts = C.classify({"iteration": [EMPTY_POST_CUT]}, CFG)
+    out, counts = C.classify({"iteration": [EMPTY_POST_CUT]}, CFG, PROMPTS)
 
     assert counts["action_direction_unparsed"] == 0
     assert len(out["iteration"]) == 1
@@ -850,7 +934,7 @@ def test_skipped_moments_are_not_counted_as_parse_failures(monkeypatch):
 def test_report_names_the_skipped_moments(monkeypatch, capsys):
     monkeypatch.setattr(C, "run_entries", lambda entries, cfg, batch_id=None: RAW)
 
-    out, counts = C.classify({"iteration": [SCAFFOLDED, EMPTY_POST_CUT]}, CFG)
+    out, counts = C.classify({"iteration": [SCAFFOLDED, EMPTY_POST_CUT]}, CFG, PROMPTS)
 
     assert "1 moment(s) not classified" in C.report(out, counts, dry_run=False)
 
@@ -859,7 +943,7 @@ def test_report_breaks_the_over_scaffolding_skips_down_by_reason(monkeypatch, ca
     monkeypatch.setattr(C, "run_entries", lambda entries, cfg, batch_id=None: RAW)
 
     out, counts = C.classify(
-        {"iteration": [SCAFFOLDED, UNSCAFFOLDED, UNCALLED_FOR]}, CFG
+        {"iteration": [SCAFFOLDED, UNSCAFFOLDED, UNCALLED_FOR]}, CFG, PROMPTS
     )
     text = C.report(out, counts, dry_run=False)
 
@@ -875,60 +959,129 @@ def test_missing_field_warns_with_the_rebuild_command(caplog):
                 {
                     "moment_id": "old",
                     "labels": {},
-                    "excerpts": {
-                        str(w): {"excerpt": "x"}
-                        for w in (
-                            C.ACTION_CONTEXT_TURNS,
-                            C.OVER_SCAFFOLDING_CONTEXT_TURNS,
-                        )
-                    },
+                    "excerpts": {C.EXCERPT_WIDTH: {"excerpt": "x"}},
                 }
-            ]
+            ],
+            PROMPTS,
         )
 
     assert "v2.excerpts" in caplog.text
 
 
 # ===========================================================================
-# Per-prompt context width
+# Excerpt rendering the prompts read
 # ===========================================================================
 
 
-def test_each_prompt_is_filled_from_its_own_window():
-    """Action direction reads the 5-turn window, over-scaffolding the 20-turn one."""
-    entries, _ = C.build_entries([SCAFFOLDED])
+def test_both_prompts_are_filled_from_the_whole_transcript():
+    """Neither pass reads a lead-up window; both get the full rendering."""
+    entries, _ = C.build_entries([SCAFFOLDED], PROMPTS)
     by_key = {
         e["key"]: e["request"]["contents"][0]["parts"][0]["text"] for e in entries
     }
 
-    assert "wide lead-up" not in by_key["action__aaa"]
-    assert "wide lead-up" in by_key["overscaffold__aaa"]
+    assert "whole transcript" in by_key["action__aaa"]
+    assert "whole transcript" in by_key["overscaffold__aaa"]
+    assert "wide lead-up" not in by_key["overscaffold__aaa"]
 
 
-def test_excerpt_at_picks_the_requested_width():
-    assert C.excerpt_at(SCAFFOLDED, 5).startswith("Turn 1.")
-    assert C.excerpt_at(SCAFFOLDED, 20).startswith("wide lead-up")
+def test_excerpt_at_defaults_to_the_full_rendering():
+    assert C.EXCERPT_WIDTH == "full"
+    assert C.excerpt_at(SCAFFOLDED).startswith("whole transcript")
+    assert C.excerpt_at(SCAFFOLDED, "20").startswith("wide lead-up")
 
 
 def test_a_missing_width_names_the_rebuild_command():
-    narrow_only = dict(SCAFFOLDED, excerpts={"5": {"excerpt": "x"}})
+    """An excerpt file built before `full` existed must not silently truncate."""
+    windowed_only = dict(SCAFFOLDED, excerpts={"5": {"excerpt": "x"}})
 
-    with pytest.raises(KeyError, match="v2.excerpts --context-turns"):
-        C.excerpt_at(narrow_only, C.OVER_SCAFFOLDING_CONTEXT_TURNS)
+    with pytest.raises(KeyError, match="v2.excerpts --context-turns full"):
+        C.excerpt_at(windowed_only)
 
 
 def test_the_widths_each_pass_used_are_recorded():
-    record = C.build_record(SCAFFOLDED, RAW, CFG)
+    record = C.build_record(SCAFFOLDED, RAW, CFG, PROMPTS)
 
     assert record["context_turns"] == {
-        "action_direction": C.ACTION_CONTEXT_TURNS,
-        "over_scaffolding": C.OVER_SCAFFOLDING_CONTEXT_TURNS,
+        "action_direction": "full",
+        "over_scaffolding": "full",
     }
 
 
-def test_print_labels_each_prompt_with_its_window(tmp_path, capsys):
+def test_print_labels_each_prompt_with_the_rendering_it_read(tmp_path, capsys):
     C.main(["--excerpt-dir", _write_excerpts(tmp_path), "--print", "aaa"])
     out = capsys.readouterr().out
 
-    assert f"({C.ACTION_CONTEXT_TURNS}-turn window)" in out
-    assert f"({C.OVER_SCAFFOLDING_CONTEXT_TURNS}-turn window)" in out
+    assert out.count(f"(@{C.EXCERPT_WIDTH} excerpt)") == 2
+
+
+# ===========================================================================
+# Overwrite protection
+# ===========================================================================
+
+
+def test_a_second_round_refuses_to_replace_the_first(tmp_path, monkeypatch):
+    """Predictions cost money to make; a re-run must not silently discard them."""
+    excerpt_dir = _write_excerpts(tmp_path)
+    monkeypatch.setattr(C, "run_entries", lambda entries, cfg, batch_id=None: RAW)
+    out_dir = tmp_path / "out"
+    # Version pinned: what is under test is the refusal, not which prompts ran.
+    argv = ["--excerpt-dir", excerpt_dir, "--out-dir", str(out_dir), "--prompt-version", "1"]
+
+    assert C.main(argv) == 0
+    written = (out_dir / "claude-opus-5" / "1" / "iteration.jsonl").read_text(
+        encoding="utf-8"
+    )
+
+    with pytest.raises(FileExistsError, match="--overwrite"):
+        C.main(argv)
+
+    assert (out_dir / "claude-opus-5" / "1" / "iteration.jsonl").read_text(
+        encoding="utf-8"
+    ) == written
+
+
+def test_the_refusal_comes_before_the_batch_is_submitted(tmp_path, monkeypatch):
+    """Refusing after the round would have already spent the money it protects."""
+    excerpt_dir = _write_excerpts(tmp_path)
+    monkeypatch.setattr(C, "run_entries", lambda entries, cfg, batch_id=None: RAW)
+    out_dir = tmp_path / "out"
+    argv = ["--excerpt-dir", excerpt_dir, "--out-dir", str(out_dir)]
+    assert C.main(argv) == 0
+
+    def _boom(*args, **kwargs):
+        raise AssertionError("submitted a batch it was going to refuse to write")
+
+    monkeypatch.setattr(C, "run_entries", _boom)
+    with pytest.raises(FileExistsError):
+        C.main(argv)
+
+
+def test_overwrite_replaces_the_earlier_round(tmp_path, monkeypatch):
+    excerpt_dir = _write_excerpts(tmp_path)
+    monkeypatch.setattr(C, "run_entries", lambda entries, cfg, batch_id=None: RAW)
+    out_dir = tmp_path / "out"
+    argv = ["--excerpt-dir", excerpt_dir, "--out-dir", str(out_dir), "--prompt-version", "1"]
+
+    assert C.main(argv) == 0
+    assert C.main(argv + ["--overwrite"]) == 0
+    assert (out_dir / "claude-opus-5" / "1" / "iteration.jsonl").exists()
+
+
+def test_a_new_prompt_version_is_not_an_overwrite(tmp_path, monkeypatch):
+    """The version directory is what keeps a revision from clobbering the last."""
+    excerpt_dir = _write_excerpts(tmp_path)
+    monkeypatch.setattr(C, "run_entries", lambda entries, cfg, batch_id=None: RAW)
+    monkeypatch.setattr(
+        C, "load_prompt_set", lambda version: C.PromptSet(
+            version=version, paths=PROMPTS.paths, templates=PROMPTS.templates
+        )
+    )
+    out_dir = tmp_path / "out"
+    argv = ["--excerpt-dir", excerpt_dir, "--out-dir", str(out_dir)]
+
+    assert C.main(argv + ["--prompt-version", "1"]) == 0
+    assert C.main(argv + ["--prompt-version", "2"]) == 0
+
+    assert (out_dir / "claude-opus-5" / "1" / "iteration.jsonl").exists()
+    assert (out_dir / "claude-opus-5" / "2" / "iteration.jsonl").exists()

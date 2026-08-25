@@ -489,6 +489,100 @@ class TestBuildMoments:
         assert moments[0]["passes"][0]["annotator_name"] == "a"
 
 
+class TestAdjudicatorPasses:
+    """An adjudicator files their judgment under `final`, so a pass shape that reads
+    the payload root finds nothing on them and renders an empty column."""
+
+    def _adjudicated(self, **payload):
+        moments = build_moments(
+            [
+                record(
+                    [
+                        annotation("a", "selector", **judged()),
+                        annotation("b", "reannotator", **judged()),
+                        annotation("c", "adjudicator", **payload),
+                    ]
+                )
+            ]
+        )
+        return {p["role"]: p for p in moments[0]["passes"]}["adjudicator"]
+
+    def test_the_judgment_is_unwrapped_for_the_page(self):
+        pass_ = self._adjudicated(
+            final=judged(situation=situation(why="the adjudicator's reading")),
+            meta={},
+        )
+        assert pass_["sar"]["situation"]["why"] == "the adjudicator's reading"
+        assert pass_["sar"]["action"]["explanation"] == "did a thing"
+        assert pass_["sar"]["result"]["explanation"] == "outcome"
+        assert pass_["axes"]["scaffolding_present"] is True
+
+    def test_observations_are_unwrapped_too(self):
+        pass_ = self._adjudicated(
+            final={**judged(), "other_observations": "worth noting"}, meta={}
+        )
+        assert pass_["observations"] == "worth noting"
+
+    def test_a_selectors_judgment_is_left_where_it_is(self):
+        moments = build_moments([record([annotation("a", "selector", **judged())])])
+        pass_ = moments[0]["passes"][0]
+        assert pass_["sar"]["situation"]["why"] == "because"
+        assert pass_["observations"] == ""
+
+    def test_how_they_resolved_the_two_passes_is_carried_through(self):
+        decisions = {"situation": "agreed", "action": "reannotator"}
+        pass_ = self._adjudicated(
+            final=judged(), rationale="  took the second read on the action  ",
+            decisions=decisions, meta={},
+        )
+        assert pass_["rationale"] == "took the second read on the action"
+        assert pass_["decisions"] == decisions
+
+    def test_no_rationale_recorded_is_empty_not_missing(self):
+        pass_ = self._adjudicated(final=judged(), rationale="", meta={})
+        assert pass_["rationale"] == ""
+        assert pass_["decisions"] is None
+
+    def test_an_adjudicator_who_threw_the_moment_out_recorded_no_judgment(self):
+        pass_ = self._adjudicated(final={}, meta={"throw_out": True})
+        assert pass_["sar"] is None
+        assert pass_["axes"] is None
+
+    def test_a_mixed_export_partitions_by_how_far_review_got(self):
+        """What the page's adjudication filter slices on: whether a moment has an
+        adjudicator pass at all, and whether that pass left labels or removed it."""
+        moments = build_moments(
+            [
+                record(
+                    [
+                        annotation("a", "selector", **judged()),
+                        annotation("c", "adjudicator", final=judged(), meta={}),
+                    ],
+                    moment_id="labelled",
+                ),
+                record(
+                    [
+                        annotation("a", "selector", **judged()),
+                        annotation(
+                            "c", "adjudicator", final={}, meta={"throw_out": True}
+                        ),
+                    ],
+                    moment_id="thrown",
+                ),
+                record([annotation("a", "selector", **judged())], moment_id="untouched"),
+            ]
+        )
+        adjudicator = {
+            m["id"]: next(
+                (p for p in m["passes"] if p["role"] == "adjudicator"), None
+            )
+            for m in moments
+        }
+        assert adjudicator["untouched"] is None
+        assert adjudicator["labelled"]["axes"] is not None
+        assert adjudicator["thrown"]["axes"] is None
+
+
 class TestNoKeyMomentVerdicts:
     def test_reads_the_verdict_and_its_note(self):
         verdicts = no_key_moment_verdicts(

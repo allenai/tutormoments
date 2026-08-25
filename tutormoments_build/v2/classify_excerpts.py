@@ -2,11 +2,15 @@
 
 ``excerpts.py`` creates excerpts. 
 
-Using
-prompts in ``tutormoments_build/prompts/v2/``: 
+Using prompts in ``tutormoments_build/prompts/v2/<version>/``:
 
   action_direction.md    scaffolding yes/no, rigor yes/no, plus a description
   over-scaffolding.md    over-scaffolding yes/no, plus a description
+
+The prompts are versioned by directory and ``--prompt-version`` picks the set,
+defaulting to the newest version present. An edited prompt asks a different
+question, so its predictions are filed apart from the ones the previous revision
+made rather than replacing them.
 
 Together they predict ``scaffolding_present``, ``rigor_present``, ``over_scaffolding_present``,
 in a manner that lines up for direct comparison with gold labels. 
@@ -21,7 +25,12 @@ for, the tutor scaffolded, did they scaffold too much?
 Moments outside the gate get no over-scaffolding call at all: the field is
 ``null``. 
 
-Both passes ride in one batch.
+Both passes ride in one batch, and both read the same excerpt: the whole
+transcript from its first row through the moment's last, with no lead-up window
+-- the ``full`` rendering ``excerpts.py`` writes. Nothing before the cut is
+elided, so a prompt weighing what the student has already shown, or what the
+tutor has already tried, is reading the whole session rather than a window
+guessed in advance.
 
 Model and thinking default to the ``v2`` block in the runtime config. 
 ``--model`` sets the model, with hyperparameters 
@@ -29,7 +38,10 @@ Model and thinking default to the ``v2`` block in the runtime config.
 that model's entry under ``v2.models`` in the config. Falling back to the
 top-level ``models`` tutor roster for an id already configured there.
 
-Predictions are written per model: ``<out-dir>/<model>/<split>.jsonl``. 
+Predictions are written per model and prompt version:
+``<out-dir>/<model>/<prompt version>/<split>.jsonl``. An existing file is never
+replaced unless ``--overwrite`` says to, and the check runs before the batch is
+submitted rather than after it.
 
 Only the ``iteration`` split runs by default. The ``test`` split is held out
 while the prompts are still changing, and is classified with an explicit
@@ -47,6 +59,8 @@ Usage::
     python -m tutormoments_build.v2.classify_excerpts
     python -m tutormoments_build.v2.classify_excerpts --splits test
     python -m tutormoments_build.v2.classify_excerpts --model claude-opus-5
+    python -m tutormoments_build.v2.classify_excerpts --prompt-version 2
+    python -m tutormoments_build.v2.classify_excerpts --overwrite
     python -m tutormoments_build.v2.classify_excerpts --print
     python -m tutormoments_build.v2.classify_excerpts --print 02e89625
     python -m tutormoments_build.v2.classify_excerpts --batch-id msgbatch_01ABC...
@@ -60,9 +74,11 @@ import random
 import re
 import sys
 from collections import Counter
+from dataclasses import dataclass
 
 from tutormoments.logging_setup import logging_args_parent, setup_logging
-from tutormoments_build.resources import resource_text
+from tutormoments_build.resources import resource_path, resource_text
+from tutormoments_build.v2 import excerpts
 
 logger = logging.getLogger("tutormoments_build.v2.classify_excerpts")
 
@@ -78,17 +94,31 @@ SPLIT_STEMS = ("iteration", "test")
 # is classified once the prompts are frozen, with `--splits test`.
 DEFAULT_SPLITS = ("iteration",)
 
-ACTION_DIRECTION_PROMPT = "prompts/v2/action_direction.md"
-OVER_SCAFFOLDING_PROMPT = "prompts/v2/over-scaffolding.md"
+# Prompts are versioned: each revision is a numbered directory under
+# PROMPT_ROOT holding a full set, and predictions are filed under the version
+# that produced them. A prompt edit changes what the labels mean, so a run made
+# before it and one made after it are not comparable and must not land in the
+# same file.
+PROMPT_ROOT = "prompts/v2"
 
-# Lead-up each prompt reads, in dialogue turns before the cut. They differ
-# because the questions differ: action direction asks only what the tutor's
-# *first* move after the cut is, which the immediate exchange settles, while
-# over-scaffolding asks whether the student had already shown they could do the
-# work -- a judgment that needs to see enough of the session to answer.
-# The excerpt file must have been built at both widths (it is, by default).
-ACTION_CONTEXT_TURNS = 5
-OVER_SCAFFOLDING_CONTEXT_TURNS = 20
+# Version a bare run falls back to when the prompt root cannot be read at all.
+# The real default is the newest version present -- see latest_prompt_version.
+FALLBACK_PROMPT_VERSION = "1"
+
+# Pass name -> its template's filename inside a version directory.
+PROMPT_FILES = {
+    "action_direction": "action_direction.md",
+    "over_scaffolding": "over-scaffolding.md",
+}
+
+# What both prompts read: the excerpt rendered with no lead-up window at all --
+# the transcript from its first row through the moment's last. Neither question
+# is settled by the immediate exchange alone (over-scaffolding asks whether the
+# student had already shown they could do the work, and even action direction
+# reads differently against what the tutor has already tried), so rather than
+# guess a width that holds for both, they get the whole session. The excerpt
+# file must have been built at this width (it is, by default).
+EXCERPT_WIDTH = excerpts.FULL_KEY
 
 # Batch-entry key prefixes. Neither contains "__", and a moment_id is a UUID, so
 # a key splits back apart on the first "__".
@@ -108,6 +138,88 @@ ZERO_USAGE = {"input_tokens": 0, "output_tokens": 0, "total_tokens": 0}
 
 # Sentinel for `--print` passed with no id: pick a moment at random.
 RANDOM = object()
+
+
+# ===========================================================================
+# Prompt versions
+# ===========================================================================
+
+
+@dataclass(frozen=True)
+class PromptSet:
+    """One numbered revision of the v2 prompts, loaded from disk.
+
+    ``paths`` is what a prediction record reports it was made with, so the file
+    names the exact templates rather than only their version number.
+    """
+
+    version: str
+    paths: dict[str, str]
+    templates: dict[str, str]
+
+
+def prompt_paths(version: str) -> dict[str, str]:
+    """Package-relative paths to one version's templates, by pass name."""
+    return {
+        name: f"{PROMPT_ROOT}/{version}/{filename}"
+        for name, filename in PROMPT_FILES.items()
+    }
+
+
+def available_prompt_versions() -> list[str]:
+    """Version directories present under PROMPT_ROOT, numerically where possible.
+
+    Used to pick the default version and to make a bad --prompt-version say what
+    the alternatives are, so a missing prompt root is an empty list rather than
+    an error -- the caller either has a fallback or is already reporting a
+    failure and should not be derailed by a second one.
+    """
+    try:
+        root = resource_path(PROMPT_ROOT)
+        names = [entry.name for entry in root.iterdir() if entry.is_dir()]
+    except (FileNotFoundError, NotADirectoryError):
+        return []
+    return sorted(names, key=lambda n: (not n.isdigit(), int(n) if n.isdigit() else n))
+
+
+def latest_prompt_version() -> str:
+    """The newest numbered prompt version present under PROMPT_ROOT.
+
+    This is what a bare run classifies with. A prompt revision is written to be
+    run, and a default pinned to a number would leave a bare run quietly
+    classifying with an older set and filing its predictions under that older
+    version -- the edit never exercised, and the comparison it was made to
+    settle never made.
+
+    Numbered versions sort numerically, so this is v10 rather than v9 once there
+    are ten of them. Unnumbered directories are ignored: a scratch copy left
+    beside the numbered sets must not become what a bare run uses. Falls back to
+    FALLBACK_PROMPT_VERSION when there is nothing to read, leaving the failure to
+    ``load_prompt_set``, which reports it with the versions that do exist.
+    """
+    numbered = [name for name in available_prompt_versions() if name.isdigit()]
+    return numbered[-1] if numbered else FALLBACK_PROMPT_VERSION
+
+
+def load_prompt_set(version: str) -> PromptSet:
+    """Load every template for one prompt version.
+
+    Both templates are read up front so a version missing one fails here, before
+    any moment is sent, rather than half way through a round that has already
+    been paid for.
+    """
+    paths = prompt_paths(version)
+    templates = {}
+    for name, path in paths.items():
+        try:
+            templates[name] = resource_text(path)
+        except (FileNotFoundError, NotADirectoryError) as exc:
+            available = available_prompt_versions()
+            raise FileNotFoundError(
+                f"no {name} prompt at {path}; prompt versions available: "
+                f"{', '.join(available) or '(none)'}"
+            ) from exc
+    return PromptSet(version=version, paths=paths, templates=templates)
 
 
 # ===========================================================================
@@ -253,23 +365,23 @@ def fill(template: str, excerpt: str) -> str:
     return template.replace("{excerpt}", excerpt)
 
 
-def excerpt_at(record: dict, context_turns: int) -> str:
-    """The moment's excerpt rendered at ``context_turns`` of lead-up.
+def excerpt_at(record: dict, width: str = EXCERPT_WIDTH) -> str:
+    """The moment's excerpt rendered at ``width`` of lead-up.
 
-    Excerpt files carry one rendering per width built (see
-    ``excerpts.DEFAULT_CONTEXT_WIDTHS``). A missing width is a build/consumer
-    mismatch rather than a data problem, so it raises with the command that
-    fixes it instead of silently falling back to a window the prompt was not
-    written for.
+    Excerpt files carry one rendering per width built, keyed by
+    ``excerpts.width_key`` (see ``excerpts.DEFAULT_CONTEXT_WIDTHS``). A missing
+    width is a build/consumer mismatch rather than a data problem, so it raises
+    with the command that fixes it instead of silently falling back to a window
+    the prompt was not written for -- an excerpt file built before ``full``
+    existed would otherwise hand the prompts a truncated session.
     """
     available = record.get("excerpts") or {}
-    rendered = available.get(str(context_turns))
+    rendered = available.get(width)
     if rendered is None:
         raise KeyError(
-            f"moment {record.get('moment_id')} has no {context_turns}-turn excerpt "
+            f"moment {record.get('moment_id')} has no {width!r} excerpt "
             f"(built: {', '.join(sorted(available)) or 'none'}); rebuild with "
-            f"`python -m tutormoments_build.v2.excerpts --context-turns "
-            f"{OVER_SCAFFOLDING_CONTEXT_TURNS} {ACTION_CONTEXT_TURNS}`"
+            f"`python -m tutormoments_build.v2.excerpts --context-turns {width}`"
         )
     return rendered["excerpt"]
 
@@ -322,12 +434,14 @@ def has_post_cut_content(record: dict) -> bool:
     return record.get("post_cut_rows", 1) > 0
 
 
-def build_entries(records: list[dict]) -> tuple[list[dict], Counter]:
+def build_entries(
+    records: list[dict], prompts: PromptSet
+) -> tuple[list[dict], Counter]:
     """Build the batch entries for one round. Returns (entries, per-pass counts)."""
     from tutormoments.client import build_batch_entry
 
-    action_template = resource_text(ACTION_DIRECTION_PROMPT)
-    over_template = resource_text(OVER_SCAFFOLDING_PROMPT)
+    action_template = prompts.templates["action_direction"]
+    over_template = prompts.templates["over_scaffolding"]
 
     entries: list[dict] = []
     counts: Counter = Counter()
@@ -344,7 +458,7 @@ def build_entries(records: list[dict]) -> tuple[list[dict], Counter]:
         entries.append(
             build_batch_entry(
                 f"{ACTION_PREFIX}__{moment_id}",
-                fill(action_template, excerpt_at(record, ACTION_CONTEXT_TURNS)),
+                fill(action_template, excerpt_at(record)),
                 json_mode=True,
             )
         )
@@ -354,10 +468,7 @@ def build_entries(records: list[dict]) -> tuple[list[dict], Counter]:
             entries.append(
                 build_batch_entry(
                     f"{OVER_SCAFFOLDING_PREFIX}__{moment_id}",
-                    fill(
-                        over_template,
-                        excerpt_at(record, OVER_SCAFFOLDING_CONTEXT_TURNS),
-                    ),
+                    fill(over_template, excerpt_at(record)),
                     json_mode=True,
                 )
             )
@@ -547,7 +658,9 @@ def _pass_result(raw: dict | None, parse) -> dict:
     }
 
 
-def build_record(excerpt_record: dict, raw_entries: dict, cfg: dict) -> dict:
+def build_record(
+    excerpt_record: dict, raw_entries: dict, cfg: dict, prompts: PromptSet
+) -> dict:
     """Assemble one prediction record from an excerpt record and the batch results.
 
     ``over_scaffolding`` is None when the pass was not asked about this moment
@@ -592,13 +705,17 @@ def build_record(excerpt_record: dict, raw_entries: dict, cfg: dict) -> dict:
         "effort": cfg.get("effort") or None,
         "reasoning_effort": cfg.get("reasoning_effort") or None,
         "thinking_budget": cfg.get("thinking_budget") or None,
-        "prompts": {
-            "action_direction": ACTION_DIRECTION_PROMPT,
-            "over_scaffolding": OVER_SCAFFOLDING_PROMPT,
-        },
+        # Which prompts wrote this label. The version is what the output path
+        # is keyed on; the paths are kept beside it so a record still names the
+        # templates if the directories are ever reorganised.
+        "prompt_version": prompts.version,
+        "prompts": dict(prompts.paths),
+        # Which rendering of the excerpt the prompts read. Both passes get the
+        # same one; it is recorded per pass so a later round that splits them
+        # apart again stays readable against this one.
         "context_turns": {
-            "action_direction": ACTION_CONTEXT_TURNS,
-            "over_scaffolding": OVER_SCAFFOLDING_CONTEXT_TURNS,
+            "action_direction": EXCERPT_WIDTH,
+            "over_scaffolding": EXCERPT_WIDTH,
         },
         "post_cut_rows": excerpt_record.get("post_cut_rows"),
         "post_cut_dialogue_rows": excerpt_record.get("post_cut_dialogue_rows"),
@@ -615,6 +732,7 @@ def build_record(excerpt_record: dict, raw_entries: dict, cfg: dict) -> dict:
 def classify(
     excerpts: dict[str, list[dict]],
     cfg: dict,
+    prompts: PromptSet,
     *,
     batch_id: str | None = None,
 ) -> tuple[dict[str, list[dict]], Counter]:
@@ -625,13 +743,15 @@ def classify(
     apart again on the way out.
     """
     flat = [record for records in excerpts.values() for record in records]
-    entries, counts = build_entries(flat)
+    entries, counts = build_entries(flat, prompts)
 
     raw_entries = run_entries(entries, cfg, batch_id=batch_id) if entries else {}
 
     out: dict[str, list[dict]] = {}
     for stem, records in excerpts.items():
-        built = [build_record(record, raw_entries, cfg) for record in records]
+        built = [
+            build_record(record, raw_entries, cfg, prompts) for record in records
+        ]
         for record in built:
             if not record["classified"]:
                 continue
@@ -644,15 +764,43 @@ def classify(
     return out, counts
 
 
-def model_dir(out_dir: str, model: str) -> str:
-    """The output directory for one model's predictions.
+def prediction_dir(out_dir: str, model: str, prompt_version: str) -> str:
+    """The output directory for one model's predictions at one prompt version.
 
     Predictions are filed under the model that made them so a comparison run
-    does not overwrite the round before it. Model ids can carry a vendor prefix
+    does not overwrite the round before it, and under the prompt version below
+    that so a prompt revision does not either -- an edited prompt asks a
+    different question, and its answers are a different result set rather than a
+    fresher copy of the old one. Model ids can carry a vendor prefix
     ("deepseek-ai/DeepSeek-V4-Pro"), which would otherwise nest a directory;
     the separator is flattened so every model gets exactly one level.
     """
-    return os.path.join(out_dir, model.replace("/", "_"))
+    return os.path.join(out_dir, model.replace("/", "_"), prompt_version)
+
+
+def existing_outputs(out_dir: str, stems) -> list[str]:
+    """Prediction files in ``out_dir`` that a round over ``stems`` would replace."""
+    paths = [os.path.join(out_dir, f"{stem}.jsonl") for stem in stems]
+    return [path for path in paths if os.path.exists(path)]
+
+
+def check_writable(out_dir: str, stems, overwrite: bool) -> None:
+    """Refuse to clobber existing predictions unless --overwrite says to.
+
+    Called before the batch is submitted, not before the write: a round costs
+    real money, and discovering at the end that the results have nowhere to go
+    would either throw them away or force the overwrite this check exists to
+    prevent.
+    """
+    if overwrite:
+        return
+    existing = existing_outputs(out_dir, stems)
+    if existing:
+        raise FileExistsError(
+            f"{len(existing)} prediction file(s) already here: "
+            f"{', '.join(existing)}. Pass --overwrite to replace them, or "
+            "--out-dir to write elsewhere."
+        )
 
 
 def write_split(out_dir: str, stem: str, records: list[dict]) -> str:
@@ -719,11 +867,28 @@ def _model_line(cfg: dict | None) -> list[str]:
     return [f"  model: {cfg['model']} ({', '.join(knobs)})", ""]
 
 
+def _prompt_line(prompts: "PromptSet | None", out_dir: str | None) -> list[str]:
+    """The prompt version the round ran, and where its predictions land.
+
+    Printed on dry runs too: the version decides both which templates are filled
+    and which file is written, so it is the one setting worth confirming before
+    paying for a round.
+    """
+    if prompts is None:
+        return []
+    lines = [f"  prompts: v{prompts.version} ({PROMPT_ROOT}/{prompts.version}/)"]
+    if out_dir:
+        lines.append(f"  output:  {out_dir}/")
+    return lines + [""]
+
+
 def report(
     out: dict[str, list[dict]],
     counts: Counter,
     dry_run: bool,
     cfg: dict | None = None,
+    prompts: "PromptSet | None" = None,
+    out_dir: str | None = None,
 ) -> str:
     lines = [
         "",
@@ -733,6 +898,7 @@ def report(
         "",
     ]
     lines += _model_line(cfg)
+    lines += _prompt_line(prompts, out_dir)
 
     if dry_run:
         if counts["no_post_cut_content"]:
@@ -826,6 +992,20 @@ def build_parser() -> argparse.ArgumentParser:
         "in <out-dir>/<model>/.",
     )
     parser.add_argument(
+        "--prompt-version",
+        default=latest_prompt_version(),
+        metavar="VERSION",
+        help="Which numbered prompt set under "
+        f"tutormoments_build/{PROMPT_ROOT}/ to classify with. Defaults to the "
+        "newest one present. Predictions land in <out-dir>/<model>/<version>/.",
+    )
+    parser.add_argument(
+        "--overwrite",
+        action="store_true",
+        help="Replace prediction files that are already there. Without it a "
+        "round that would overwrite one refuses before making any API call.",
+    )
+    parser.add_argument(
         "--splits",
         nargs="+",
         choices=SPLIT_STEMS,
@@ -876,7 +1056,9 @@ def pick_moment(excerpts: dict[str, list[dict]], prefix: str) -> dict | None:
     return next((r for r in flat if r["moment_id"].startswith(prefix)), None)
 
 
-def _print_prompts(excerpts: dict[str, list[dict]], prefix: str) -> int:
+def _print_prompts(
+    excerpts: dict[str, list[dict]], prefix: str, prompts: PromptSet
+) -> int:
     record = pick_moment(excerpts, prefix)
     if record is None:
         if prefix is RANDOM:
@@ -885,25 +1067,22 @@ def _print_prompts(excerpts: dict[str, list[dict]], prefix: str) -> int:
             print(f"no moment matching {prefix!r}", file=sys.stderr)
         return 1
 
-    action_template = resource_text(ACTION_DIRECTION_PROMPT)
-    over_template = resource_text(OVER_SCAFFOLDING_PROMPT)
+    action_template = prompts.templates["action_direction"]
+    over_template = prompts.templates["over_scaffolding"]
+    action_path = prompts.paths["action_direction"]
+    over_path = prompts.paths["over_scaffolding"]
 
     # Naming the moment makes a random pick reproducible: the id printed here is
     # what `--print <id>` takes to render this exact moment again.
     print(f"===== moment {record['moment_id']} ({record['split']}) =====\n")
-    print(
-        f"===== {ACTION_DIRECTION_PROMPT} ({ACTION_CONTEXT_TURNS}-turn window) =====\n"
-    )
-    print(fill(action_template, excerpt_at(record, ACTION_CONTEXT_TURNS)))
+    print(f"===== {action_path} (@{EXCERPT_WIDTH} excerpt) =====\n")
+    print(fill(action_template, excerpt_at(record)))
     if wants_over_scaffolding(record):
-        print(
-            f"\n\n===== {OVER_SCAFFOLDING_PROMPT} "
-            f"({OVER_SCAFFOLDING_CONTEXT_TURNS}-turn window) =====\n"
-        )
-        print(fill(over_template, excerpt_at(record, OVER_SCAFFOLDING_CONTEXT_TURNS)))
+        print(f"\n\n===== {over_path} (@{EXCERPT_WIDTH} excerpt) =====\n")
+        print(fill(over_template, excerpt_at(record)))
     else:
         print(
-            f"\n\n===== {OVER_SCAFFOLDING_PROMPT} =====\n\n"
+            f"\n\n===== {over_path} =====\n\n"
             f"not asked: {_SKIP_LABELS[skip_reason(record)]}"
         )
     return 0
@@ -917,30 +1096,43 @@ def main(argv: list[str] | None = None) -> int:
     if args.limit is not None:
         excerpts = {stem: records[: args.limit] for stem, records in excerpts.items()}
 
+    # Loaded before anything else uses it so an unknown --prompt-version fails
+    # on every path, --print and --dry-run included.
+    prompts = load_prompt_set(args.prompt_version)
+
     if args.print_moment:
-        return _print_prompts(excerpts, args.print_moment)
+        return _print_prompts(excerpts, args.print_moment, prompts)
 
     # Resolved before the dry run too, so an unknown --model fails there rather
     # than only once a real round is submitted.
     cfg = phase_config(model=args.model)
+    out_dir = prediction_dir(args.out_dir, cfg["model"], prompts.version)
 
     if args.dry_run:
         _, counts = build_entries(
-            [record for records in excerpts.values() for record in records]
+            [record for records in excerpts.values() for record in records],
+            prompts,
         )
-        print(report({}, counts, dry_run=True, cfg=cfg))
+        print(
+            report(
+                {}, counts, dry_run=True, cfg=cfg, prompts=prompts, out_dir=out_dir
+            )
+        )
         return 0
 
+    # Before the batch, not after it: see check_writable.
+    check_writable(out_dir, args.splits, args.overwrite)
+
     logger.info(
-        "classifying %d moment(s) with model=%s thinking=%s",
+        "classifying %d moment(s) with model=%s thinking=%s prompts=v%s",
         sum(len(records) for records in excerpts.values()),
         cfg["model"],
         cfg.get("thinking"),
+        prompts.version,
     )
 
-    out, counts = classify(excerpts, cfg, batch_id=args.batch_id)
+    out, counts = classify(excerpts, cfg, prompts, batch_id=args.batch_id)
 
-    out_dir = model_dir(args.out_dir, cfg["model"])
     for stem, records in out.items():
         logger.info(
             "wrote %d prediction(s) to %s",
@@ -948,7 +1140,9 @@ def main(argv: list[str] | None = None) -> int:
             write_split(out_dir, stem, records),
         )
 
-    print(report(out, counts, dry_run=False, cfg=cfg))
+    print(
+        report(out, counts, dry_run=False, cfg=cfg, prompts=prompts, out_dir=out_dir)
+    )
     return 0
 
 

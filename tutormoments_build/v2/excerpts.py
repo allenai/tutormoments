@@ -8,17 +8,19 @@ The output is used to format transcript excerpts for action classification.
 - ``start_turn``/``end_turn`` count dialogue only
 - ``start_index``/``end_index`` are positions in the rendered row
 
-The lead-up window is measured in *dialogue turns* (``context_turns``).
-The window is measured back from the cut point, and from nothing else: it may
-reach back past the moment's start, and on a long moment it may open *inside*
-the moment, after ``start_index``. Every excerpt at a given width therefore
-carries the same amount of lead-up, however the moment was drawn.
+Each moment is rendered at every width in ``--context-turns``. A turn count is
+a lead-up window measured in *dialogue turns*, back from the cut point and from
+nothing else: it may reach back past the moment's start, and on a long moment it
+may open *inside* the moment, after ``start_index``. Every excerpt at a given
+width therefore carries the same amount of lead-up, however the moment was
+drawn. ``full`` is no window at all -- the transcript from its first row.
 
 The excerpt stops at the moment's last row.
 
 Usage:
     python -m tutormoments_build.v2.excerpts --dry-run
     python -m tutormoments_build.v2.excerpts --context-turns 8
+    python -m tutormoments_build.v2.excerpts --context-turns full 20
     python -m tutormoments_build.v2.excerpts --print 02e89625-9d6b-5e00-b40d-5d38a6adb2b3
 """
 
@@ -45,17 +47,39 @@ SPLIT_STEMS = ("iteration", "test")
 
 DEFAULT_CONTEXT_TURNS = 20
 
+# The "no window at all" width: the excerpt opens on the transcript's first row
+# and runs to the moment's end. Spelled ``None`` in code and ``"full"`` in the
+# record, because it is not a turn count and writing it as a very large one
+# would read as a window that happens not to bind.
+FULL = None
+FULL_KEY = "full"
+
 # Lead-up widths every excerpt is rendered at. One moment yields one excerpt per
-# width, and a consumer picks the one its prompt calls for -- the v2
-# action-direction prompt reads 5 turns, over-scaffolding reads 20, and asking
-# them to share a width would mean rebuilding this file to change either.
-DEFAULT_CONTEXT_WIDTHS = (20, 5)
+# width, and a consumer picks the one its prompt calls for. Both v2
+# classification prompts read the full transcript, so ``FULL`` is the width that
+# is actually sent; 20 and 5 are kept so a round can be re-run against a narrow
+# window without rebuilding this file.
+DEFAULT_CONTEXT_WIDTHS = (FULL, 20, 5)
 
 # The excerpt's one marker, and the literal string both v2 prompts name. It is
 # bare: its position in the text is the whole signal. Row indices are a
 # build-side artifact and turn numbers a lossy projection of them (see above),
 # so printing either would add noise a reader cannot act on.
 CUT_POINT = ">>> CUT POINT <<<"
+
+
+def width_key(width: int | None) -> str:
+    """The ``excerpts`` key one width is filed under.
+
+    JSON object keys are strings, so a turn count is stored as its digits and
+    ``FULL`` as ``"full"``. Consumers look a rendering up by this key.
+    """
+    return FULL_KEY if width is FULL else str(width)
+
+
+def sort_widths(keys) -> list[str]:
+    """Width keys widest-first: ``full``, then descending turn counts."""
+    return sorted(set(keys), key=lambda key: (0, 0) if key == FULL_KEY else (1, -int(key)))
 
 
 # ===========================================================================
@@ -97,7 +121,7 @@ def load_ground_truth(ground_truth_dir: str) -> dict[str, list[dict]]:
 def context_start(
     rows: list[dict],
     anchor_row: int,
-    context_turns: int,
+    context_turns: int | None,
     max_context_rows: int | None = None,
 ) -> int:
     """First row of the lead-up window before ``anchor_row``.
@@ -108,12 +132,18 @@ def context_start(
     on something someone said rather than mid-way through a run of screen
     activity. Runs out of transcript -> opens at row 0.
 
+    ``context_turns`` of ``FULL`` is no window at all: row 0, the transcript's
+    first row, whatever ``max_context_rows`` says -- an unbounded lead-up is the
+    point of that width, so a cap would quietly turn it back into a window.
+
     ``max_context_rows`` clamps the result, for the dense-screen-activity case
     where a few turns of lead-up span a great many rows.
 
     ``render_excerpt`` anchors this on the *cut point*, not the moment start --
     see there for why.
     """
+    if context_turns is FULL:
+        return 0
     if context_turns <= 0:
         first = anchor_row
     else:
@@ -162,7 +192,7 @@ def render_excerpt(
     rows: list[dict],
     boundaries: dict,
     *,
-    context_turns: int = DEFAULT_CONTEXT_TURNS,
+    context_turns: int | None = DEFAULT_CONTEXT_TURNS,
     max_context_rows: int | None = None,
 ) -> tuple[str, int]:
     """Render one moment's excerpt. Returns (text, first row rendered).
@@ -181,8 +211,9 @@ def render_excerpt(
 
     The window runs from the lead-up through ``end_index`` and stops there --
     no trailing context, because for this benchmark the moment's last row is
-    where the transcript ends. Its opening is measured back from ``cut_index``
-    (see the module docstring) and from nothing else: ``context_turns`` turns
+    where the transcript ends. At ``context_turns=FULL`` it opens on row 0 and
+    the rest of this paragraph does not apply. Otherwise its opening is measured
+    back from ``cut_index`` (see the module docstring) and from nothing else: ``context_turns`` turns
     before the cut is the whole rule, whether that reaches back past
     ``start_index`` or opens inside the moment. The teacher-drawn start is an
     annotation boundary, not a unit of context -- holding the window open to it
@@ -223,7 +254,7 @@ def build_record(
     rows: list[dict],
     conversation_id: str,
     *,
-    context_widths: "tuple[int, ...]" = DEFAULT_CONTEXT_WIDTHS,
+    context_widths: "tuple[int | None, ...]" = DEFAULT_CONTEXT_WIDTHS,
     max_context_rows: int | None = None,
 ) -> dict:
     """Assemble one excerpt record from a ground-truth record and its rows.
@@ -232,10 +263,10 @@ def build_record(
     else about the moment is recoverable by joining on ``moment_id``.
 
     ``excerpts`` holds one rendering per width in ``context_widths``, keyed by
-    the width as a string (JSON object keys are strings, and round-tripping the
-    file must not turn the key into something else). Only the lead-up differs
-    between them, so everything width-independent -- boundaries, row counts,
-    labels -- stays at the top level rather than being repeated per width.
+    ``width_key`` (JSON object keys are strings, and round-tripping the file
+    must not turn the key into something else). Only the lead-up differs between
+    them, so everything width-independent -- boundaries, row counts, labels --
+    stays at the top level rather than being repeated per width.
     """
     excerpts = {}
     for width in context_widths:
@@ -245,8 +276,10 @@ def build_record(
             context_turns=width,
             max_context_rows=max_context_rows,
         )
-        excerpts[str(width)] = {
+        excerpts[width_key(width)] = {
             "excerpt": text,
+            # The width as asked for: a turn count, or null for FULL, whose
+            # own name is the key this rendering sits under.
             "context_turns": width,
             "context_start_index": first,
             # Rows rendered before the cut -- the lead-up as the prompt sees it.
@@ -316,7 +349,7 @@ def build(
     ground_truth_dir: str,
     transcripts_path: str,
     *,
-    context_widths: "tuple[int, ...]" = DEFAULT_CONTEXT_WIDTHS,
+    context_widths: "tuple[int | None, ...]" = DEFAULT_CONTEXT_WIDTHS,
     max_context_rows: int | None = None,
 ) -> tuple[dict[str, list[dict]], Counter]:
     """Return ({output stem: [excerpt record, ...]}, per-reason drop counts)."""
@@ -396,7 +429,7 @@ def write_split(out_dir: str, stem: str, records: list[dict]) -> str:
 # ===========================================================================
 
 
-def _inside_moment_lines(out: dict[str, list[dict]], widths: list[int]) -> list[str]:
+def _inside_moment_lines(out: dict[str, list[dict]], widths: list[str]) -> list[str]:
     """How often each width opened inside the moment rather than before it.
 
     Worth surfacing per run: it is the share of moments where the prompt saw
@@ -408,12 +441,10 @@ def _inside_moment_lines(out: dict[str, list[dict]], widths: list[int]) -> list[
     if not records:
         return []
     lines = []
-    for width in widths:
-        inside = sum(
-            1 for r in records if r["excerpts"][str(width)]["opens_inside_moment"]
-        )
+    for key in widths:
+        inside = sum(1 for r in records if r["excerpts"][key]["opens_inside_moment"])
         lines.append(
-            f"    @{width:<4}{inside:>5} of {len(records)} ({inside / len(records):.0%})"
+            f"    @{key:<5}{inside:>5} of {len(records)} ({inside / len(records):.0%})"
         )
     return ["", "  windows opening inside the moment:", *lines] if lines else []
 
@@ -424,11 +455,9 @@ def report(out: dict[str, list[dict]], dropped: Counter, dry_run: bool) -> str:
         "DRY RUN -- nothing written" if dry_run else "Excerpts written",
         "",
     ]
-    widths = sorted(
-        (int(w) for records in out.values() for r in records for w in r["excerpts"]),
-        reverse=True,
+    widths = sort_widths(
+        w for records in out.values() for r in records for w in r["excerpts"]
     )
-    widths = list(dict.fromkeys(widths))
 
     lead_up = "".join(f"{f'lead-up @{w}':>15}" for w in widths)
     header = (
@@ -442,7 +471,7 @@ def report(out: dict[str, list[dict]], dropped: Counter, dry_run: bool) -> str:
             lines.append(f"  {stem:<12}{0:>9}")
             continue
         per_width = "".join(
-            f"{sum(r['excerpts'][str(w)]['context_rows'] for r in records) / len(records):>15.1f}"
+            f"{sum(r['excerpts'][w]['context_rows'] for r in records) / len(records):>15.1f}"
             for w in widths
         )
         moment = sum(r["moment_rows"] for r in records) / len(records)
@@ -457,7 +486,7 @@ def report(out: dict[str, list[dict]], dropped: Counter, dry_run: bool) -> str:
     lines.append("")
     lines.append(
         "  (row counts are means per moment; lead-up @N is the N-turn window, "
-        "counted back from the cut)"
+        "counted back from the cut; @full is the transcript from its first row)"
     )
 
     lines += _inside_moment_lines(out, widths)
@@ -475,6 +504,18 @@ def report(out: dict[str, list[dict]], dropped: Counter, dry_run: bool) -> str:
 # ===========================================================================
 
 
+def context_width(value: str) -> int | None:
+    """Parse one ``--context-turns`` value: a turn count, or ``full``."""
+    if value.strip().lower() == FULL_KEY:
+        return FULL
+    try:
+        return int(value)
+    except ValueError:
+        raise argparse.ArgumentTypeError(
+            f"expected a turn count or {FULL_KEY!r}, got {value!r}"
+        ) from None
+
+
 def build_parser() -> argparse.ArgumentParser:
     parser = argparse.ArgumentParser(
         prog="python -m tutormoments_build.v2.excerpts",
@@ -489,14 +530,15 @@ def build_parser() -> argparse.ArgumentParser:
     parser.add_argument("--out-dir", default=DEFAULT_OUT_DIR, metavar="DIR")
     parser.add_argument(
         "--context-turns",
-        type=int,
+        type=context_width,
         nargs="+",
         default=list(DEFAULT_CONTEXT_WIDTHS),
         metavar="N",
-        help="Dialogue turns of lead-up before the CUT POINT (0 for none). "
-        "Enrichments interleaved with those turns are included. The window is "
-        "measured from the cut alone: on a moment with a long pre-cut run it "
-        "opens inside the moment, so every excerpt at a width carries the same "
+        help="Dialogue turns of lead-up before the CUT POINT (0 for none, "
+        f"{FULL_KEY!r} for the whole transcript before it). Enrichments "
+        "interleaved with those turns are included. A turn window is measured "
+        "from the cut alone: on a moment with a long pre-cut run it opens "
+        "inside the moment, so every excerpt at a width carries the same "
         "lead-up. Pass several widths to render an excerpt at each; consumers "
         "pick the one their prompt calls for.",
     )
@@ -534,8 +576,14 @@ def main(argv: list[str] | None = None) -> int:
         for records in out.values():
             for record in records:
                 if record["moment_id"].startswith(args.print_moment):
-                    for width, rendered in record["excerpts"].items():
-                        print(f"===== {width}-turn window =====\n")
+                    for key in sort_widths(record["excerpts"]):
+                        rendered = record["excerpts"][key]
+                        label = (
+                            "whole transcript"
+                            if key == FULL_KEY
+                            else f"{key}-turn window"
+                        )
+                        print(f"===== {label} =====\n")
                         print(rendered["excerpt"])
                         print()
                     return 0

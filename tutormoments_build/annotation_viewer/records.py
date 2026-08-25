@@ -66,19 +66,37 @@ def _pass(annotation):
     `axes` is None when the pass recorded no judgment at all -- a reannotator who
     threw the moment out. That is not a judgment to compare, and the card says so
     rather than rendering a column of hollow "not appropriate" chips.
+
+    `sar` is the judgment itself, already unwrapped: an adjudicator files theirs under
+    `final`, so a page reading `payload.situation` would find nothing on them and
+    render an empty column. Everything the card shows about what a rater judged reads
+    `sar`; only `meta`, which stays at the payload root for every role, reads `payload`.
     """
-    sar = axes_mod.sar_of(annotation["role"], annotation["payload"])
+    payload = annotation["payload"] or {}
+    role = annotation["role"]
+    sar = axes_mod.sar_of(role, payload)
     return {
-        "role": annotation["role"],
+        "role": role,
         "annotator_id": annotation["annotator_id"],
         "annotator_name": _name(annotation),
         "revision": annotation["revision"],
         "created_at": annotation["created_at"],
         "date": (annotation["created_at"] or "")[:10],
         "is_test": int(annotation.get("is_test") or 0),
-        "payload": annotation["payload"],
+        "payload": payload,
+        "sar": sar,
+        "observations": _observations(role, payload),
+        # How the adjudicator resolved the two passes, and why. Only they record it.
+        "rationale": (payload.get("rationale") or "").strip(),
+        "decisions": payload.get("decisions") or None,
         "axes": axes_mod.coarse_axes(sar) if sar else None,
     }
+
+
+def _observations(role, payload):
+    """Free-text observations, which an adjudicator files under `final` like the rest."""
+    source = payload.get("final") if role == "adjudicator" else payload
+    return ((source or {}).get("other_observations") or "").strip()
 
 
 def _outcome(passes):

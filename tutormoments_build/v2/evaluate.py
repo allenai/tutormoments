@@ -1,8 +1,9 @@
 """Score v2 predictions against the gold labels: precision, recall, F1.
 
 ``classify_excerpts.py`` writes predictions to
-``<pred-dir>/<model>/<split>.jsonl``, each record carrying the gold ``labels``
-it was made against, so this script needs nothing but those files.
+``<pred-dir>/<model>/<prompt version>/<split>.jsonl``, each record carrying the
+gold ``labels`` it was made against, so this script needs nothing but those
+files.
 
 Three binary tasks are scored, positive class = True:
 
@@ -23,7 +24,11 @@ Usage::
 
     python -m tutormoments_build.v2.evaluate
     python -m tutormoments_build.v2.evaluate --model claude-opus-5
+    python -m tutormoments_build.v2.evaluate --prompt-version 1
     python -m tutormoments_build.v2.evaluate --splits iteration test
+
+With no ``--prompt-version`` every version found under a model is scored, so a
+bare run reports each revision of the prompts against the same gold.
 """
 
 import argparse
@@ -109,6 +114,12 @@ def read_predictions(path: str) -> list[dict]:
         return [json.loads(line) for line in fh if line.strip()]
 
 
+def _subdirectories(path: str) -> list[str]:
+    return sorted(
+        name for name in os.listdir(path) if os.path.isdir(os.path.join(path, name))
+    )
+
+
 def find_models(pred_dir: str, model: str | None) -> list[str]:
     """Model subdirectory names to evaluate: the one asked for, or all present."""
     if model:
@@ -118,10 +129,24 @@ def find_models(pred_dir: str, model: str | None) -> list[str]:
             f"no predictions at {pred_dir}; run "
             "`python -m tutormoments_build.v2.classify_excerpts` first"
         )
+    return _subdirectories(pred_dir)
+
+
+def find_prompt_versions(model_dir: str, prompt_version: str | None) -> list[str]:
+    """Prompt-version subdirectories to score under one model.
+
+    Default is every version present, so a bare run reports each revision of the
+    prompts side by side -- which is the comparison a prompt edit is made to
+    settle. Versions sort numerically where they are numbers, so v10 lands after
+    v9 rather than after v1.
+    """
+    if prompt_version:
+        return [prompt_version]
+    if not os.path.isdir(model_dir):
+        return []
     return sorted(
-        name
-        for name in os.listdir(pred_dir)
-        if os.path.isdir(os.path.join(pred_dir, name))
+        _subdirectories(model_dir),
+        key=lambda n: (not n.isdigit(), int(n) if n.isdigit() else n),
     )
 
 
@@ -139,12 +164,18 @@ def evaluate(records: list[dict]) -> list[dict]:
 # ===========================================================================
 
 
-def report(model: str, split: str, rows: list[dict]) -> str:
+def report(model: str, prompt_version: str, split: str, rows: list[dict]) -> str:
     header = (
         f"  {'task':<18}{'n':>6}{'gold yes':>10}{'TP':>5}{'FP':>5}{'FN':>5}{'TN':>5}"
         f"{'prec':>8}{'rec':>7}{'F1':>7}{'not scored':>13}"
     )
-    lines = ["", f"  {model}  --  {split}", "", header, f"  {'-' * (len(header) - 2)}"]
+    lines = [
+        "",
+        f"  {model}  --  prompts v{prompt_version}  --  {split}",
+        "",
+        header,
+        f"  {'-' * (len(header) - 2)}",
+    ]
     for row in rows:
         lines.append(
             f"  {row['task']:<18}{row['n']:>6}{row['support']:>10}"
@@ -182,6 +213,13 @@ def build_parser() -> argparse.ArgumentParser:
         "under --pred-dir.",
     )
     parser.add_argument(
+        "--prompt-version",
+        default=None,
+        metavar="VERSION",
+        help="Prompt version whose predictions to score. Default: every "
+        "version found under each model.",
+    )
+    parser.add_argument(
         "--splits",
         nargs="+",
         default=list(DEFAULT_SPLITS),
@@ -203,14 +241,27 @@ def main(argv: list[str] | None = None) -> int:
 
     results = []
     for model in find_models(args.pred_dir, args.model):
-        for split in args.splits:
-            path = os.path.join(args.pred_dir, model, f"{split}.jsonl")
-            if not os.path.exists(path):
-                logger.warning("no predictions at %s; skipping", path)
-                continue
-            rows = evaluate(read_predictions(path))
-            results.append({"model": model, "split": split, "tasks": rows})
-            print(report(model, split, rows))
+        model_dir = os.path.join(args.pred_dir, model)
+        versions = find_prompt_versions(model_dir, args.prompt_version)
+        if not versions:
+            logger.warning("no prompt-version directories under %s", model_dir)
+            continue
+        for version in versions:
+            for split in args.splits:
+                path = os.path.join(model_dir, version, f"{split}.jsonl")
+                if not os.path.exists(path):
+                    logger.warning("no predictions at %s; skipping", path)
+                    continue
+                rows = evaluate(read_predictions(path))
+                results.append(
+                    {
+                        "model": model,
+                        "prompt_version": version,
+                        "split": split,
+                        "tasks": rows,
+                    }
+                )
+                print(report(model, version, split, rows))
 
     if not results:
         logger.error("no prediction files found under %s", args.pred_dir)

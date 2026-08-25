@@ -117,14 +117,16 @@ def test_evaluate_scores_every_task():
 # ===========================================================================
 
 
-def _write_predictions(tmp_path, model="claude-opus-5", split="iteration"):
-    model_dir = tmp_path / model
-    model_dir.mkdir(parents=True)
+def _write_predictions(
+    tmp_path, model="claude-opus-5", split="iteration", prompt_version="1"
+):
+    version_dir = tmp_path / model / prompt_version
+    version_dir.mkdir(parents=True)
     records = [
         record("a", gold=GOLD_YES, scaffolding=True, rigor=True, over=True, asked=True),
         record("b", gold=GOLD_NO, scaffolding=True, rigor=False),
     ]
-    (model_dir / f"{split}.jsonl").write_text(
+    (version_dir / f"{split}.jsonl").write_text(
         "".join(json.dumps(r) + "\n" for r in records), encoding="utf-8"
     )
     return str(tmp_path)
@@ -139,6 +141,7 @@ def test_cli_reports_and_writes_json(tmp_path, capsys):
     assert "F1" in capsys.readouterr().out
     scores = json.loads(out.read_text(encoding="utf-8"))
     assert scores[0]["model"] == "claude-opus-5"
+    assert scores[0]["prompt_version"] == "1"
     assert scores[0]["split"] == "iteration"
     scaffolding = scores[0]["tasks"][0]
     assert (scaffolding["tp"], scaffolding["fp"]) == (1, 1)
@@ -146,9 +149,37 @@ def test_cli_reports_and_writes_json(tmp_path, capsys):
 
 
 def test_cli_fails_when_there_is_nothing_to_score(tmp_path):
-    (tmp_path / "claude-opus-5").mkdir()
+    (tmp_path / "claude-opus-5" / "1").mkdir(parents=True)
 
     assert E.main(["--pred-dir", str(tmp_path)]) == 1
+
+
+def test_cli_scores_every_prompt_version_by_default(tmp_path, capsys):
+    """A prompt edit is made to be compared, so both revisions report by default."""
+    pred_dir = _write_predictions(tmp_path, prompt_version="1")
+    _write_predictions(tmp_path, prompt_version="2")
+
+    assert E.main(["--pred-dir", pred_dir]) == 0
+    out = capsys.readouterr().out
+    assert "prompts v1" in out
+    assert "prompts v2" in out
+
+
+def test_cli_scores_only_the_prompt_version_asked_for(tmp_path, capsys):
+    pred_dir = _write_predictions(tmp_path, prompt_version="1")
+    _write_predictions(tmp_path, prompt_version="2")
+
+    assert E.main(["--pred-dir", pred_dir, "--prompt-version", "2"]) == 0
+    out = capsys.readouterr().out
+    assert "prompts v2" in out
+    assert "prompts v1" not in out
+
+
+def test_prompt_versions_sort_numerically(tmp_path):
+    for version in ("1", "2", "10"):
+        (tmp_path / version).mkdir()
+
+    assert E.find_prompt_versions(str(tmp_path), None) == ["1", "2", "10"]
 
 
 def test_cli_scores_only_the_model_asked_for(tmp_path, capsys):

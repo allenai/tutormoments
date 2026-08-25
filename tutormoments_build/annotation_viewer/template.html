@@ -234,6 +234,17 @@
     border-radius: 0 6px 6px 0; margin-top: 8px; padding: 6px 10px;
   }
   details.why-more.disagree > summary::before { color: var(--danger); font-weight: 700; }
+  .adj {
+    width: 100%; color: var(--text); background: rgba(24, 144, 255, .07);
+    border-left: 3px solid var(--primary); border-radius: 0 6px 6px 0;
+    margin-top: 10px; padding: 7px 10px; font-size: 12px;
+  }
+  .adj .adj-k {
+    letter-spacing: .06em; color: var(--primary); font-size: 10px; font-weight: 700;
+    display: block; margin-bottom: 4px;
+  }
+  .adj .adj-why { white-space: pre-wrap; }
+  .adj .secondary-tags { margin-top: 6px; }
   .why-cols { display: grid; gap: 14px; margin-top: 6px; }
   .why-col { color: var(--text); white-space: pre-wrap; font-size: 12px; }
   .why-none { color: var(--faint); }
@@ -268,6 +279,10 @@
   <div class="ctl">
     <label for="f-axis">Agreement on</label>
     <select id="f-axis"></select>
+  </div>
+  <div class="ctl">
+    <label for="f-adjudication">Adjudication</label>
+    <select id="f-adjudication"></select>
   </div>
   <div class="ctl">
     <label for="f-from">Annotated from</label>
@@ -332,6 +347,8 @@ const state = {
   annotator: "",
   // "agree:<axis>" / "differ:<axis>", or "" for every moment.
   axis: "",
+  // "any" / "labels" / "thrown" / "none", or "" for every moment.
+  adjudication: "",
   from: "",
   to: "",
   excludeTesters: true,
@@ -391,12 +408,32 @@ function matchesAxis(v) {
   return (pair[0] === pair[1]) === (want === "agree");
 }
 
-/** Moments passing the filters that select which work is in view. */
-function selectedViews() {
+/** Where a moment got to in review: whether a third pass settled it, and whether that
+ *  pass left labels behind or removed the moment.
+ *
+ *  Read off the passes rather than the moment's status, so an adjudicator dropped as a
+ *  tester takes their adjudication out of view with them. */
+function matchesAdjudication(v) {
+  if (!state.adjudication) return true;
+  const adj = v.byRole.adjudicator;
+  if (state.adjudication === "none") return !adj;
+  if (!adj) return false;
+  if (state.adjudication === "labels") return !!adj.axes;
+  if (state.adjudication === "thrown") return !adj.axes;
+  return true;
+}
+
+/** Moments passing the filters that select which work is in view.
+ *
+ *  `ignoreAdjudication` gives the set the adjudication filter itself is choosing from,
+ *  which is what its option counts are shares of. */
+function selectedViews({ ignoreAdjudication = false } = {}) {
   const out = [];
   for (const moment of DATA.moments) {
     const v = view(moment);
-    if (v && matchesAnnotator(v) && matchesDates(v) && matchesAxis(v)) out.push(v);
+    if (!v || !matchesAnnotator(v) || !matchesDates(v) || !matchesAxis(v)) continue;
+    if (!ignoreAdjudication && !matchesAdjudication(v)) continue;
+    out.push(v);
   }
   return out;
 }
@@ -550,8 +587,8 @@ const RIGOR_AMOUNT = {
   unclear: ["rigor: unclear", "muted"],
 };
 
-function actionChips(cell, payload, diff) {
-  const act = payload.action || {};
+function actionChips(cell, sar, diff) {
+  const act = sar.action || {};
   const scaff = act.scaffolding_present
     ? SCAFFOLD_AMOUNT[act.scaffolding_amount] || ["scaffolding present", "muted"]
     : ["no scaffolding", "muted"];
@@ -588,18 +625,18 @@ const SUCCESS = {
   not_enough_evidence: ["success: no evidence", "muted"],
 };
 
-function resultChips(cell, payload, diff) {
-  const res = payload.result || {};
+function resultChips(cell, sar, diff) {
+  const res = sar.result || {};
   const eng = ENGAGEMENT[res.cognitive_engagement] || ["engagement: —", "muted"];
   const suc = SUCCESS[res.problem_success] || ["success: —", "muted"];
   cell.append(chip(eng[0], eng[1], diff.has("high_engagement")));
   cell.append(chip(suc[0], suc[1], diff.has("meaningful_success")));
 }
 
-function whyText(construct, payload) {
-  if (construct === "sit") return (payload.situation || {}).why || "";
-  if (construct === "act") return (payload.action || {}).explanation || "";
-  return (payload.result || {}).explanation || "";
+function whyText(construct, sar) {
+  if (construct === "sit") return (sar.situation || {}).why || "";
+  if (construct === "act") return (sar.action || {}).explanation || "";
+  return (sar.result || {}).explanation || "";
 }
 
 const CONSTRUCT_AXES = {
@@ -627,6 +664,28 @@ function metaNote(pass) {
     notes.push(`Changed boundaries: ${moved}`);
   }
   return notes.length ? el("div", "m-note", "✎ " + notes.join(" · ")) : null;
+}
+
+const DECISION_LABEL = {
+  agreed: "both agreed", combined: "combined", selector: "took selector",
+  reannotator: "took reannotator", adjudicator: "own call",
+};
+
+/** How the adjudicator resolved the two passes, and why. Only they record either. */
+function adjudicationNote(pass) {
+  if (!pass) return null;
+  const tags = Object.entries(pass.decisions || {})
+    .map(([k, v]) => `${humanize(k)}: ${DECISION_LABEL[v] || humanize(v)}`);
+  if (!pass.rationale && !tags.length) return null;
+  const box = el("div", "adj");
+  box.append(el("span", "adj-k", `ADJUDICATION · ${pass.annotator_name}`));
+  if (pass.rationale) box.append(el("div", "adj-why", pass.rationale));
+  if (tags.length) {
+    const strip = el("div", "secondary-tags");
+    for (const t of tags) strip.append(el("span", "chip tag", t));
+    box.append(strip);
+  }
+  return box;
 }
 
 /** One moment as its passes side by side, one row per construct, disagreements marked. */
@@ -677,13 +736,13 @@ function momentCard(v) {
       const cell = el("div", "cell");
       if (!p.axes) cell.append(el("span", "none", "no judgment — threw the moment out"));
       else if (c === "sit") situationChips(cell, p.axes, v.diff);
-      else if (c === "act") actionChips(cell, p.payload, v.diff);
-      else resultChips(cell, p.payload, v.diff);
+      else if (c === "act") actionChips(cell, p.sar, v.diff);
+      else resultChips(cell, p.sar, v.diff);
       row.append(cell);
     }
     const block = el("div");
     block.append(row);
-    const whys = v.passes.map((p) => (p.axes ? whyText(c, p.payload) : ""));
+    const whys = v.passes.map((p) => (p.axes ? whyText(c, p.sar) : ""));
     if (whys.some(Boolean)) {
       const more = el("details", "why-more" + (rowDiff ? " disagree" : ""));
       more.open = rowDiff;
@@ -702,7 +761,7 @@ function momentCard(v) {
     cmp.append(block);
   }
 
-  const observations = v.passes.map((p) => (p.payload || {}).other_observations || "");
+  const observations = v.passes.map((p) => p.observations || "");
   if (observations.some(Boolean)) {
     const row = el("div", "row");
     row.style.gridTemplateColumns = grid;
@@ -713,6 +772,8 @@ function momentCard(v) {
     cmp.append(row);
   }
   card.append(cmp);
+  const adj = adjudicationNote(v.byRole.adjudicator);
+  if (adj) card.append(adj);
   return card;
 }
 
@@ -804,10 +865,10 @@ function emptyDist() {
 
 /** Fold one pass's judgment into that pass's distribution. `n` counts the judgments
  *  folded in, which is the denominator every bar of that series is a share of. */
-function tally(dist, payload) {
-  const sit = payload.situation || {};
-  const act = payload.action || {};
-  const res = payload.result || {};
+function tally(dist, sar) {
+  const sit = sar.situation || {};
+  const act = sar.action || {};
+  const res = sar.result || {};
   dist.n++;
   if (sit.scaffolding_appropriate) dist.sit.scaffolding_appropriate++;
   if (sit.rigor_appropriate) dist.sit.rigor_appropriate++;
@@ -848,8 +909,8 @@ function analytics(views) {
     if (m.thrown_out) thrownOut++;
     const sel = v.byRole.selector;
     const re = v.byRole.reannotator;
-    if (sel && sel.axes && theirs(sel)) tally(first, sel.payload);
-    if (re && re.axes && theirs(re)) tally(second, re.payload);
+    if (sel && sel.axes && theirs(sel)) tally(first, sel.sar);
+    if (re && re.axes && theirs(re)) tally(second, re.sar);
     // A thrown-out review left no judgment, so the moment has nothing to agree about.
     if (Object.keys(v.pairs).length) twoPasses++;
   }
@@ -1053,7 +1114,7 @@ function renderTranscriptMode(views, verdicts) {
   // listed under "disagreed on rigor present" never opens an empty pane. A "no key
   // moments" verdict has no axes to agree about, so those entries drop out of the list
   // as soon as the axis filter asks for one.
-  const options = transcriptOptions(views, state.axis ? [] : verdicts);
+  const options = transcriptOptions(views, state.axis || state.adjudication ? [] : verdicts);
   const select = clear($("transcript-select"));
   select.append(new Option("— select a transcript —", ""));
   for (const o of options) {
@@ -1123,6 +1184,7 @@ function scrollToSpan(pane, turnIndex) {
 // ── Wiring ──────────────────────────────────────────────────────────────────
 function render() {
   const views = selectedViews();
+  labelAdjudicationOptions();
   renderAnalytics(views);
   $("clear-dates").hidden = !state.from && !state.to;
   renderTranscriptMode(views, selectedVerdicts());
@@ -1148,9 +1210,35 @@ for (const [want, label] of [["differ", "Disagreed on"], ["agree", "Agreed on"]]
   axisSelect.append(group);
 }
 
+// Counts sit in the labels because adjudication is rare -- a maintainer should be able
+// to see there are six of them without selecting the option and finding out.
+const ADJUDICATION_OPTIONS = [
+  ["", "Any"],
+  ["any", "Adjudicated"],
+  ["labels", "Adjudicated · final labels"],
+  ["thrown", "Adjudicated · thrown out"],
+  ["none", "Not adjudicated"],
+];
+const adjudicationSelect = $("f-adjudication");
+for (const [value, label] of ADJUDICATION_OPTIONS) {
+  adjudicationSelect.append(new Option(label, value));
+}
+
+/** The option labels, counted over the moments the other filters leave in view. */
+function labelAdjudicationOptions() {
+  const base = selectedViews({ ignoreAdjudication: true });
+  const chosen = state.adjudication;
+  ADJUDICATION_OPTIONS.forEach(([value, label], i) => {
+    state.adjudication = value;
+    adjudicationSelect.options[i].text = `${label} (${base.filter((v) => matchesAdjudication(v)).length})`;
+  });
+  state.adjudication = chosen;
+}
+
 const BINDINGS = [
   ["f-annotator", "annotator"],
   ["f-axis", "axis"],
+  ["f-adjudication", "adjudication"],
   ["f-from", "from"],
   ["f-to", "to"],
 ];
