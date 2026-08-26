@@ -28,30 +28,6 @@ logger = logging.getLogger(__name__)
 
 __all__ = ["ModelClient", "ModelResponse", "infer_provider"]
 
-VISION_CAPABLE_PREFIXES = (
-    "claude-opus-4",
-    "claude-sonnet-4",
-    "claude-sonnet-5",
-    "claude-fable-5",
-    "gemini-2",
-    "gemini-3",
-    "gpt-4o",
-    "gpt-4.1",
-    "gpt-5",
-    "o4",
-)
-
-
-def validate_vision_support(model: str) -> None:
-    """Raise ValueError if the model is not known to support vision input."""
-    m = model.lower()
-    if not any(m.startswith(p) for p in VISION_CAPABLE_PREFIXES):
-        raise ValueError(
-            f"Model '{model}' is not in the vision-capable list. "
-            f"Vision-capable prefixes: {', '.join(VISION_CAPABLE_PREFIXES)}."
-        )
-
-
 
 @dataclass
 class ModelResponse:
