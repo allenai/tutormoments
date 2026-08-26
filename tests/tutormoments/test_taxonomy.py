@@ -499,12 +499,13 @@ def test_classify_run_writes_classified_and_counts(tmp_path):
 
 def test_taxonomy_spec_reads_config():
     from tutormoments import config as cfgmod
+    from tutormoments.models import ThinkingLevel
 
     cfgmod._reset_config_cache()
     spec = cfgmod.taxonomy_spec()
-    assert spec["model"] == "claude-opus-4-8"
-    assert spec["thinking"] is False
-    assert spec["batch_size"] == 50
+    assert spec.model == "claude-opus-4-8"
+    assert spec.thinking == ThinkingLevel.NONE
+    assert spec.batch_size == 50
 
 
 def test_read_paper_distribution_selects_series(tmp_path):

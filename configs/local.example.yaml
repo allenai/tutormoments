@@ -15,17 +15,21 @@ providers:
   gemini:    { env: GEMINI_API_KEY }
   together:  { env: TOGETHER_API_KEY }
 
+# Each key is an ARM (a benchmark condition): `model` defaults to the key;
+# `thinking` is required (none/minimal/low/medium/high/xhigh/max/dynamic).
+# The same model may appear under several arms with different conditions:
+#   gpt-5.5-no-thinking: { model: gpt-5.5-2026-04-23, thinking: none }
 models:
-  claude-opus-4-8:             { thinking: true, effort: xhigh }
-  claude-sonnet-4-6:           { thinking: true, effort: high }
-  gemini-2.5-pro:              { thinking: true, thinking_budget: -1 }
-  gemini-3.5-flash:            { thinking: true, thinking_budget: -1 }
-  gpt-5.4-mini-2026-03-17:     { thinking: true, reasoning_effort: high }
-  gpt-5.5-2026-04-23:          { thinking: true, reasoning_effort: high }
-  deepseek-ai/DeepSeek-V4-Pro: {}
+  claude-opus-4-8:             { thinking: xhigh }
+  claude-sonnet-4-6:           { thinking: high }
+  gemini-2.5-pro:              { thinking: dynamic }
+  gemini-3.5-flash:            { thinking: dynamic }
+  gpt-5.4-mini-2026-03-17:     { thinking: high }
+  gpt-5.5-2026-04-23:          { thinking: high }
+  deepseek-ai/DeepSeek-V4-Pro: { thinking: dynamic }
 
-student: { model: claude-opus-4-6, mode: oracle, thinking: false }
-scorer:  { model: claude-opus-4-6, thinking: adaptive }
+student: { model: claude-opus-4-6, mode: oracle, thinking: none }
+scorer:  { model: claude-opus-4-6, thinking: dynamic }
 
 defaults: { trials: 1, max_turns: 5 }
 retry:    { max_retries: 5, base_delay: 5 }

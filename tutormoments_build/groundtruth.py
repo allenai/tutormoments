@@ -105,19 +105,9 @@ def compute_iou(range_a, range_b):
     return intersection / union if union > 0 else 0
 
 
-def _phase_cfg() -> dict:
-    """Ground-truth phase config (model/poll_interval/thinking/...)."""
+def _phase_cfg():
+    """Ground-truth phase spec (model/poll_interval/thinking/labeller)."""
     return get_groundtruth_phase_config()
-
-
-def _use_thinking(cfg: dict) -> bool:
-    """Normalize the config `thinking` value to the bool run_batch expects.
-
-    Mirrors tutormoments.scoring.score: a string like "adaptive"/"enabled" (or True)
-    enables thinking; anything else (e.g. "disabled", False) disables it. Passing
-    the raw config string straight through would make ANY non-empty string truthy.
-    """
-    return cfg.get("thinking", False) in ("adaptive", "enabled", True)
 
 
 def load_from_jsonl(path, annotation_types=("scaffolding", "rapport")):
@@ -440,7 +430,7 @@ def decompose_batch(items):
     from tutormoments.client import ModelClient, build_batch_entry, run_batch
 
     cfg = _phase_cfg()
-    client = ModelClient(cfg["model"])
+    client = ModelClient(cfg.model)
 
     action_template = _load_decompose_prompt("decompose_action.md")
     result_template = _load_decompose_prompt("decompose_result.md")
@@ -484,17 +474,15 @@ def decompose_batch(items):
 
     print(
         f"  Submitting {len(entries)} decomposition requests to batch API "
-        f"(model={cfg['model']})..."
+        f"(model={cfg.model})..."
     )
     raw = run_batch(
         client,
         entries,
         json_mode=True,
         display_name="decomposition",
-        poll_interval=cfg.get("poll_interval", 60),
-        thinking=_use_thinking(cfg),
-        thinking_budget=cfg.get("thinking_budget", 0),
-        reasoning_effort=cfg.get("reasoning_effort", ""),
+        poll_interval=cfg.poll_interval,
+        thinking=cfg.thinking,
     )
 
     for key, result in raw.items():
@@ -526,7 +514,7 @@ def action_direction_classify_batch(items):
     from tutormoments.client import ModelClient, build_batch_entry, run_batch
 
     cfg = _phase_cfg()
-    client = ModelClient(cfg["model"])
+    client = ModelClient(cfg.model)
     template = _load_structure_prompt("classify_action.md")
 
     entries = [
@@ -542,17 +530,15 @@ def action_direction_classify_batch(items):
 
     print(
         f"  Submitting {len(entries)} action direction classifications to batch API "
-        f"(model={cfg['model']})..."
+        f"(model={cfg.model})..."
     )
     results = run_batch(
         client,
         entries,
         json_mode=True,
         display_name="action_direction_agg_classification",
-        poll_interval=cfg.get("poll_interval", 60),
-        thinking=_use_thinking(cfg),
-        thinking_budget=cfg.get("thinking_budget", 0),
-        reasoning_effort=cfg.get("reasoning_effort", ""),
+        poll_interval=cfg.poll_interval,
+        thinking=cfg.thinking,
     )
 
     labels = {}
@@ -585,7 +571,7 @@ def student_outcome_classify_batch(items):
     from tutormoments.client import ModelClient, build_batch_entry, run_batch
 
     cfg = _phase_cfg()
-    client = ModelClient(cfg["model"])
+    client = ModelClient(cfg.model)
     template = _load_structure_prompt("classify_student_result.md")
 
     entries = [
@@ -601,17 +587,15 @@ def student_outcome_classify_batch(items):
 
     print(
         f"  Submitting {len(entries)} student outcome classifications to batch API "
-        f"(model={cfg['model']})..."
+        f"(model={cfg.model})..."
     )
     results = run_batch(
         client,
         entries,
         json_mode=False,
         display_name="student_outcome_agg_classification",
-        poll_interval=cfg.get("poll_interval", 60),
-        thinking=_use_thinking(cfg),
-        thinking_budget=cfg.get("thinking_budget", 0),
-        reasoning_effort=cfg.get("reasoning_effort", ""),
+        poll_interval=cfg.poll_interval,
+        thinking=cfg.thinking,
     )
 
     labels = {}
@@ -640,7 +624,7 @@ def situation_classify_batch(items):
     from tutormoments.client import ModelClient, build_batch_entry, run_batch
 
     cfg = _phase_cfg()
-    client = ModelClient(cfg["model"])
+    client = ModelClient(cfg.model)
     prompt_template = load_situation_prompt()
 
     entries = []
@@ -660,17 +644,15 @@ def situation_classify_batch(items):
 
     print(
         f"  Submitting {len(entries)} situation classifications to batch API "
-        f"(model={cfg['model']})..."
+        f"(model={cfg.model})..."
     )
     results = run_batch(
         client,
         entries,
         json_mode=True,
         display_name="situation_classification",
-        poll_interval=cfg.get("poll_interval", 60),
-        thinking=_use_thinking(cfg),
-        thinking_budget=cfg.get("thinking_budget", 0),
-        reasoning_effort=cfg.get("reasoning_effort", ""),
+        poll_interval=cfg.poll_interval,
+        thinking=cfg.thinking,
     )
 
     for key, result in results.items():
@@ -701,7 +683,7 @@ def classify_batch(items, labeller="hybrid"):
     from tutormoments.client import ModelClient, build_batch_entry, run_batch
 
     cfg = _phase_cfg()
-    client = ModelClient(cfg["model"])
+    client = ModelClient(cfg.model)
 
     if labeller == "hybrid":
         templates = load_labeller_templates(get_labeller_config())
@@ -737,17 +719,15 @@ def classify_batch(items, labeller="hybrid"):
 
     print(
         f"  Submitting {len(entries)} classifications to Anthropic batch API "
-        f"(model={cfg['model']})..."
+        f"(model={cfg.model})..."
     )
     results = run_batch(
         client,
         entries,
         json_mode=False,
         display_name="effectiveness_classification_refresh",
-        poll_interval=cfg.get("poll_interval", 60),
-        thinking=_use_thinking(cfg),
-        thinking_budget=cfg.get("thinking_budget", 0),
-        reasoning_effort=cfg.get("reasoning_effort", ""),
+        poll_interval=cfg.poll_interval,
+        thinking=cfg.thinking,
     )
 
     for key, result in results.items():

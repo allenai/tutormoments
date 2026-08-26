@@ -1,4 +1,6 @@
+import copy
 import json
+from types import SimpleNamespace
 from unittest.mock import MagicMock, patch
 
 import pytest
@@ -6,15 +8,23 @@ import pytest
 from tutormoments.client import (
     ModelClient,
     ModelResponse,
-    _anthropic_thinking_param,
+    _base64_bytes,
+    _build_image_blocks_anthropic,
+    _build_image_blocks_gemini,
+    _build_image_blocks_openai,
     _mime_from_path,
+    _presigned_url,
+    _should_use_presigned_url,
     _strip_json_fences,
     build_batch_entry,
+    cancel_batch,
     infer_provider,
+    normalize_usage,
     run_batch,
     run_sync_entries,
     write_jsonl,
 )
+from tutormoments.models import ThinkingConfigError
 
 
 @pytest.mark.parametrize(
@@ -44,49 +54,161 @@ def test_infer_provider_unknown_raises():
         infer_provider("totally-unknown-model")
 
 
-class TestAnthropicThinkingParam:
-    def test_adaptive_models_get_adaptive_shape(self):
-        for m in (
-            "claude-opus-4-8",
-            "claude-opus-4-7",
-            "claude-opus-4-6",
-            "claude-sonnet-4-6",
-            "claude-sonnet-5",
-            "claude-fable-5",
+class TestGenerateThinkingWire:
+    """The thinking ladder resolves to the exact wire bytes the raw knobs sent.
+
+    The full (family, rung) -> wire matrix is pinned in test_models.py; these
+    tests prove the client actually places each resolved fragment on the
+    request. Each expected payload is byte-identical to what the pre-ladder
+    client produced for the equivalent raw-knob inputs (thinking=True,
+    thinking_budget, effort, reasoning_effort) -- the wire-level
+    reproducibility proof for the refactor.
+    """
+
+    def _anthropic(self, monkeypatch, model, **gen_kwargs):
+        monkeypatch.setenv("ANTHROPIC_API_KEY", "sk-test")
+        with patch("anthropic.Anthropic") as MockAnthropic:
+            client_obj = MagicMock()
+            client_obj.messages.create.return_value = _fake_anthropic_message("ok")
+            MockAnthropic.return_value = client_obj
+            ModelClient(model).generate("Q", json_mode=False, **gen_kwargs)
+        return client_obj.messages.create.call_args.kwargs
+
+    def test_anthropic_dynamic_sends_adaptive(self, monkeypatch):
+        # Old thinking=True on adaptive-tier models.
+        kwargs = self._anthropic(monkeypatch, "claude-opus-4-6", thinking="dynamic")
+        assert kwargs["thinking"] == {"type": "adaptive"}
+        assert "extra_body" not in kwargs  # no effort alongside plain adaptive
+
+    def test_anthropic_xhigh_sends_adaptive_plus_effort(self, monkeypatch):
+        # Old thinking=True + effort="xhigh".
+        kwargs = self._anthropic(monkeypatch, "claude-opus-4-8", thinking="xhigh")
+        assert kwargs["thinking"] == {"type": "adaptive"}
+        assert kwargs["extra_body"]["output_config"] == {"effort": "xhigh"}
+
+    def test_anthropic_legacy_high_sends_enabled_budget_and_bumps_max_tokens(
+        self, monkeypatch
+    ):
+        # Old haiku-4-5 thinking=True (legacy enabled + default budget 16384).
+        # Enabled mode requires max_tokens >= budget + headroom.
+        kwargs = self._anthropic(
+            monkeypatch, "claude-haiku-4-5", thinking="high", max_tokens=100
+        )
+        assert kwargs["thinking"] == {"type": "enabled", "budget_tokens": 16384}
+        assert kwargs["max_tokens"] == 16384 + 64
+
+    def test_anthropic_haiku_output_cap_comes_from_registry(self, monkeypatch):
+        # max_tokens=0 resolves to the provider maximum (128000), which the
+        # registry's per-model cap clamps to haiku's 64000. The dated id
+        # resolves to the claude-haiku-4-5 entry by longest prefix.
+        kwargs = self._anthropic(monkeypatch, "claude-haiku-4-5-20251001")
+        assert kwargs["max_tokens"] == 64000
+
+    def test_anthropic_none_level_sends_no_thinking_param(self, monkeypatch):
+        kwargs = self._anthropic(monkeypatch, "claude-opus-4-6", thinking="none")
+        assert "thinking" not in kwargs
+        assert "extra_body" not in kwargs
+
+    def test_no_stated_condition_sends_nothing_even_unregistered(self, monkeypatch):
+        # thinking=None is unvalidated and unsent -- works for model ids the
+        # registry has never heard of (dev/direct client use).
+        kwargs = self._anthropic(
+            monkeypatch, "claude-experimental-dev-model", thinking=None
+        )
+        assert "thinking" not in kwargs
+
+    def _gemini(self, monkeypatch, model, **gen_kwargs):
+        monkeypatch.setenv("GEMINI_API_KEY", "k")
+        with patch("google.genai.Client") as MockGenai:
+            client_obj = MagicMock()
+            client_obj.models.generate_content.return_value = SimpleNamespace(
+                text="ok", usage_metadata=None
+            )
+            MockGenai.return_value = client_obj
+            ModelClient(model).generate("Q", json_mode=False, **gen_kwargs)
+        return client_obj.models.generate_content.call_args.kwargs
+
+    def test_gemini_dynamic_sends_budget_minus_one(self, monkeypatch):
+        # Old thinking=True + thinking_budget=-1.
+        kwargs = self._gemini(monkeypatch, "gemini-2.5-pro", thinking="dynamic")
+        assert kwargs["config"]["thinking_config"] == {
+            "include_thoughts": True,
+            "thinking_budget": -1,
+        }
+
+    def test_gemini_flash_none_sends_zero_budget(self, monkeypatch):
+        # Old thinking=False; only valid where the API accepts budget 0.
+        kwargs = self._gemini(monkeypatch, "gemini-2.5-flash", thinking="none")
+        assert kwargs["config"]["thinking_config"] == {
+            "include_thoughts": False,
+            "thinking_budget": 0,
+        }
+
+    def test_gemini_no_condition_omits_thinking_config(self, monkeypatch):
+        kwargs = self._gemini(monkeypatch, "gemini-2.5-pro")
+        assert "thinking_config" not in kwargs["config"]
+
+    def _openai(self, monkeypatch, model, **gen_kwargs):
+        monkeypatch.setenv("OPENAI_API_KEY", "sk-test")
+        with patch("openai.OpenAI") as MockOpenAI:
+            client_obj = MagicMock()
+            client_obj.chat.completions.create.return_value = SimpleNamespace(
+                choices=[SimpleNamespace(message=SimpleNamespace(content="ok"))],
+                usage=None,
+            )
+            MockOpenAI.return_value = client_obj
+            ModelClient(model).generate("Q", json_mode=False, **gen_kwargs)
+        return client_obj.chat.completions.create.call_args.kwargs
+
+    def test_openai_high_sends_reasoning_effort(self, monkeypatch):
+        # Old reasoning_effort="high".
+        kwargs = self._openai(monkeypatch, "gpt-5.5", thinking="high")
+        assert kwargs["reasoning_effort"] == "high"
+
+    def test_openai_no_condition_omits_reasoning_effort(self, monkeypatch):
+        kwargs = self._openai(monkeypatch, "gpt-5.5")
+        assert "reasoning_effort" not in kwargs
+
+    def test_unsatisfiable_level_fails_before_sdk_call_without_retries(
+        self, monkeypatch
+    ):
+        # gemini-2.5-pro is always-thinking: `none` must die at resolve time,
+        # before any request is made and without burning the retry budget.
+        monkeypatch.setenv("GEMINI_API_KEY", "k")
+        with (
+            patch("google.genai.Client") as MockGenai,
+            patch("tutormoments.client.time.sleep") as mock_sleep,
         ):
-            assert _anthropic_thinking_param(m, 0) == {"type": "adaptive"}
+            client_obj = MagicMock()
+            MockGenai.return_value = client_obj
+            c = ModelClient("gemini-2.5-pro")
+            with pytest.raises(ThinkingConfigError):
+                c.generate("Q", json_mode=False, thinking="none")
+        client_obj.models.generate_content.assert_not_called()
+        mock_sleep.assert_not_called()
 
-    def test_haiku_4_5_gets_legacy_enabled_shape(self):
-        # Haiku 4.5 is the one current model without adaptive-thinking support
-        # (extended thinking only, per the Anthropic models overview) --
-        # sending {"type": "adaptive"} there would 400.
-        assert _anthropic_thinking_param("claude-haiku-4-5", 4096) == {
-            "type": "enabled",
-            "budget_tokens": 4096,
-        }
-        assert _anthropic_thinking_param("claude-haiku-4-5-20251001", 0) == {
-            "type": "enabled",
-            "budget_tokens": 16384,
-        }
+    def test_unregistered_model_with_explicit_level_fails_closed(self, monkeypatch):
+        monkeypatch.setenv("ANTHROPIC_API_KEY", "sk-test")
+        with patch("anthropic.Anthropic") as MockAnthropic:
+            client_obj = MagicMock()
+            MockAnthropic.return_value = client_obj
+            c = ModelClient("claude-experimental-dev-model")
+            with pytest.raises(ThinkingConfigError):
+                c.generate("Q", json_mode=False, thinking="high")
+        client_obj.messages.create.assert_not_called()
 
-    def test_unknown_or_future_model_defaults_to_adaptive(self):
-        # A brand-new Anthropic model must work with no code change (README
-        # "Running new tutor models"). Anything not in the frozen legacy set
-        # gets adaptive.
-        for m in ("claude-opus-5", "claude-sonnet-6", "totally-new-claude"):
-            assert _anthropic_thinking_param(m, 0) == {"type": "adaptive"}
-
-    def test_legacy_model_gets_enabled_with_budget(self):
-        assert _anthropic_thinking_param("claude-sonnet-4-5", 8192) == {
-            "type": "enabled",
-            "budget_tokens": 8192,
-        }
-
-    def test_legacy_model_zero_budget_defaults_16384(self):
-        assert _anthropic_thinking_param("claude-sonnet-4-5", 0) == {
-            "type": "enabled",
-            "budget_tokens": 16384,
-        }
+    def test_retired_raw_knob_kwargs_are_gone(self, monkeypatch):
+        # The raw knobs were deleted, not deprecated: passing one is a
+        # TypeError, so no caller can silently keep steering the old way.
+        monkeypatch.setenv("ANTHROPIC_API_KEY", "sk-test")
+        with patch("anthropic.Anthropic"):
+            c = ModelClient("claude-opus-4-6")
+        with pytest.raises(TypeError):
+            c.generate("Q", thinking_budget=16384)
+        with pytest.raises(TypeError):
+            c.generate("Q", effort="xhigh")
+        with pytest.raises(TypeError):
+            c.generate("Q", reasoning_effort="high")
 
 
 def test_strip_json_fences_removes_markdown_fence():
@@ -291,42 +413,8 @@ def test_get_retry_config_values():
 
 
 # ===================================================================
-# Task 7: vision image-block builders + cacheable-prefix
+# Task 7: image-block builders + cacheable-prefix
 # ===================================================================
-
-from tutormoments.client import (
-    VISION_CAPABLE_PREFIXES,
-    _base64_bytes,
-    _build_image_blocks_anthropic,
-    _build_image_blocks_gemini,
-    _build_image_blocks_openai,
-    _presigned_url,
-    _should_use_presigned_url,
-    validate_vision_support,
-)
-
-
-class TestVisionSupport:
-    def test_vision_capable_prefixes_covers_current_anthropic_tutors(self):
-        # Every Anthropic model in the tutor roster must pass the vision gate.
-        validate_vision_support("claude-sonnet-5")
-        validate_vision_support("claude-fable-5")
-
-    def test_vision_capable_prefixes_contains_known_models(self):
-        # Spot-check a few entries from the source list.
-        assert "claude-opus-4" in VISION_CAPABLE_PREFIXES
-        assert "gpt-4o" in VISION_CAPABLE_PREFIXES
-        assert "gemini-2" in VISION_CAPABLE_PREFIXES
-
-    def test_validate_vision_support_passes_for_capable_model(self):
-        # Should not raise.
-        validate_vision_support("claude-opus-4-6")
-        validate_vision_support("gpt-4o-mini")
-        validate_vision_support("gemini-2.0-flash")
-
-    def test_validate_vision_support_raises_for_unknown_model(self):
-        with pytest.raises(ValueError, match="not in the vision-capable list"):
-            validate_vision_support("claude-2")
 
 
 class TestShouldUsePresignedUrl:
@@ -585,8 +673,11 @@ def test_run_batch_anthropic_remaps_custom_ids(monkeypatch):
 
 
 def test_run_batch_anthropic_sends_thinking_and_effort(monkeypatch):
-    """Batch requests must carry the same thinking/effort params as sync calls
-    (benchmark fidelity: batch mode may not silently diverge from run_conversation)."""
+    """Batch requests must carry the same wire thinking/effort fragment as sync
+    calls (benchmark fidelity: batch mode may not silently diverge from
+    run_conversation). thinking="xhigh" resolves to adaptive thinking plus
+    output_config.effort -- the exact bytes the retired thinking=True +
+    effort="xhigh" knobs produced."""
     monkeypatch.setenv("ANTHROPIC_API_KEY", "sk-test")
     with (
         patch("anthropic.Anthropic") as MockAnthropic,
@@ -605,12 +696,44 @@ def test_run_batch_anthropic_sends_thinking_and_effort(monkeypatch):
             c,
             [build_batch_entry("kA", "pA")],
             poll_interval=0,
-            thinking=True,
-            effort="xhigh",
+            thinking="xhigh",
         )
         (submitted,) = client_obj.messages.batches.create.call_args.kwargs["requests"]
     assert submitted["params"]["thinking"] == {"type": "adaptive"}
     assert submitted["params"]["output_config"] == {"effort": "xhigh"}
+
+
+def test_run_batch_anthropic_legacy_budget_and_registry_cap(monkeypatch):
+    """Legacy (enabled+budget) models get budget_tokens on batch requests, no
+    output_config, and the registry's per-model output cap clamps the entry's
+    max_tokens (build_batch_entry's 65536 default > haiku's 64000 cap)."""
+    monkeypatch.setenv("ANTHROPIC_API_KEY", "sk-test")
+    with (
+        patch("anthropic.Anthropic") as MockAnthropic,
+        patch("tutormoments.client.time.sleep"),
+    ):
+        client_obj = MagicMock()
+        batch = MagicMock()
+        batch.id = "b1"
+        batch.processing_status = "ended"
+        client_obj.messages.batches.create.return_value = batch
+        client_obj.messages.batches.retrieve.return_value = batch
+        client_obj.messages.batches.results.return_value = []
+        MockAnthropic.return_value = client_obj
+        c = ModelClient("claude-haiku-4-5")
+        run_batch(
+            c,
+            [build_batch_entry("kA", "pA")],
+            poll_interval=0,
+            thinking="high",
+        )
+        (submitted,) = client_obj.messages.batches.create.call_args.kwargs["requests"]
+    assert submitted["params"]["thinking"] == {
+        "type": "enabled",
+        "budget_tokens": 16384,
+    }
+    assert submitted["params"]["max_tokens"] == 64000
+    assert "output_config" not in submitted["params"]
 
 
 def test_run_batch_anthropic_resume_rebuilds_id_map(monkeypatch):
@@ -650,17 +773,47 @@ def test_run_batch_anthropic_resume_rebuilds_id_map(monkeypatch):
         ]
         MockAnthropic.return_value = client_obj
         c = ModelClient("claude-opus-4-6")
+        created_ids = []
         out = run_batch(
             c,
             [build_batch_entry("kA", "pA"), build_batch_entry("kB", "pB")],
             poll_interval=0,
             existing_batch_id="b1",
+            on_batch_created=created_ids.append,
         )
-    # No fresh submission on resume.
+    # No fresh submission on resume, so the created-callback never fires.
     client_obj.messages.batches.create.assert_not_called()
     client_obj.messages.batches.retrieve.assert_called_with("b1")
+    assert created_ids == []
     assert out["kA"]["text"] == "A"
     assert out["kB"]["text"] == "B"
+
+
+def test_run_batch_calls_on_batch_created_after_fresh_submit(monkeypatch):
+    """A fresh submission reports its batch id via on_batch_created (ctrl-C
+    recovery hook) before the poll loop starts."""
+    monkeypatch.setenv("ANTHROPIC_API_KEY", "sk-test")
+    with (
+        patch("anthropic.Anthropic") as MockAnthropic,
+        patch("tutormoments.client.time.sleep"),
+    ):
+        client_obj = MagicMock()
+        batch = MagicMock()
+        batch.id = "b-fresh"
+        batch.processing_status = "ended"
+        client_obj.messages.batches.create.return_value = batch
+        client_obj.messages.batches.retrieve.return_value = batch
+        client_obj.messages.batches.results.return_value = []
+        MockAnthropic.return_value = client_obj
+        c = ModelClient("claude-opus-4-6")
+        created_ids = []
+        run_batch(
+            c,
+            [build_batch_entry("kA", "pA")],
+            poll_interval=0,
+            on_batch_created=created_ids.append,
+        )
+    assert created_ids == ["b-fresh"]
 
 
 def test_run_batch_openai_parses_results(monkeypatch):
@@ -770,10 +923,6 @@ def test_run_batch_unsupported_provider_raises(monkeypatch):
 # ===================================================================
 # Canonical usage vector (cost tracking, Phase 1)
 # ===================================================================
-
-from types import SimpleNamespace
-
-from tutormoments.client import normalize_usage
 
 
 def test_normalize_usage_total_is_derived_and_provenance_rides_along():
@@ -1122,3 +1271,174 @@ def test_run_batch_gemini_captures_cache_read_and_reasoning(monkeypatch):
         c = ModelClient("gemini-3.1-pro-preview")
         out = run_batch(c, [build_batch_entry("kA", "pA")], poll_interval=0)
     _assert_gemini_vector(out["kA"]["usage"], "batch")
+
+
+# ===================================================================
+# Thinking ladder on the batch paths + cancel_batch + sync forwarding
+# ===================================================================
+
+
+def _mock_gemini_batch_client(result_text: str):
+    """Gemini batch double that captures the uploaded JSONL before the submit
+    path unlinks the temp file."""
+    client_obj = MagicMock()
+    captured = {}
+
+    def _upload(file, config=None):
+        with open(file, encoding="utf-8") as fh:
+            captured["jsonl"] = fh.read()
+        uploaded = MagicMock()
+        uploaded.name = "files/up1"
+        return uploaded
+
+    client_obj.files.upload.side_effect = _upload
+    batch = MagicMock()
+    batch.name = "batches/gb1"
+    batch.state.name = "JOB_STATE_SUCCEEDED"
+    batch.dest.file_name = "files/out1"
+    client_obj.batches.create.return_value = batch
+    client_obj.batches.get.return_value = batch
+    client_obj.files.download.return_value = result_text.encode("utf-8")
+    return client_obj, captured
+
+
+def test_run_batch_gemini_injects_thinking_config_without_mutating_entries(
+    monkeypatch,
+):
+    """thinking="dynamic" lands in every uploaded JSONL line's
+    generation_config as the include_thoughts/budget -1 wire shape, and the
+    caller's entry dicts stay untouched (resume flows re-submit them)."""
+    monkeypatch.setenv("GEMINI_API_KEY", "key-test")
+    result_text = "\n".join(
+        json.dumps(
+            {
+                "key": key,
+                "response": {
+                    "candidates": [{"content": {"parts": [{"text": "A"}]}}],
+                    "usageMetadata": {},
+                },
+            }
+        )
+        for key in ("kA", "kB")
+    )
+    entries = [build_batch_entry("kA", "pA"), build_batch_entry("kB", "pB")]
+    entries_before = copy.deepcopy(entries)
+    with (
+        patch("google.genai.Client") as MockGenai,
+        patch("tutormoments.client.time.sleep"),
+    ):
+        client_obj, captured = _mock_gemini_batch_client(result_text)
+        MockGenai.return_value = client_obj
+        c = ModelClient("gemini-2.5-pro")
+        out = run_batch(c, entries, poll_interval=0, thinking="dynamic")
+    lines = [json.loads(ln) for ln in captured["jsonl"].strip().splitlines()]
+    assert len(lines) == 2
+    for line in lines:
+        assert line["request"]["generation_config"]["thinking_config"] == {
+            "include_thoughts": True,
+            "thinking_budget": -1,
+        }
+        # The rest of the generation_config is carried over unchanged.
+        assert line["request"]["generation_config"]["max_output_tokens"] == 65536
+    assert entries == entries_before
+    assert set(out) == {"kA", "kB"}
+
+
+def test_run_batch_gemini_skips_thought_parts_and_joins_text(monkeypatch):
+    """Result parsing drops parts flagged thought: true (reasoning summaries,
+    not the answer) and joins the remaining text parts, keeping batch text
+    identical to sync response.text."""
+    monkeypatch.setenv("GEMINI_API_KEY", "key-test")
+    result_text = json.dumps(
+        {
+            "key": "kA",
+            "response": {
+                "candidates": [
+                    {
+                        "content": {
+                            "parts": [
+                                {"text": "reasoning...", "thought": True},
+                                {"text": '{"a":'},
+                                {"text": " 1}"},
+                            ]
+                        }
+                    }
+                ],
+                "usageMetadata": {},
+            },
+        }
+    )
+    with (
+        patch("google.genai.Client") as MockGenai,
+        patch("tutormoments.client.time.sleep"),
+    ):
+        client_obj, _ = _mock_gemini_batch_client(result_text)
+        MockGenai.return_value = client_obj
+        c = ModelClient("gemini-2.5-pro")
+        out = run_batch(
+            c, [build_batch_entry("kA", "pA")], poll_interval=0, thinking="dynamic"
+        )
+    assert out["kA"]["text"] == '{"a": 1}'
+
+
+def test_run_batch_unsatisfiable_level_fails_before_upload(monkeypatch):
+    """A level the model cannot honor dies at resolve time -- nothing is
+    uploaded and no batch job is created."""
+    monkeypatch.setenv("GEMINI_API_KEY", "key-test")
+    with patch("google.genai.Client") as MockGenai:
+        client_obj = MagicMock()
+        MockGenai.return_value = client_obj
+        c = ModelClient("gemini-2.5-pro")
+        with pytest.raises(ThinkingConfigError):
+            run_batch(
+                c, [build_batch_entry("k", "p")], poll_interval=0, thinking="none"
+            )
+    client_obj.files.upload.assert_not_called()
+    client_obj.batches.create.assert_not_called()
+
+
+def test_run_sync_entries_forwards_thinking_to_generate(monkeypatch):
+    """run_sync_entries takes the same ladder level run_batch does and passes
+    it straight through to generate(), so switching between the sync and batch
+    paths keeps the same benchmark condition."""
+    monkeypatch.setenv("ANTHROPIC_API_KEY", "sk-test")
+    with patch("anthropic.Anthropic"):
+        c = ModelClient("claude-opus-4-6")
+    with patch.object(c, "generate", return_value=ModelResponse("R")) as mock_gen:
+        out = run_sync_entries(c, [build_batch_entry("k1", "p1")], thinking="dynamic")
+    assert mock_gen.call_args.kwargs["thinking"] == "dynamic"
+    assert out["k1"]["text"] == "R"
+
+
+class TestCancelBatch:
+    def test_gemini_routes_to_batches_cancel_by_name(self, monkeypatch):
+        monkeypatch.setenv("GEMINI_API_KEY", "k")
+        with patch("google.genai.Client") as MockGenai:
+            client_obj = MagicMock()
+            MockGenai.return_value = client_obj
+            cancel_batch(ModelClient("gemini-2.5-pro"), "batches/gb1")
+        client_obj.batches.cancel.assert_called_once_with(name="batches/gb1")
+
+    def test_openai_routes_to_batches_cancel(self, monkeypatch):
+        monkeypatch.setenv("OPENAI_API_KEY", "sk-test")
+        with patch("openai.OpenAI") as MockOpenAI:
+            client_obj = MagicMock()
+            MockOpenAI.return_value = client_obj
+            cancel_batch(ModelClient("gpt-5.5"), "ob1")
+        client_obj.batches.cancel.assert_called_once_with("ob1")
+
+    def test_anthropic_routes_to_messages_batches_cancel(self, monkeypatch):
+        monkeypatch.setenv("ANTHROPIC_API_KEY", "sk-test")
+        with patch("anthropic.Anthropic") as MockAnthropic:
+            client_obj = MagicMock()
+            MockAnthropic.return_value = client_obj
+            cancel_batch(ModelClient("claude-opus-4-6"), "mb1")
+        client_obj.messages.batches.cancel.assert_called_once_with("mb1")
+
+    def test_unsupported_provider_raises(self, monkeypatch):
+        monkeypatch.setenv("TOGETHER_API_KEY", "key-test")
+        with patch("openai.OpenAI") as MockOpenAI:
+            MockOpenAI.return_value = MagicMock()
+            c = ModelClient("deepseek-ai/DeepSeek-V4-Pro")
+        with pytest.raises(ValueError, match="Batch API not supported"):
+            cancel_batch(c, "b1")

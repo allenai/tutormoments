@@ -818,7 +818,7 @@ def classify_pool(
     first_run_probe: int = CLASSIFIER_FIRST_RUN_PROBE,
     client: Any = None,
     model: Optional[str] = None,
-    thinking: Optional[bool] = None,
+    thinking=None,
     batch_size: Optional[int] = None,
 ) -> dict[str, str]:
     """Classify every unique statement in `kept` into A-M.
@@ -842,6 +842,8 @@ def classify_pool(
             (requires the provider API key).
         model / thinking / batch_size: override the `taxonomy` config block;
             each falls back to config (then a module default) when None.
+            `thinking` is a canonical ladder level (ThinkingLevel or its
+            string form), same contract as ModelClient.generate.
 
     Returns:
         Mapping from statement -> category letter, covering every statement
@@ -857,20 +859,20 @@ def classify_pool(
     # honoring explicit overrides. Config import is local so `import
     # tutormoments.taxonomy` stays lightweight (no client/provider-SDK import
     # unless we actually classify).
-    spec: dict = {}
+    spec = None
     if client is None or model is None or thinking is None or batch_size is None:
         try:
             from tutormoments.config import taxonomy_spec
 
             spec = taxonomy_spec()
         except Exception:
-            spec = {}
+            spec = None
     if model is None:
-        model = spec.get("model", CLASSIFIER_MODEL)
-    if thinking is None:
-        thinking = bool(spec.get("thinking", False))
+        model = spec.model if spec is not None else CLASSIFIER_MODEL
+    if thinking is None and spec is not None:
+        thinking = spec.thinking
     if batch_size is None:
-        batch_size = int(spec.get("batch_size", CLASSIFIER_BATCH_SIZE))
+        batch_size = spec.batch_size if spec is not None else CLASSIFIER_BATCH_SIZE
 
     statements = sorted(
         {f.statement.strip() for f in kept if f.statement and f.statement.strip()},
@@ -913,7 +915,7 @@ def classify_pool(
 
         client = ModelClient(model)
 
-    ask = _make_classifier(client, thinking=bool(thinking))
+    ask = _make_classifier(client, thinking=thinking)
 
     for bi in range(stop_after):
         start = bi * batch_size
@@ -948,7 +950,7 @@ def classify_pool(
     return assigned
 
 
-def _make_classifier(client: Any, *, thinking: bool = False):
+def _make_classifier(client: Any, *, thinking=None):
     """Build a `(statements, label) -> ({stmt: letter}, usage_dict)` callable.
 
     `client` exposes `.generate(...)` (a `tutormoments.client.ModelClient` or a

@@ -13,6 +13,7 @@ from unittest.mock import MagicMock, patch
 
 import pytest
 
+from tutormoments.config import ArmSpec, ScorerSpec, StudentSpec
 from tutormoments.moments import Moment
 from tutormoments.scoring import Annotation
 
@@ -153,8 +154,21 @@ _TAX_RESULT = {
 }
 
 
-def _make_run_config(sample=2, dataset="test_ds", max_turns=4, replay_concurrency=1):
-    """Build a fake RunConfig-like object."""
+def _make_run_config(
+    sample=2,
+    dataset="test_ds",
+    max_turns=4,
+    replay_concurrency=1,
+    arm="claude-opus-4-8",
+    model=None,
+    thinking="dynamic",
+):
+    """Build a fake RunConfig-like object.
+
+    `arm` is the roster key results are keyed by; `model` is the resolved
+    provider model id (defaults to the arm name, as in the config schema).
+    """
+    model = model or arm
     cfg = MagicMock()
     cfg.dataset = dataset
     cfg.data_path = None
@@ -162,13 +176,15 @@ def _make_run_config(sample=2, dataset="test_ds", max_turns=4, replay_concurrenc
     cfg.dataset_config = "moments"
     cfg.sample = sample
     cfg.max_turns = max_turns
-    cfg.tutors = ["claude-opus-4-8"]
+    cfg.tutors = [arm]
     cfg.modes = ["plain"]
     cfg.trials = 1
     cfg.replay_concurrency = replay_concurrency
-    cfg.student = {"model": "claude-haiku", "mode": "oracle", "thinking": "adaptive"}
-    cfg.scorer = {"model": "claude-opus-4-6", "thinking": "adaptive"}
-    cfg.resolved_tutors = {"claude-opus-4-8": {}}
+    cfg.student = StudentSpec(model="claude-haiku", mode="oracle", thinking="dynamic")
+    cfg.scorer = ScorerSpec(model="claude-opus-4-6", thinking="dynamic")
+    cfg.resolved_tutors = {
+        arm: ArmSpec(name=arm, model=model, provider="anthropic", thinking=thinking)
+    }
     cfg.config_source = "test"
     return cfg
 
@@ -217,6 +233,26 @@ def test_run_cell_writes_all_files(tmp_path):
     assert isinstance(cfg_data, dict)
     # --seed was removed (never seeded anything); must not be recorded
     assert "seed" not in cfg_data
+    # Arm-based identity: `tutor`/`arm` are the roster key, `model` the
+    # resolved provider model id.
+    assert cfg_data["tutor"] == "claude-opus-4-8"
+    assert cfg_data["arm"] == "claude-opus-4-8"
+    assert cfg_data["model"] == "claude-opus-4-8"
+    # Frozen specs are serialized as plain dicts with thinking as a string.
+    assert cfg_data["student"] == {
+        "model": "claude-haiku",
+        "mode": "oracle",
+        "thinking": "dynamic",
+    }
+    assert cfg_data["scorer"] == {"model": "claude-opus-4-6", "thinking": "dynamic"}
+    assert cfg_data["resolved_tutors"] == {
+        "claude-opus-4-8": {
+            "name": "claude-opus-4-8",
+            "model": "claude-opus-4-8",
+            "provider": "anthropic",
+            "thinking": "dynamic",
+        }
+    }
 
     # 2 transcripts
     for s in scenarios:
@@ -233,6 +269,11 @@ def test_run_cell_writes_all_files(tmp_path):
     # summary.json
     assert (run_dir / "summary.json").exists()
     summary = json.loads((run_dir / "summary.json").read_text(encoding="utf-8"))
+
+    # Identity block: tutor_model is the ARM name; model the resolved id.
+    assert summary["tutor_model"] == "claude-opus-4-8"
+    assert summary["model"] == "claude-opus-4-8"
+    assert summary["mode"] == "plain"
 
     # summary metrics == aggregate of the 2 annotations
     assert summary["n_scenarios"] == expected_summary["n_scenarios"]
@@ -498,12 +539,48 @@ def test_run_cell_raises_when_all_scenarios_fail(tmp_path):
 # Test 4: cell expansion -- tutors x modes = cells with correct lane assignment
 # ---------------------------------------------------------------------------
 
+# An arm-based roster covering all three providers, plus an arm whose key is
+# NOT a model id (lane must come from its resolved model's provider).
+_ARM_CONFIG_YAML = """
+providers:
+  anthropic: { env: ANTHROPIC_API_KEY }
+  openai:    { env: OPENAI_API_KEY }
+  gemini:    { env: GEMINI_API_KEY }
 
-def test_cell_expansion_and_lane_assignment():
+models:
+  claude-opus-4-8:   { thinking: dynamic }
+  claude-sonnet-4-6: { thinking: dynamic }
+  gemini-2.5-pro:    { thinking: dynamic }
+  gpt-5.5:           { thinking: high }
+  sonnet-high:       { model: claude-sonnet-4-6, thinking: high }
+
+student: { model: claude-haiku-4-5, mode: oracle, thinking: none }
+scorer:  { model: claude-opus-4-6, thinking: dynamic }
+
+defaults: { trials: 1, max_turns: 4 }
+retry: { max_retries: 1, base_delay: 1 }
+batch: { timeout: 60 }
+""".strip()
+
+
+@pytest.fixture
+def arm_config(tmp_path, monkeypatch):
+    """Point TUTORMOMENTS_CONFIG at a roster of arms for lane-resolution tests."""
+    from tutormoments.config import _reset_config_cache
+
+    config_path = tmp_path / "arm_config.yaml"
+    config_path.write_text(_ARM_CONFIG_YAML, encoding="utf-8")
+    monkeypatch.setenv("TUTORMOMENTS_CONFIG", str(config_path))
+    _reset_config_cache()
+    yield
+    _reset_config_cache()
+
+
+def test_cell_expansion_and_lane_assignment(arm_config):
     """3 tutors x 2 modes = 6 cells; each cell gets the correct provider lane."""
     from tutormoments.cli import expand_cells
 
-    tutors = ["claude-opus-4-8", "gemini-3.1-pro-preview", "gpt-5.4"]
+    tutors = ["claude-opus-4-8", "gemini-2.5-pro", "gpt-5.5"]
     modes = ["plain", "scaffolding_rigor"]
 
     cells = expand_cells(tutors, modes)
@@ -516,11 +593,21 @@ def test_cell_expansion_and_lane_assignment():
         for m in modes:
             assert (t, m) in pairs, f"Missing cell ({t}, {m})"
 
-    # Check lane assignment by provider
+    # Check lane assignment by the arm's resolved model's provider
     lane_map = {c["tutor"]: c["lane"] for c in cells}
     assert lane_map["claude-opus-4-8"] == "anthropic"
-    assert lane_map["gemini-3.1-pro-preview"] == "gemini"
-    assert lane_map["gpt-5.4"] == "openai"
+    assert lane_map["gemini-2.5-pro"] == "gemini"
+    assert lane_map["gpt-5.5"] == "openai"
+
+
+def test_cell_expansion_arm_key_that_is_not_a_model_id(arm_config):
+    """An arm named after its condition (not a model id) still lands on the
+    lane of its resolved model's provider."""
+    from tutormoments.cli import expand_cells
+
+    cells = expand_cells(["sonnet-high"], ["plain"])
+
+    assert cells == [{"tutor": "sonnet-high", "mode": "plain", "lane": "anthropic"}]
 
 
 # ---------------------------------------------------------------------------
@@ -528,12 +615,12 @@ def test_cell_expansion_and_lane_assignment():
 # ---------------------------------------------------------------------------
 
 
-def test_scheduler_within_lane_sequential(tmp_path):
+def test_scheduler_within_lane_sequential(tmp_path, arm_config):
     """Cells within a lane are called in order; all 6 run_cell calls complete."""
     from tutormoments.cli import expand_cells, run_sweep
 
     # 2 tutors in the same lane (anthropic), 1 mode each -> 2 cells in 1 lane
-    tutors = ["claude-opus-4-8", "claude-haiku-3-5"]
+    tutors = ["claude-opus-4-8", "claude-sonnet-4-6"]
     modes = ["plain"]
 
     cells = expand_cells(tutors, modes)
@@ -557,9 +644,9 @@ def test_scheduler_within_lane_sequential(tmp_path):
     # All 2 cells produced a run_id
     assert len(run_ids) == 2
 
-    # Within-lane sequential: claude-opus-4-8 before claude-haiku-3-5 (sweep order)
+    # Within-lane sequential: claude-opus-4-8 before claude-sonnet-4-6 (sweep order)
     tutors_in_order = [t for t, m in call_order]
-    assert tutors_in_order == ["claude-opus-4-8", "claude-haiku-3-5"]
+    assert tutors_in_order == ["claude-opus-4-8", "claude-sonnet-4-6"]
 
 
 def test_scheduler_multiple_lanes_all_cells_run(tmp_path):
@@ -604,9 +691,16 @@ def _make_run_config_trials(
     cfg.modes = ["plain"]
     cfg.trials = n_trials
     cfg.replay_concurrency = replay_concurrency
-    cfg.student = {"model": "claude-haiku", "mode": "oracle", "thinking": "adaptive"}
-    cfg.scorer = {"model": "claude-opus-4-6", "thinking": "adaptive"}
-    cfg.resolved_tutors = {"claude-opus-4-8": {}}
+    cfg.student = StudentSpec(model="claude-haiku", mode="oracle", thinking="dynamic")
+    cfg.scorer = ScorerSpec(model="claude-opus-4-6", thinking="dynamic")
+    cfg.resolved_tutors = {
+        "claude-opus-4-8": ArmSpec(
+            name="claude-opus-4-8",
+            model="claude-opus-4-8",
+            provider="anthropic",
+            thinking="dynamic",
+        )
+    }
     cfg.config_source = "test"
     return cfg
 
@@ -1115,10 +1209,10 @@ providers:
   openai: { env: OPENAI_API_KEY }
 
 models:
-  gpt-4o-mini: {}
+  gpt-5.5: { thinking: high }
 
-student: { model: mock-student, mode: oracle, thinking: false }
-scorer: { model: gpt-4o-mini, thinking: false }
+student: { model: claude-haiku-4-5, mode: oracle, thinking: none }
+scorer: { model: gpt-5.5, thinking: high }
 
 defaults: { trials: 1, max_turns: 1 }
 retry: { max_retries: 1, base_delay: 1 }
@@ -1130,11 +1224,11 @@ batch: { timeout: 60 }
     observed = {}
 
     def fake_run_sweep(cells, run_cfg, *, date, results_root):
-        from tutormoments.config import resolve_model, scorer_spec, student_spec
+        from tutormoments.config import resolve_arm, scorer_spec, student_spec
 
-        observed["provider"] = resolve_model("gpt-4o-mini")["provider"]
-        observed["student"] = student_spec()["model"]
-        observed["scorer"] = scorer_spec()["model"]
+        observed["provider"] = resolve_arm("gpt-5.5").provider
+        observed["student"] = student_spec().model
+        observed["scorer"] = scorer_spec().model
         observed["run_cfg_source"] = run_cfg.config_source
         return ["fake_run"]
 
@@ -1149,7 +1243,7 @@ batch: { timeout: 60 }
                 "--config",
                 str(config_path),
                 "--tutors",
-                "gpt-4o-mini",
+                "gpt-5.5",
                 "--dataset",
                 "readme_mock",
             ]
@@ -1157,8 +1251,8 @@ batch: { timeout: 60 }
 
         assert observed == {
             "provider": "openai",
-            "student": "mock-student",
-            "scorer": "gpt-4o-mini",
+            "student": "claude-haiku-4-5",
+            "scorer": "gpt-5.5",
             "run_cfg_source": str(config_path),
         }
         assert os.environ["TUTORMOMENTS_CONFIG"] == str(config_path)
@@ -1327,6 +1421,68 @@ def test_run_cell_folds_taxonomy_block_into_summary(tmp_path):
     # taxonomy usage folded into the token bookkeeping
     assert summary["tokens"]["taxonomy"] == tax_result["usage"]
     assert summary["tokens"]["total"]["total_tokens"] >= 1000
+
+
+# ---------------------------------------------------------------------------
+# Arm identity: an arm keyed by a condition name, not a model id
+# ---------------------------------------------------------------------------
+
+
+def test_run_cell_keys_results_by_arm_name_not_model_id(tmp_path):
+    """For an arm whose key is not a model id (sonnet-high -> claude-sonnet-4-6):
+    the run id is keyed by the ARM name, config.json records arm == tutor ==
+    the arm name with model == the resolved id, and the summary identity block
+    carries both."""
+    import tutormoments.results as results_mod
+    from tutormoments.cli import run_cell
+
+    scenarios = list(FIXTURE_SCENARIOS)
+    transcripts = [_make_transcript(s.id) for s in scenarios]
+    annotations = [_make_annotation(s.id) for s in scenarios]
+
+    cfg_mock = _make_run_config(
+        sample=2, arm="sonnet-high", model="claude-sonnet-4-6", thinking="high"
+    )
+
+    with (
+        patch(_CFG_PATCH, return_value=cfg_mock),
+        patch(_LOAD_PATCH, return_value=_load_result(scenarios)),
+        patch(_CONV_PATCH, side_effect=transcripts),
+        patch(_SCORE_PATCH, side_effect=_score_batch_from(annotations)),
+        patch(_TAX_PATCH, return_value=_TAX_RESULT),
+        patch(
+            "tutormoments.cli.results.make_run_id", wraps=results_mod.make_run_id
+        ) as mock_run_id,
+    ):
+        run_id = run_cell(
+            tutor="sonnet-high",
+            mode="plain",
+            run_cfg=None,
+            date="20260626",
+            results_root=str(tmp_path),
+        )
+
+    # make_run_id received the ARM name, not the resolved model id
+    mock_run_id.assert_called_once_with("sonnet-high", "plain", "test_ds", "20260626")
+    assert "sonnet-high" in run_id
+    assert "claude-sonnet-4-6" not in run_id
+
+    run_dir = tmp_path / run_id
+    cfg_data = json.loads((run_dir / "config.json").read_text(encoding="utf-8"))
+    assert cfg_data["arm"] == "sonnet-high"
+    assert cfg_data["tutor"] == "sonnet-high"
+    assert cfg_data["model"] == "claude-sonnet-4-6"
+    assert cfg_data["resolved_tutors"]["sonnet-high"] == {
+        "name": "sonnet-high",
+        "model": "claude-sonnet-4-6",
+        "provider": "anthropic",
+        "thinking": "high",
+    }
+
+    summary = json.loads((run_dir / "summary.json").read_text(encoding="utf-8"))
+    assert summary["tutor_model"] == "sonnet-high"
+    assert summary["model"] == "claude-sonnet-4-6"
+    assert summary["mode"] == "plain"
 
 
 # ---------------------------------------------------------------------------

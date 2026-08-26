@@ -75,26 +75,28 @@ def resolve_tutor(tutor_id: str) -> dict:
     Returns:
         Dictionary with:
         - kind == "registered": {"kind": "registered", "fn": <callable>}
-        - kind == "hosted": {"kind": "hosted", "client": ModelClient, "kwargs": dict}
+        - kind == "hosted": {"kind": "hosted", "client": ModelClient,
+          "kwargs": dict, "arm": ArmSpec}
 
     Raises:
-        ValueError: If tutor_id is not registered and not in model roster.
+        ValueError: If tutor_id is not registered and not in the arm roster.
     """
     from tutormoments.client import get_client
-    from tutormoments.config import get_registered_tutor, resolve_model
+    from tutormoments.config import get_registered_tutor, resolve_arm
 
     # FIRST: check registry
     registered_fn = get_registered_tutor(tutor_id)
     if registered_fn is not None:
         return {"kind": "registered", "fn": registered_fn}
 
-    # ELSE: resolve as hosted model (raises ValueError if unknown)
-    model_spec = resolve_model(tutor_id)
+    # ELSE: resolve as a roster arm (raises ValueError if unknown)
+    arm = resolve_arm(tutor_id)
     # Shared per model: a fresh client per moment would pay a TLS handshake on
     # the conversation's first turn, inflating the cold-cache latency figure.
-    client = get_client(tutor_id)
+    client = get_client(arm.model)
     return {
         "kind": "hosted",
         "client": client,
-        "kwargs": model_spec["kwargs"],
+        "kwargs": {"thinking": arm.thinking},
+        "arm": arm,
     }

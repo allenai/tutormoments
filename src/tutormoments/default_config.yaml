@@ -13,25 +13,36 @@ providers:
   gemini:    { env: GEMINI_API_KEY }
   together:  { env: TOGETHER_API_KEY }
 
-models:          # tutor roster; provider inferred from id
-  claude-opus-4-8:             { thinking: true, effort: xhigh }
-  claude-sonnet-4-6:           { thinking: true, effort: high }
-  # Introduce Sonnet 5: first Sonnet model with an xhigh effort option
-  claude-sonnet-5:             { thinking: adaptive, effort: xhigh }
-  gemini-2.5-pro:              { thinking: true, thinking_budget: -1 }
-  gemini-3.5-flash:            { thinking: true, thinking_budget: -1 }
-  gpt-5.4-mini-2026-03-17:     { thinking: true, reasoning_effort: high }
-  gpt-5.5-2026-04-23:          { thinking: true, reasoning_effort: high }
-  deepseek-ai/DeepSeek-V4-Pro: {}
+# Tutor roster: each key is an ARM -- a benchmark condition. `model` names the
+# provider model id (default: the key itself, so an arm that just runs a model
+# under one condition needs no model field). `thinking` is REQUIRED and states
+# the arm's reasoning condition on the canonical ladder
+# (none/minimal/low/medium/high/xhigh/max/dynamic); the model registry
+# (models.yaml) translates it to the provider's wire knob and rejects
+# conditions the model cannot honor. The same model may appear under several
+# arms, e.g.:
+#   gpt-5.5-no-thinking: { model: gpt-5.5-2026-04-23, thinking: none }
+models:
+  claude-opus-4-8:             { thinking: xhigh }
+  claude-sonnet-4-6:           { thinking: high }
+  # Sonnet 5: first Sonnet model with an xhigh effort option
+  claude-sonnet-5:             { thinking: xhigh }
+  # Gemini and DeepSeek arms run model-paced thinking (dynamic): Gemini sends
+  # thinking_budget -1; DeepSeek-V4-Pro reasons internally with no wire knob.
+  gemini-2.5-pro:              { thinking: dynamic }
+  gemini-3.5-flash:            { thinking: dynamic }
+  gpt-5.4-mini-2026-03-17:     { thinking: high }
+  gpt-5.5-2026-04-23:          { thinking: high }
+  deepseek-ai/DeepSeek-V4-Pro: { thinking: dynamic }
 
-student: { model: claude-opus-4-6, mode: oracle, thinking: false }
-scorer:  { model: claude-opus-4-6, thinking: adaptive }
+student: { model: claude-opus-4-6, mode: oracle, thinking: none }
+scorer:  { model: claude-opus-4-6, thinking: dynamic }
 
 # Action-taxonomy classification. Runs on every `tutormoments run` (writes
 # results/<run_id>/taxonomy/classified.csv + a taxonomy block in summary.json)
 # and backs the dev `tutormoments taxonomy` command. Pinned to opus-4-8 with
-# thinking disabled for reproducibility of the published action distribution.
-taxonomy: { model: claude-opus-4-8, thinking: false, batch_size: 50 }
+# thinking off for reproducibility of the published action distribution.
+taxonomy: { model: claude-opus-4-8, thinking: none, batch_size: 50 }
 
 defaults: { trials: 1, max_turns: 5 }
 retry:    { max_retries: 5, base_delay: 5 }
@@ -44,15 +55,13 @@ batch:    { timeout: 86400 }
 execution: { replay_concurrency: 4 }
 
 # Ground-truth build phase (dev-only `tutormoments dataset build-ground-truth`).
-# opus-4-8 uses adaptive thinking only: the Anthropic client sends {type: adaptive}
-# and ignores thinking_budget/reasoning_effort. The paper's ground truth was built
-# on opus-4-8 with adaptive thinking -- keep this pinned for reproducibility.
+# The paper's ground truth was built on opus-4-8 with adaptive (model-paced)
+# thinking -- `dynamic` sends the same {type: adaptive} wire shape; keep this
+# pinned for reproducibility.
 groundtruth:
   model: claude-opus-4-8
   poll_interval: 60
-  thinking: adaptive
-  thinking_budget: 0
-  reasoning_effort: ""
+  thinking: dynamic
   labeller:                 # per-annotation_type effectiveness templates (hybrid routing)
     scaffolding: classify_scaffolding
     rapport: classify_rapport

@@ -474,8 +474,8 @@ def run_probe(
                 moment,
                 tutor_id=tutor,
                 tutor_mode=mode or None,
-                student_id=(cfg.student or {}).get("model"),
-                student_mode=(cfg.student or {}).get("mode", "oracle"),
+                student_id=cfg.student.model,
+                student_mode=cfg.student.mode or "oracle",
                 max_turns=cfg.max_turns,
             )
         except Exception as e:  # noqa: BLE001 -- one bad moment must not
@@ -488,9 +488,11 @@ def run_probe(
         for t in getattr(transcript, "student_timings", []) or []:
             student_timings.append({**t, "moment_id": moment.id})
 
+    arm_spec = cfg.resolved_tutors.get(tutor)
     block = {
         "source": "probe",
         "tutor_model": tutor,
+        "model": arm_spec.model if arm_spec is not None else None,
         "mode": mode,
         "tutor": aggregate_timings(tutor_timings),
         "student": aggregate_timings(student_timings),

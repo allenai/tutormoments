@@ -817,7 +817,7 @@ def _build_structure_entries(
 #   Pass 3 (structure): build action entries in one batch,
 #                       assign action_label back onto the annotation dict
 #
-# Scorer model/params from config.scorer_spec() (claude-opus-4-6, thinking=adaptive).
+# Scorer model/params from config.scorer_spec() (claude-opus-4-6, thinking=dynamic).
 # context_window=0 always (benchmark-only override; see annotate pass docstring).
 # Usage accumulated across all 3 passes is attached as Annotation.usage.
 # ---------------------------------------------------------------------------
@@ -848,9 +848,7 @@ def score_batch(pairs: "list[tuple[Any, Any]]") -> "dict[str, Annotation]":
         return {}
 
     spec = scorer_spec()
-    scorer_model = spec["model"]
-    thinking_mode = spec.get("thinking", "adaptive")
-    use_thinking = thinking_mode in ("adaptive", "enabled", True)
+    scorer_model = spec.model
 
     client = ModelClient(scorer_model)
 
@@ -903,7 +901,7 @@ def score_batch(pairs: "list[tuple[Any, Any]]") -> "dict[str, Annotation]":
         annotate_entries,
         display_name="scorer_annotate",
         poll_interval=60,
-        thinking=use_thinking,
+        thinking=spec.thinking,
     )
 
     parsed = _parse_and_merge(annotate_raw, dict(detections))
@@ -956,7 +954,7 @@ def score_batch(pairs: "list[tuple[Any, Any]]") -> "dict[str, Annotation]":
             decompose_entries,
             display_name="scorer_decompose",
             poll_interval=60,
-            thinking=use_thinking,
+            thinking=spec.thinking,
         )
     else:
         logger.info("Classification pass 2/3 (decompose): skipped, no entries")
@@ -1008,7 +1006,7 @@ def score_batch(pairs: "list[tuple[Any, Any]]") -> "dict[str, Annotation]":
             structure_entries,
             display_name="scorer_structure",
             poll_interval=60,
-            thinking=use_thinking,
+            thinking=spec.thinking,
         )
     else:
         logger.info("Classification pass 3/3 (structure): skipped, no entries")

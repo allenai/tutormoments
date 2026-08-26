@@ -811,10 +811,11 @@ def _cli_build(args: argparse.Namespace) -> None:
     spec = student_spec()
     n_generated = generate_traits_for_moments(
         moments,
-        model_client=ModelClient(spec["model"]),
-        model_name=spec["model"],
+        model_client=ModelClient(spec.model),
+        model_name=spec.model,
+        thinking=spec.thinking,
     )
-    print(f"Generated {n_generated} student traits with {spec['model']}")
+    print(f"Generated {n_generated} student traits with {spec.model}")
 
     manifest = write_release(
         moments,
