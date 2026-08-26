@@ -989,11 +989,24 @@ def _openai_style_usage(usage_obj, *, provider: str, model: str, endpoint: str) 
     written = (
         (getattr(details, "cache_write_tokens", 0) or 0) if details is not None else 0
     )
+    # Informational, additive: OpenAI reports its thinking spend as a SUBSET
+    # of completion_tokens under completion_tokens_details.reasoning_tokens.
+    # It is not a separate cost bucket (unlike Gemini's thoughts), so it must
+    # not move into the canonical `reasoning` bucket -- that would
+    # double-count against `output`. `tutormoments smoke` reads it as
+    # wire-level evidence that a reasoning_effort knob actually did something.
+    completion_details = getattr(usage_obj, "completion_tokens_details", None)
+    reasoning_tokens = (
+        (getattr(completion_details, "reasoning_tokens", 0) or 0)
+        if completion_details is not None
+        else 0
+    )
     return {
         "input_tokens": prompt,
         "output_tokens": completion,
         "total_tokens": total,
         "cached_tokens": cached,
+        "reasoning_tokens": reasoning_tokens,
         **normalize_usage(
             provider,
             model,
@@ -1016,10 +1029,14 @@ def _openai_batch_usage(usage: dict, *, model: str) -> dict:
     prompt = usage.get("prompt_tokens", 0) or 0
     completion = usage.get("completion_tokens", 0) or 0
     total = usage.get("total_tokens", 0) or 0
+    reasoning_tokens = (usage.get("completion_tokens_details") or {}).get(
+        "reasoning_tokens", 0
+    ) or 0
     return {
         "input_tokens": prompt,
         "output_tokens": completion,
         "total_tokens": total,
+        "reasoning_tokens": reasoning_tokens,
         **normalize_usage(
             "openai",
             model,

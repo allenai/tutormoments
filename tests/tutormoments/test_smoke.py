@@ -242,6 +242,34 @@ def test_dynamic_without_evidence_warns_then_fails_strict():
     assert report.results[0].status == FAIL
 
 
+def test_openai_reasoning_tokens_are_evidence():
+    # OpenAI reports thinking as usage.completion_tokens_details.reasoning_tokens,
+    # surfaced by the client as the informational reasoning_tokens key (the
+    # canonical `reasoning` bucket stays 0 there -- it is a subset of output,
+    # not a separate cost). The smoke must read it as evidence.
+    check = _sync_check("gpt-5.5", "high")
+    client = _FakeClient(
+        "gpt-5.5",
+        response=SimpleNamespace(
+            text="answer",
+            usage=_usage(provider="openai", reasoning=0, reasoning_tokens=1857),
+        ),
+    )
+    report = run_smoke(_plan(sync=[check]), client_factory=_factory({"gpt-5.5": client}))
+    assert report.results[0].status == PASS
+    assert report.results[0].thinking_evidence == "1857"
+
+    client = _FakeClient(
+        "gpt-5.5",
+        response=SimpleNamespace(
+            text="answer",
+            usage=_usage(provider="openai", reasoning=0, reasoning_tokens=0),
+        ),
+    )
+    report = run_smoke(_plan(sync=[check]), client_factory=_factory({"gpt-5.5": client}))
+    assert report.results[0].status == FAIL
+
+
 def test_together_evidence_not_asserted():
     check = _sync_check("deepseek-ai/DeepSeek-V4-Pro", "dynamic")
     client = _FakeClient(

@@ -240,10 +240,13 @@ def _thinking_evidence(usage: dict) -> "int | None":
     reasoning = usage.get("reasoning", 0) or 0
     if reasoning:
         return int(reasoning)
-    if "thinking_blocks" in usage:
-        return int(usage.get("thinking_blocks") or 0)
-    # OpenAI/Gemini report reasoning tokens in the `reasoning` bucket; zero
-    # there IS the observation. Together never reports one.
+    # Anthropic: thinking blocks; OpenAI: the informational reasoning_tokens
+    # subset of completion_tokens. Either key's presence means the provider
+    # reported the dimension, so zero IS the observation.
+    for key in ("thinking_blocks", "reasoning_tokens"):
+        if key in usage:
+            return int(usage.get(key) or 0)
+    # Together never reports a reasoning dimension at all.
     if usage.get("provider") == "together":
         return None
     return int(reasoning)

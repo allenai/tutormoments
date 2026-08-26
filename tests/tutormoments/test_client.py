@@ -1442,3 +1442,49 @@ class TestCancelBatch:
             c = ModelClient("deepseek-ai/DeepSeek-V4-Pro")
         with pytest.raises(ValueError, match="Batch API not supported"):
             cancel_batch(c, "b1")
+
+
+def test_openai_usage_captures_reasoning_tokens():
+    """The informational reasoning_tokens key rides alongside the usage vector.
+
+    It is a subset of completion_tokens (not a separate cost bucket), so the
+    canonical `reasoning` bucket stays 0 -- moving it there would double-count
+    against `output`. The smoke layer reads it as thinking evidence.
+    """
+    from tutormoments.client import _openai_batch_usage, _openai_style_usage
+
+    usage_obj = SimpleNamespace(
+        prompt_tokens=53,
+        completion_tokens=109,
+        total_tokens=162,
+        prompt_tokens_details=SimpleNamespace(cached_tokens=0, cache_write_tokens=0),
+        completion_tokens_details=SimpleNamespace(reasoning_tokens=64),
+    )
+    usage = _openai_style_usage(
+        usage_obj, provider="openai", model="gpt-5.5", endpoint="sync"
+    )
+    assert usage["reasoning_tokens"] == 64
+    assert usage["reasoning"] == 0
+    assert usage["output"] == 109
+    assert usage["total"] == 53 + 109
+
+    batch = _openai_batch_usage(
+        {
+            "prompt_tokens": 53,
+            "completion_tokens": 109,
+            "total_tokens": 162,
+            "completion_tokens_details": {"reasoning_tokens": 64},
+        },
+        model="gpt-5.5",
+    )
+    assert batch["reasoning_tokens"] == 64
+    assert batch["reasoning"] == 0
+
+    # Absent details: key present, zero -- "reported dimension, zero observed".
+    bare = _openai_style_usage(
+        SimpleNamespace(prompt_tokens=1, completion_tokens=2, total_tokens=3),
+        provider="together",
+        model="deepseek-ai/DeepSeek-V4-Pro",
+        endpoint="sync",
+    )
+    assert bare["reasoning_tokens"] == 0
