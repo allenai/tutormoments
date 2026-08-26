@@ -51,6 +51,24 @@ imports them.
   response, which is recorded as `"..."` and scored as if the tutor said it.
   Never reintroduce a cap to save tokens.
 - Never make choices about which language model to use or language model configuration for any API call without consulting the user; this is a language model benchmark, the choice of model matters
+- `src/tutormoments/models.yaml` (the model registry) is benchmark-defining LM
+  configuration: its ladder->wire mappings decide what each thinking condition
+  actually sends to a provider. Never edit it without consulting the user, and
+  verify new or changed rungs live with `tutormoments smoke` before relying on
+  them. Config states only canonical `thinking:` ladder levels
+  (none/minimal/low/medium/high/xhigh/max/dynamic, required on every arm and
+  role block); the raw provider knobs (boolean `thinking`, `thinking_budget`,
+  `reasoning_effort`, `effort`) are invalid in config and rejected at load.
+  See docs/thinking.md.
+- The offline suite can only prove the code agrees with itself. The live
+  verification layer is `tutormoments smoke` (one tiny real call per
+  configured arm/role plus a submit-then-cancel batch per provider): run it
+  before merging any PR that touches core API wire-format paths
+  (`src/tutormoments/client.py`, `models.py`, `models.yaml`, `config.py`,
+  `default_config.yaml`, `smoke.py` -- keep this list in sync with the
+  smoke-reminder job in .github/workflows/ci.yml). Smoke output goes to
+  stdout / gitignored `results/smoke/`, never committed. CI stays offline: no
+  API secrets in GitHub, ever (public repo, fork PRs).
 - This repo is public. PR commits are public. Before pushing anything to remote, think about whether it could expose unnecessary information.
 
 ## Tests
