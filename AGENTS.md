@@ -56,7 +56,7 @@ imports them.
   actually sends to a provider. Never edit it without consulting the user, and
   verify new or changed rungs live with `tutormoments smoke` before relying on
   them. Config states only canonical `thinking:` ladder levels
-  (none/minimal/low/medium/high/xhigh/max/dynamic, required on every arm and
+  (none/low/high/xhigh/dynamic, required on every arm and
   role block); the raw provider knobs (boolean `thinking`, `thinking_budget`,
   `reasoning_effort`, `effort`) are invalid in config and rejected at load.
   See docs/thinking.md.

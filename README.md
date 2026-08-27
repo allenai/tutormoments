@@ -129,7 +129,7 @@ The report and viewer commands read `summary.json` files from run directories.
 The `models:` roster maps **arms** — benchmark conditions — not bare models.
 Each entry names a model (`model:` defaults to the key) and states its
 reasoning condition with a required `thinking:` level from the canonical
-ladder (`none | minimal | low | medium | high | xhigh | max | dynamic`).
+ladder (`none | low | high | xhigh | dynamic`).
 The model registry (`src/tutormoments/models.yaml`) translates the level to
 each provider's wire knob and rejects conditions the model cannot honor —
 see `docs/thinking.md`. The same model can run under several arms:

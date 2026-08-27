@@ -17,7 +17,7 @@ providers:
 # provider model id (default: the key itself, so an arm that just runs a model
 # under one condition needs no model field). `thinking` is REQUIRED and states
 # the arm's reasoning condition on the canonical ladder
-# (none/minimal/low/medium/high/xhigh/max/dynamic); the model registry
+# (none/low/high/xhigh/dynamic); the model registry
 # (models.yaml) translates it to the provider's wire knob and rejects
 # conditions the model cannot honor. The same model may appear under several
 # arms, e.g.:

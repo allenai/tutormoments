@@ -10,7 +10,7 @@
 #
 #   families: a capability *shape* shared by models -- which provider, which
 #     thinking mechanism the API exposes, and how each canonical ladder rung
-#     (none/minimal/low/medium/high/xhigh/max/dynamic) translates to the wire.
+#     (none/low/high/xhigh/dynamic) translates to the wire.
 #     A rung that is absent is unsatisfiable on that family and is rejected at
 #     config load. `unverified` lists rungs whose wire form is documented but
 #     has not yet been proven against the live API -- they are rejected with a
@@ -40,11 +40,11 @@
 #   noop: the model reasons internally and exposes no knob; the only
 #     expressible condition is `dynamic`, which sends nothing.
 #
-# The shared budget ladder (minimal=1024, low=4096, medium=8192, high=16384,
-# max=provider cap) is anchored in provider guidance: 1,024 is Anthropic's
-# documented minimum budget, 16k+ its complex-task guidance (and where the
-# literature finds diminishing returns), and >32k requires batch processing.
-# See docs/thinking.md for sources.
+# The shared budget ladder (low=4096, high=16384) is anchored in provider
+# guidance: 16k+ is Anthropic's complex-task guidance (and where the
+# literature finds diminishing returns). The ladder is deliberately small --
+# a rung exists only when an experiment needs it; add one as a reviewed
+# registry line verified with `tutormoments smoke`. See docs/thinking.md.
 
 families:
   anthropic-adaptive-4-6:
@@ -55,9 +55,7 @@ families:
       rungs:
         none: omit
         low: low
-        medium: medium
         high: high
-        max: max
         dynamic: adaptive
 
   anthropic-adaptive-4-7-plus:
@@ -67,10 +65,8 @@ families:
       rungs:
         none: omit
         low: low
-        medium: medium
         high: high
         xhigh: xhigh
-        max: max
         dynamic: adaptive
 
   anthropic-sonnet-5:
@@ -83,10 +79,8 @@ families:
       rungs:
         none: disabled
         low: low
-        medium: medium
         high: high
         xhigh: xhigh
-        max: max
         dynamic: adaptive
 
   anthropic-legacy:
@@ -97,11 +91,8 @@ families:
       mechanism: anthropic-budget
       rungs:
         none: omit
-        minimal: 1024
         low: 4096
-        medium: 8192
         high: 16384
-        max: 32768
 
   gemini-2-5-pro:
     provider: gemini
@@ -111,11 +102,8 @@ families:
     thinking:
       mechanism: gemini
       rungs:
-        minimal: 1024
         low: 4096
-        medium: 8192
         high: 16384
-        max: 32768
         dynamic: -1
 
   gemini-2-5-flash:
@@ -124,11 +112,8 @@ families:
       mechanism: gemini
       rungs:
         none: 0
-        minimal: 1024
         low: 4096
-        medium: 8192
         high: 16384
-        max: 24576
         dynamic: -1
 
   gemini-3:
@@ -141,13 +126,11 @@ families:
     thinking:
       mechanism: gemini
       rungs:
-        minimal: minimal
         low: low
-        medium: medium
         high: high
         dynamic: -1
       # thinking_level has not been exercised live from this codebase yet.
-      unverified: [minimal, low, medium, high]
+      unverified: [low, high]
 
   openai-gpt-5:
     provider: openai
@@ -155,24 +138,21 @@ families:
       mechanism: openai-effort
       rungs:
         none: none
-        minimal: minimal
         low: low
-        medium: medium
         high: high
         xhigh: xhigh
-      # none/minimal/xhigh support varies by point release; unproven live here.
-      unverified: [none, minimal, xhigh]
+      # none/xhigh support varies by point release; unproven live here.
+      unverified: [none, xhigh]
 
   openai-o-series:
     provider: openai
     notes: >-
-      The o-series exposes only a depth knob (reasoning_effort
-      low/medium/high), never an off switch, so `none` is unsatisfiable.
+      The o-series exposes only a depth knob (reasoning_effort),
+      never an off switch, so `none` is unsatisfiable.
     thinking:
       mechanism: openai-effort
       rungs:
         low: low
-        medium: medium
         high: high
 
   together-internal-reasoner:

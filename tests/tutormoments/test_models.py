@@ -45,9 +45,7 @@ WIRE_MATRIX = [
     # --- anthropic 4.6 adaptive tier ---
     ("claude-opus-4-6", "none", NOTHING),
     ("claude-opus-4-6", "low", _anth(ADAPTIVE, "low")),
-    ("claude-opus-4-6", "medium", _anth(ADAPTIVE, "medium")),
     ("claude-opus-4-6", "high", _anth(ADAPTIVE, "high")),
-    ("claude-opus-4-6", "max", _anth(ADAPTIVE, "max")),
     ("claude-opus-4-6", "dynamic", _anth(ADAPTIVE)),
     ("claude-sonnet-4-6", "high", _anth(ADAPTIVE, "high")),
     # --- anthropic 4.7+ adaptive tier ---
@@ -60,27 +58,14 @@ WIRE_MATRIX = [
     ("claude-sonnet-5", "dynamic", _anth(ADAPTIVE)),
     # --- anthropic legacy (enabled + budget) ---
     ("claude-haiku-4-5", "none", NOTHING),
-    ("claude-haiku-4-5", "minimal", _anth({"type": "enabled", "budget_tokens": 1024})),
     ("claude-haiku-4-5", "low", _anth({"type": "enabled", "budget_tokens": 4096})),
-    ("claude-haiku-4-5", "medium", _anth({"type": "enabled", "budget_tokens": 8192})),
     ("claude-haiku-4-5", "high", _anth({"type": "enabled", "budget_tokens": 16384})),
-    ("claude-haiku-4-5", "max", _anth({"type": "enabled", "budget_tokens": 32768})),
     ("claude-3-7-sonnet", "high", _anth({"type": "enabled", "budget_tokens": 16384})),
     # --- gemini 2.5 pro (always-thinking) ---
     (
         "gemini-2.5-pro",
-        "minimal",
-        _gem({"include_thoughts": True, "thinking_budget": 1024}),
-    ),
-    (
-        "gemini-2.5-pro",
         "high",
         _gem({"include_thoughts": True, "thinking_budget": 16384}),
-    ),
-    (
-        "gemini-2.5-pro",
-        "max",
-        _gem({"include_thoughts": True, "thinking_budget": 32768}),
     ),
     (
         "gemini-2.5-pro",
@@ -100,11 +85,6 @@ WIRE_MATRIX = [
     ),
     (
         "gemini-2.5-flash",
-        "max",
-        _gem({"include_thoughts": True, "thinking_budget": 24576}),
-    ),
-    (
-        "gemini-2.5-flash",
         "dynamic",
         _gem({"include_thoughts": True, "thinking_budget": -1}),
     ),
@@ -116,7 +96,6 @@ WIRE_MATRIX = [
     ),
     # --- openai gpt-5 line ---
     ("gpt-5.5", "low", _oai("low")),
-    ("gpt-5.5", "medium", _oai("medium")),
     ("gpt-5.5", "high", _oai("high")),
     ("gpt-5.4-mini", "high", _oai("high")),
     # --- openai o-series ---
@@ -173,11 +152,9 @@ def test_unsatisfiable_error_carries_family_reason():
 # ---------------------------------------------------------------------------
 
 UNVERIFIED = [
-    ("gemini-3.5-flash", "minimal"),
     ("gemini-3.5-flash", "low"),
     ("gemini-3.5-flash", "high"),
     ("gpt-5.5", "none"),
-    ("gpt-5.5", "minimal"),
     ("gpt-5.5", "xhigh"),
 ]
 
@@ -253,6 +230,14 @@ def test_coerce_rejects_unknown_strings():
         ThinkingLevel.coerce("adaptive")  # retired spelling; dynamic replaced it
     with pytest.raises(ThinkingConfigError, match="not a valid thinking level"):
         ThinkingLevel.coerce("enabled")
+
+
+@pytest.mark.parametrize("dropped", ["minimal", "medium", "max"])
+def test_coerce_rejects_dropped_rungs(dropped):
+    # The ladder is deliberately small: these rungs were removed as unused.
+    # Re-adding one is a reviewed registry line + a smoke verification.
+    with pytest.raises(ThinkingConfigError, match="not a valid thinking level"):
+        ThinkingLevel.coerce(dropped)
 
 
 def test_coerce_rejects_numbers():

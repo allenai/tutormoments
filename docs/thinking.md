@@ -15,8 +15,12 @@ way — which produced validation/runtime divergence and made "the same model
 at two thinking levels" inexpressible. Now:
 
 - Config states ONE canonical value per arm/role:
-  `thinking: none | minimal | low | medium | high | xhigh | max | dynamic`
-  (required — every benchmarked condition is explicit).
+  `thinking: none | low | high | xhigh | dynamic`
+  (required — every benchmarked condition is explicit). The ladder is
+  deliberately small: a rung exists only when an experiment needs it, and
+  adding one (e.g. `medium` for OpenAI's default effort tier, or `minimal`/
+  `max`) is a reviewed registry line plus a `tutormoments smoke`
+  verification.
 - The model registry (`src/tutormoments/models.yaml`) translates it to the
   provider's wire knob, exactly once, at config load
   (`tutormoments.models.resolve_thinking`).
@@ -24,27 +28,27 @@ at two thinking levels" inexpressible. Now:
   on an always-thinking model), an unregistered model, or a retired raw knob
   in config is rejected before any tokens are spent.
 
-Rung meanings: `none` = thinking verifiably off; `minimal`–`max` = explicit
-depth rungs; `dynamic` = the model decides (Gemini budget −1, Anthropic
-adaptive, open-weight internal reasoning).
+Rung meanings: `none` = thinking verifiably off; `low`/`high`/`xhigh` =
+explicit depth rungs; `dynamic` = the model decides (Gemini budget −1,
+Anthropic adaptive, open-weight internal reasoning).
 
 ## The ladder -> wire mapping
 
 The authoritative copy is `src/tutormoments/models.yaml`; the contract tests
 in `tests/tutormoments/test_models.py` pin every cell. Summary:
 
-| family | none | minimal | low | medium | high | xhigh | max | dynamic |
-|---|---|---|---|---|---|---|---|---|
-| anthropic 4.6 tier (opus/sonnet-4-6) | omit `thinking` | – | adaptive + effort low | medium | high | – (no xhigh on 4.6) | max | `{type: adaptive}`, no effort |
-| anthropic 4.7+ (opus-4-7/4-8) | omit | – | adaptive + effort low | medium | high | xhigh | max | `{type: adaptive}` |
-| anthropic sonnet-5 | `{type: disabled}` (omission runs adaptive on Sonnet 5) | – | low | medium | high | xhigh | max | `{type: adaptive}` |
-| anthropic legacy (frozen pre-adaptive set) | omit | enabled+1024 | 4096 | 8192 | 16384 | – | 32768 | – |
-| gemini-2.5-pro | – (API rejects budget 0) | 1024 | 4096 | 8192 | 16384 | – | 32768 | budget −1 |
-| gemini-2.5-flash | budget 0, include_thoughts false | 1024 | 4096 | 8192 | 16384 | – | 24576 | budget −1 |
-| gemini-3.x | – (thinking_level floor is not off) | thinking_level minimal ⚠ | low ⚠ | medium ⚠ | high ⚠ | – | – | budget −1 (the proven wire shape) |
-| openai gpt-5 line | reasoning_effort none ⚠ | minimal ⚠ | low | medium | high | xhigh ⚠ | – | – |
-| openai o-series | – (no off switch) | – | low | medium | high | – | – | – |
-| together open-weight | – (always-thinking) | – | – | – | – | – | – | emit nothing |
+| family | none | low | high | xhigh | dynamic |
+|---|---|---|---|---|---|
+| anthropic 4.6 tier (opus/sonnet-4-6) | omit `thinking` | adaptive + effort low | high | – (no xhigh on 4.6) | `{type: adaptive}`, no effort |
+| anthropic 4.7+ (opus-4-7/4-8) | omit | adaptive + effort low | high | xhigh | `{type: adaptive}` |
+| anthropic sonnet-5 | `{type: disabled}` (omission runs adaptive on Sonnet 5) | low | high | xhigh | `{type: adaptive}` |
+| anthropic legacy (frozen pre-adaptive set) | omit | enabled+4096 | enabled+16384 | – | – |
+| gemini-2.5-pro | – (API rejects budget 0) | budget 4096 | 16384 | – | budget −1 |
+| gemini-2.5-flash | budget 0, include_thoughts false | 4096 | 16384 | – | budget −1 |
+| gemini-3.x | – (thinking_level floor is not off) | thinking_level low ⚠ | high ⚠ | – | budget −1 (the proven wire shape) |
+| openai gpt-5 line | reasoning_effort none ⚠ | low | high | xhigh ⚠ | – |
+| openai o-series | – (no off switch) | low | high | – | – |
+| together open-weight | – (always-thinking) | – | – | – | emit nothing |
 
 "–" = unsatisfiable: config load raises. "⚠" = documented but not yet
 verified live from this codebase: the registry lists these rungs under
@@ -64,17 +68,19 @@ Notes:
 All budget-based families (Gemini 2.5, Anthropic legacy) use one ladder so
 rung names stay comparable across providers:
 
-    minimal = 1024   low = 4096   medium = 8192   high = 16384
-    max = provider cap (32768 Gemini Pro / 24576 Gemini Flash / 32768 Anthropic legacy)
+    low = 4096   high = 16384
 
 Anchors, from provider guidance and the literature:
-- 1,024 is Anthropic's documented minimum thinking budget, and the low-effort
-  anchor cross-provider translation layers use.
 - 16k+ is Anthropic's guidance for complex tasks, roughly where published
   budget-vs-accuracy sweeps find diminishing returns, and this codebase's
   historical default budget.
-- Anthropic recommends batch processing above 32k, and 32768/24576 are the
-  Gemini 2.5 Pro/Flash caps.
+- 4096 sits a quarter of the way there — a genuinely shallow condition that
+  is still above Anthropic's documented 1,024 minimum on every family.
+
+The ladder deliberately omits rungs no experiment uses today (`minimal`,
+`medium` — OpenAI's default effort tier, `max` — provider caps, which would
+mean a different depth per family). Re-adding one is a reviewed registry
+line plus a smoke verification.
 
 Sources: Anthropic extended-thinking docs
 (https://docs.claude.com/en/docs/build-with-claude/extended-thinking), Gemini

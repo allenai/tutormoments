@@ -49,7 +49,7 @@ _DEFAULT_CONFIG_RESOURCE = "default_config.yaml"
 _RAW_KNOB_KEYS = ("thinking_budget", "reasoning_effort", "effort")
 _MIGRATION_HINT = (
     "the raw provider knobs were replaced by the thinking ladder "
-    "(none/minimal/low/medium/high/xhigh/max/dynamic); see README "
+    "(none/low/high/xhigh/dynamic); see README "
     '"Configuring thinking".'
 )
 
@@ -209,7 +209,7 @@ def _require_thinking(block_name: str, entry: dict) -> ThinkingLevel:
         raise ThinkingConfigError(
             f"config {block_name}: `thinking` is required -- every benchmarked "
             f"condition must be stated explicitly "
-            f"(none/minimal/low/medium/high/xhigh/max/dynamic)."
+            f"(none/low/high/xhigh/dynamic)."
         )
     try:
         level = ThinkingLevel.coerce(entry["thinking"])

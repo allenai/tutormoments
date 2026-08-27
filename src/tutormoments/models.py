@@ -50,8 +50,8 @@ _KNOWN_MECHANISMS = {
     "noop",
 }
 _ANTHROPIC_ADAPTIVE_SPECIALS = {"omit", "disabled", "adaptive"}
-_ANTHROPIC_EFFORT_LEVELS = {"low", "medium", "high", "xhigh", "max"}
-_LADDER_DOC = "none/minimal/low/medium/high/xhigh/max/dynamic"
+_ANTHROPIC_EFFORT_LEVELS = {"low", "high", "xhigh"}
+_LADDER_DOC = "none/low/high/xhigh/dynamic"
 
 
 class ThinkingConfigError(ValueError):
@@ -61,19 +61,18 @@ class ThinkingConfigError(ValueError):
 class ThinkingLevel(str, Enum):
     """The canonical thinking ladder.
 
-    `none` means thinking verifiably off; `minimal`..`max` are explicit depth
-    rungs; `dynamic` means the model decides (provider auto mechanisms).
+    `none` means thinking verifiably off; `low`/`high`/`xhigh` are explicit
+    depth rungs; `dynamic` means the model decides (provider auto mechanisms).
     Each family maps the rungs it supports to its own wire knob in models.yaml;
-    a missing rung is unsatisfiable there and rejected.
+    a missing rung is unsatisfiable there and rejected. Deliberately small:
+    a rung exists only when an experiment needs it (adding one is a reviewed
+    registry line plus a `tutormoments smoke` verification).
     """
 
     NONE = "none"
-    MINIMAL = "minimal"
     LOW = "low"
-    MEDIUM = "medium"
     HIGH = "high"
     XHIGH = "xhigh"
-    MAX = "max"
     DYNAMIC = "dynamic"
 
     @classmethod
