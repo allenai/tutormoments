@@ -43,7 +43,7 @@ in `tests/tutormoments/test_models.py` pin every cell. Summary:
 | anthropic 4.7+ (opus-4-7/4-8) | omit | adaptive + effort low | high | xhigh | `{type: adaptive}` |
 | anthropic sonnet-5 | `{type: disabled}` (omission runs adaptive on Sonnet 5) | low | high | xhigh | `{type: adaptive}` |
 | anthropic legacy (frozen pre-adaptive set) | omit | enabled+4096 | enabled+16384 | – | – |
-| gemini-2.5-pro | – (API rejects budget 0) | budget 4096 | 16384 | – | budget −1 |
+| gemini-2.5-pro | – (API rejects budget 0) | budget 4096 | 16384 | 32768 (2x high; the Pro budget cap — Pro only, Flash caps at 24576) | budget −1 |
 | gemini-2.5-flash | budget 0, include_thoughts false | 4096 | 16384 | – | budget −1 |
 | gemini-3.x | – (thinking_level floor is not off) | thinking_level low ⚠ | high ⚠ | – | budget −1 (the proven wire shape) |
 | openai gpt-5 line | reasoning_effort none ⚠ | low | high | xhigh ⚠ | – |

@@ -69,6 +69,11 @@ WIRE_MATRIX = [
     ),
     (
         "gemini-2.5-pro",
+        "xhigh",
+        _gem({"include_thoughts": True, "thinking_budget": 32768}),
+    ),
+    (
+        "gemini-2.5-pro",
         "dynamic",
         _gem({"include_thoughts": True, "thinking_budget": -1}),
     ),

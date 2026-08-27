@@ -104,6 +104,10 @@ families:
       rungs:
         low: 4096
         high: 16384
+        # 2x high, continuing the doubling ladder; also the model's budget cap
+        # and the >32k-needs-batch boundary. Pro only: Flash caps at 24576, so
+        # an xhigh there could not mean the same number.
+        xhigh: 32768
         dynamic: -1
 
   gemini-2-5-flash:
