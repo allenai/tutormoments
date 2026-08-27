@@ -255,7 +255,9 @@ def test_openai_reasoning_tokens_are_evidence():
             usage=_usage(provider="openai", reasoning=0, reasoning_tokens=1857),
         ),
     )
-    report = run_smoke(_plan(sync=[check]), client_factory=_factory({"gpt-5.5": client}))
+    report = run_smoke(
+        _plan(sync=[check]), client_factory=_factory({"gpt-5.5": client})
+    )
     assert report.results[0].status == PASS
     assert report.results[0].thinking_evidence == "1857"
 
@@ -266,7 +268,9 @@ def test_openai_reasoning_tokens_are_evidence():
             usage=_usage(provider="openai", reasoning=0, reasoning_tokens=0),
         ),
     )
-    report = run_smoke(_plan(sync=[check]), client_factory=_factory({"gpt-5.5": client}))
+    report = run_smoke(
+        _plan(sync=[check]), client_factory=_factory({"gpt-5.5": client})
+    )
     assert report.results[0].status == FAIL
 
 
