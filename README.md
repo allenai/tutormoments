@@ -158,6 +158,12 @@ config to swap the student model with another API-callable model:
 student: { model: claude-opus-4-6, mode: oracle, thinking: none } # default
 ```
 
+The student/scorer/taxonomy/groundtruth blocks use the same `{model, thinking}`
+shape as arms but deliberately do NOT reference an arm by name: the roster is
+the set of selectable tutor conditions, while the role blocks are the fixed
+evaluation apparatus. Keeping them inline means retuning a tutor arm can never
+silently change the student or the scoring regime as a side effect.
+
 ## Custom Tutor / Student Models
 
 You can register a different approach to the LM Tutor / Synthetic student,
