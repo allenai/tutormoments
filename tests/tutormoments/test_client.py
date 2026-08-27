@@ -519,11 +519,23 @@ def test_run_sync_entries_records_error_per_key(monkeypatch):
             out = run_sync_entries(c, [build_batch_entry("k1", "p1")])
     assert out["k1"]["text"] == ""
     assert "boom" in out["k1"]["error"]
-    assert out["k1"]["usage"] == {
-        "input_tokens": 0,
-        "output_tokens": 0,
-        "total_tokens": 0,
-    }
+    # Error rows keep zeros but carry the canonical keys + provenance.
+    usage = out["k1"]["usage"]
+    for key in (
+        "input_tokens",
+        "output_tokens",
+        "total_tokens",
+        "input_uncached",
+        "cache_read",
+        "cache_write",
+        "output",
+        "reasoning",
+        "total",
+    ):
+        assert usage[key] == 0
+    assert usage["provider"] == "anthropic"
+    assert usage["model"] == "claude-opus-4-6"
+    assert usage["endpoint"] == "sync"
 
 
 def test_run_batch_anthropic_remaps_custom_ids(monkeypatch):
@@ -548,7 +560,12 @@ def test_run_batch_anthropic_remaps_custom_ids(monkeypatch):
             b.type = "text"
             b.text = text
             msg.content = [b]
-            msg.usage = MagicMock(input_tokens=1, output_tokens=1)
+            msg.usage = MagicMock(
+                input_tokens=1,
+                output_tokens=1,
+                cache_creation_input_tokens=0,
+                cache_read_input_tokens=0,
+            )
             r.result.message = msg
             return r
 
@@ -618,7 +635,12 @@ def test_run_batch_anthropic_resume_rebuilds_id_map(monkeypatch):
             b.type = "text"
             b.text = text
             msg.content = [b]
-            msg.usage = MagicMock(input_tokens=1, output_tokens=1)
+            msg.usage = MagicMock(
+                input_tokens=1,
+                output_tokens=1,
+                cache_creation_input_tokens=0,
+                cache_read_input_tokens=0,
+            )
             r.result.message = msg
             return r
 
@@ -743,3 +765,360 @@ def test_run_batch_unsupported_provider_raises(monkeypatch):
         c = ModelClient("deepseek-ai/DeepSeek-V3")
         with pytest.raises(ValueError, match="Batch API not supported"):
             run_batch(c, [build_batch_entry("k", "p")], poll_interval=0)
+
+
+# ===================================================================
+# Canonical usage vector (cost tracking, Phase 1)
+# ===================================================================
+
+from types import SimpleNamespace
+
+from tutormoments.client import normalize_usage
+
+
+def test_normalize_usage_total_is_derived_and_provenance_rides_along():
+    u = normalize_usage(
+        "gemini",
+        "gemini-3.1-pro-preview",
+        "sync",
+        input_uncached=200,
+        cache_read=100,
+        cache_write=25,
+        output=30,
+        reasoning=50,
+    )
+    assert u["total"] == 405  # one definition: sum of the five buckets
+    assert u["provider"] == "gemini"
+    assert u["model"] == "gemini-3.1-pro-preview"
+    assert u["endpoint"] == "sync"
+
+
+def test_model_response_default_usage_has_canonical_zero_vector():
+    usage = ModelResponse("x").usage
+    for key in ("input_uncached", "cache_read", "cache_write", "output", "reasoning"):
+        assert usage[key] == 0
+    assert usage["total"] == 0
+
+
+def _gemini_usage_meta(prompt=300, candidates=25, cached=100, thoughts=50):
+    return SimpleNamespace(
+        prompt_token_count=prompt,
+        candidates_token_count=candidates,
+        total_token_count=prompt + candidates + thoughts,
+        cached_content_token_count=cached,
+        thoughts_token_count=thoughts,
+    )
+
+
+def _assert_gemini_vector(usage, endpoint):
+    assert usage["input_uncached"] == 200  # prompt 300 minus 100 cached
+    assert usage["cache_read"] == 100
+    assert usage["cache_write"] == 0
+    assert usage["output"] == 25
+    assert usage["reasoning"] == 50
+    # Canonical total agrees with the provider's thinking-inclusive total,
+    # unlike legacy input+output recomputation.
+    assert usage["total"] == 375
+    assert usage["total_tokens"] == 375
+    assert usage["provider"] == "gemini"
+    assert usage["endpoint"] == endpoint
+
+
+def test_gemini_sync_captures_cache_read_and_reasoning(monkeypatch):
+    monkeypatch.setenv("GEMINI_API_KEY", "k")
+    with patch("google.genai.Client") as MockGenai:
+        client_obj = MagicMock()
+        client_obj.models.generate_content.return_value = SimpleNamespace(
+            text="hi", usage_metadata=_gemini_usage_meta()
+        )
+        MockGenai.return_value = client_obj
+        resp = ModelClient("gemini-3.1-pro-preview").generate("Q", json_mode=False)
+    _assert_gemini_vector(resp.usage, "sync")
+
+
+def test_gemini_stream_captures_cache_read_and_reasoning(monkeypatch):
+    monkeypatch.setenv("GEMINI_API_KEY", "k")
+    chunk = SimpleNamespace(
+        candidates=[
+            SimpleNamespace(
+                content=SimpleNamespace(
+                    parts=[SimpleNamespace(text="hi", thought=False)]
+                )
+            )
+        ],
+        usage_metadata=_gemini_usage_meta(),
+    )
+    with patch("google.genai.Client") as MockGenai:
+        client_obj = MagicMock()
+        client_obj.models.generate_content_stream.return_value = iter([chunk])
+        MockGenai.return_value = client_obj
+        resp = ModelClient("gemini-3.1-pro-preview").generate(
+            "Q", json_mode=False, stream=True
+        )
+    _assert_gemini_vector(resp.usage, "stream")
+
+
+def test_openai_sync_splits_cached_tokens_out_of_prompt(monkeypatch):
+    monkeypatch.setenv("OPENAI_API_KEY", "sk-test")
+    response = SimpleNamespace(
+        choices=[SimpleNamespace(message=SimpleNamespace(content="hi"))],
+        usage=SimpleNamespace(
+            prompt_tokens=500,
+            completion_tokens=20,
+            total_tokens=520,
+            prompt_tokens_details=SimpleNamespace(cached_tokens=400),
+        ),
+    )
+    with patch("openai.OpenAI") as MockOpenAI:
+        client_obj = MagicMock()
+        client_obj.chat.completions.create.return_value = response
+        MockOpenAI.return_value = client_obj
+        resp = ModelClient("gpt-5.5-2026-04-23").generate("Q", json_mode=False)
+    usage = resp.usage
+    assert usage["input_uncached"] == 100
+    assert usage["cache_read"] == 400
+    assert usage["reasoning"] == 0
+    assert usage["output"] == 20
+    assert usage["total"] == 520
+    assert usage["input_tokens"] == 500  # legacy keys preserved
+    assert usage["provider"] == "openai"
+    assert usage["endpoint"] == "sync"
+
+
+def test_openai_sync_captures_cache_write_tokens(monkeypatch):
+    """GPT-5.6-generation models meter cache writes (billed at 1.25x input)
+    under prompt_tokens_details.cache_write_tokens, a subset of prompt_tokens
+    disjoint from cached_tokens. Mirrors live gpt-5.6-luna evidence
+    (2026-08-24): prompt 1120 = 1117 written + 3 uncached, plus a mixed case.
+    Older models' usage objects lack the attribute entirely -> 0 (covered by
+    test_openai_sync_splits_cached_tokens_out_of_prompt's fixture)."""
+    monkeypatch.setenv("OPENAI_API_KEY", "sk-test")
+    response = SimpleNamespace(
+        choices=[SimpleNamespace(message=SimpleNamespace(content="hi"))],
+        usage=SimpleNamespace(
+            prompt_tokens=1120,
+            completion_tokens=5,
+            total_tokens=1125,
+            prompt_tokens_details=SimpleNamespace(
+                cached_tokens=100, cache_write_tokens=1017
+            ),
+        ),
+    )
+    with patch("openai.OpenAI") as MockOpenAI:
+        client_obj = MagicMock()
+        client_obj.chat.completions.create.return_value = response
+        MockOpenAI.return_value = client_obj
+        resp = ModelClient("gpt-5.5-2026-04-23").generate("Q", json_mode=False)
+    usage = resp.usage
+    assert usage["cache_write"] == 1017
+    assert usage["cache_read"] == 100
+    assert usage["input_uncached"] == 3  # prompt - cached - written
+    assert usage["output"] == 5
+    assert usage["total"] == 1125
+    assert usage["input_tokens"] == 1120  # legacy key untouched
+
+
+def test_together_sync_and_stream_report_identical_vectors(monkeypatch):
+    """Regression for the sync/stream asymmetry: the sync Together path used
+    to drop cached_tokens that the streamed path captured."""
+    monkeypatch.setenv("TOGETHER_API_KEY", "sk-test")
+    usage_obj = SimpleNamespace(
+        prompt_tokens=50,
+        completion_tokens=10,
+        total_tokens=60,
+        prompt_tokens_details=SimpleNamespace(cached_tokens=7),
+    )
+
+    with patch("openai.OpenAI") as MockOpenAI:
+        client_obj = MagicMock()
+        client_obj.chat.completions.create.return_value = SimpleNamespace(
+            choices=[SimpleNamespace(message=SimpleNamespace(content="hi"))],
+            usage=usage_obj,
+        )
+        MockOpenAI.return_value = client_obj
+        sync_usage = (
+            ModelClient("deepseek-ai/DeepSeek-V4-Pro")
+            .generate("Q", json_mode=False)
+            .usage
+        )
+
+    chunks = [
+        SimpleNamespace(
+            choices=[SimpleNamespace(delta=SimpleNamespace(content="hi"))], usage=None
+        ),
+        SimpleNamespace(choices=[], usage=usage_obj),
+    ]
+    with patch("openai.OpenAI") as MockOpenAI:
+        client_obj = MagicMock()
+        client_obj.chat.completions.create.return_value = iter(chunks)
+        MockOpenAI.return_value = client_obj
+        stream_usage = (
+            ModelClient("deepseek-ai/DeepSeek-V4-Pro")
+            .generate("Q", json_mode=False, stream=True)
+            .usage
+        )
+
+    assert sync_usage["cached_tokens"] == 7
+    assert sync_usage["cache_read"] == 7
+    assert sync_usage["input_uncached"] == 43
+    assert sync_usage["provider"] == "together"
+    assert sync_usage["endpoint"] == "sync"
+    assert stream_usage["endpoint"] == "stream"
+    for key, value in sync_usage.items():
+        if key != "endpoint":
+            assert stream_usage[key] == value, key
+
+
+def test_anthropic_sync_cache_buckets_stay_disjoint_from_input(monkeypatch):
+    """input_tokens already excludes the cache buckets, so input_uncached maps
+    to it directly -- re-adding cache tokens at the base rate is the
+    double-count trap the costing layer guards against."""
+    monkeypatch.setenv("ANTHROPIC_API_KEY", "sk-test")
+    msg = _fake_anthropic_message("hi", in_tok=10, out_tok=5)
+    msg.usage = MagicMock(
+        input_tokens=10,
+        output_tokens=5,
+        cache_creation_input_tokens=100,
+        cache_read_input_tokens=800,
+    )
+    with patch("anthropic.Anthropic") as MockAnthropic:
+        client_obj = MagicMock()
+        client_obj.messages.create.return_value = msg
+        MockAnthropic.return_value = client_obj
+        resp = ModelClient("claude-opus-4-6").generate("Q", json_mode=False)
+    usage = resp.usage
+    assert usage["input_uncached"] == 10
+    assert usage["cache_read"] == 800
+    assert usage["cache_write"] == 100
+    assert usage["output"] == 5
+    assert usage["total"] == 915
+    assert usage["total_tokens"] == 15  # legacy definition unchanged
+    assert usage["endpoint"] == "sync"
+
+
+def test_run_batch_anthropic_cache_fields_survive(monkeypatch):
+    """Regression for the open-coded batch usage dict that silently dropped
+    the cache buckets: the batch path must route through _anthropic_usage."""
+    monkeypatch.setenv("ANTHROPIC_API_KEY", "sk-test")
+    with (
+        patch("anthropic.Anthropic") as MockAnthropic,
+        patch("tutormoments.client.time.sleep"),
+    ):
+        client_obj = MagicMock()
+        batch = MagicMock()
+        batch.id = "b1"
+        batch.processing_status = "ended"
+        client_obj.messages.batches.create.return_value = batch
+        client_obj.messages.batches.retrieve.return_value = batch
+
+        r = MagicMock()
+        r.custom_id = "r0"
+        r.result.type = "succeeded"
+        msg = MagicMock()
+        block = MagicMock()
+        block.type = "text"
+        block.text = "A"
+        msg.content = [block]
+        msg.usage = MagicMock(
+            input_tokens=10,
+            output_tokens=5,
+            cache_creation_input_tokens=55,
+            cache_read_input_tokens=1234,
+        )
+        r.result.message = msg
+        client_obj.messages.batches.results.return_value = [r]
+        MockAnthropic.return_value = client_obj
+        c = ModelClient("claude-opus-4-6")
+        out = run_batch(c, [build_batch_entry("kA", "pA")], poll_interval=0)
+    usage = out["kA"]["usage"]
+    assert usage["cache_read"] == 1234
+    assert usage["cache_write"] == 55
+    assert usage["cache_read_input_tokens"] == 1234  # legacy key too
+    assert usage["input_uncached"] == 10
+    assert usage["total"] == 1304
+    assert usage["endpoint"] == "batch"
+    assert usage["provider"] == "anthropic"
+
+
+def test_run_batch_openai_forces_cache_read_zero(monkeypatch):
+    """Prompt caching does not apply on the OpenAI Batch API, so cache_read is
+    0 by construction even if the response body carries a cached_tokens field."""
+    monkeypatch.setenv("OPENAI_API_KEY", "sk-test")
+    with patch("openai.OpenAI") as MockOpenAI, patch("tutormoments.client.time.sleep"):
+        client_obj = MagicMock()
+        uploaded = MagicMock()
+        uploaded.id = "file-1"
+        client_obj.files.create.return_value = uploaded
+        batch = MagicMock()
+        batch.id = "ob1"
+        batch.status = "completed"
+        batch.output_file_id = "out-1"
+        client_obj.batches.create.return_value = batch
+        client_obj.batches.retrieve.return_value = batch
+        line = json.dumps(
+            {
+                "custom_id": "kA",
+                "response": {
+                    "body": {
+                        "choices": [{"message": {"content": "A"}}],
+                        "usage": {
+                            "prompt_tokens": 12,
+                            "completion_tokens": 3,
+                            "total_tokens": 15,
+                            "prompt_tokens_details": {"cached_tokens": 9},
+                        },
+                    }
+                },
+            }
+        )
+        content_obj = MagicMock()
+        content_obj.content = line.encode("utf-8")
+        client_obj.files.content.return_value = content_obj
+        MockOpenAI.return_value = client_obj
+        c = ModelClient("gpt-5.4")
+        out = run_batch(c, [build_batch_entry("kA", "pA")], poll_interval=0)
+    usage = out["kA"]["usage"]
+    assert usage["cache_read"] == 0
+    assert usage["input_uncached"] == 12
+    assert usage["output"] == 3
+    assert usage["total"] == 15
+    assert usage["endpoint"] == "batch"
+    assert usage["provider"] == "openai"
+
+
+def test_run_batch_gemini_captures_cache_read_and_reasoning(monkeypatch):
+    monkeypatch.setenv("GEMINI_API_KEY", "key-test")
+    with (
+        patch("google.genai.Client") as MockGenai,
+        patch("tutormoments.client.time.sleep"),
+    ):
+        client_obj = MagicMock()
+        uploaded = MagicMock()
+        uploaded.name = "files/up1"
+        client_obj.files.upload.return_value = uploaded
+        batch = MagicMock()
+        batch.name = "batches/gb1"
+        batch.state.name = "JOB_STATE_SUCCEEDED"
+        batch.dest.file_name = "files/out1"
+        client_obj.batches.create.return_value = batch
+        client_obj.batches.get.return_value = batch
+        line = json.dumps(
+            {
+                "key": "kA",
+                "response": {
+                    "candidates": [{"content": {"parts": [{"text": "A"}]}}],
+                    "usageMetadata": {
+                        "promptTokenCount": 300,
+                        "candidatesTokenCount": 25,
+                        "totalTokenCount": 375,
+                        "cachedContentTokenCount": 100,
+                        "thoughtsTokenCount": 50,
+                    },
+                },
+            }
+        )
+        client_obj.files.download.return_value = line.encode("utf-8")
+        MockGenai.return_value = client_obj
+        c = ModelClient("gemini-3.1-pro-preview")
+        out = run_batch(c, [build_batch_entry("kA", "pA")], poll_interval=0)
+    _assert_gemini_vector(out["kA"]["usage"], "batch")

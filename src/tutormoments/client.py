@@ -80,11 +80,21 @@ class ModelResponse:
     """Unified response from any provider."""
 
     text: str
+    # Zero legacy counters plus the canonical cost vector (see
+    # normalize_usage). No provenance here: this default is only used where
+    # no real API call happened (e.g. registered/callable tutors), so there
+    # is no provider/model/endpoint to attribute the zeros to.
     usage: dict = field(
         default_factory=lambda: {
             "input_tokens": 0,
             "output_tokens": 0,
             "total_tokens": 0,
+            "input_uncached": 0,
+            "cache_read": 0,
+            "cache_write": 0,
+            "output": 0,
+            "reasoning": 0,
+            "total": 0,
         }
     )
     # Wall-clock seconds from the start of the successful generate() attempt
@@ -514,12 +524,9 @@ class ModelClient:
         )
 
         text = response.text or ""
-        usage_meta = response.usage_metadata
-        usage = {
-            "input_tokens": getattr(usage_meta, "prompt_token_count", 0) or 0,
-            "output_tokens": getattr(usage_meta, "candidates_token_count", 0) or 0,
-            "total_tokens": getattr(usage_meta, "total_token_count", 0) or 0,
-        }
+        usage = _gemini_usage(
+            response.usage_metadata, model=self.model, endpoint="sync"
+        )
         return ModelResponse(text=text, usage=usage)
 
     def _stream_gemini(self, contents, config):
@@ -551,11 +558,7 @@ class ModelClient:
             if not saw_visible:
                 timer.chunk()
 
-        usage = {
-            "input_tokens": getattr(usage_meta, "prompt_token_count", 0) or 0,
-            "output_tokens": getattr(usage_meta, "candidates_token_count", 0) or 0,
-            "total_tokens": getattr(usage_meta, "total_token_count", 0) or 0,
-        }
+        usage = _gemini_usage(usage_meta, model=self.model, endpoint="stream")
         return ModelResponse(
             text="".join(pieces),
             usage=usage,
@@ -610,16 +613,9 @@ class ModelClient:
         response = self._client.chat.completions.create(**kwargs)
 
         text = response.choices[0].message.content or ""
-        cached = 0
-        details = getattr(response.usage, "prompt_tokens_details", None)
-        if details is not None:
-            cached = getattr(details, "cached_tokens", 0) or 0
-        usage = {
-            "input_tokens": response.usage.prompt_tokens or 0,
-            "output_tokens": response.usage.completion_tokens or 0,
-            "total_tokens": response.usage.total_tokens or 0,
-            "cached_tokens": cached,
-        }
+        usage = _openai_style_usage(
+            response.usage, provider=self.provider, model=self.model, endpoint="sync"
+        )
         return ModelResponse(text=text, usage=usage)
 
     def _generate_together(
@@ -636,8 +632,10 @@ class ModelClient:
         Together uses `max_tokens` (not `max_completion_tokens`) and does not
         accept `reasoning_effort`. Open-weight reasoners (DeepSeek-V4, Kimi)
         produce their own chain-of-thought internally; there's no depth knob
-        to pass. Caching isn't supported, so the cacheable head is just
-        concatenated into the prompt (same as the Gemini path).
+        to pass. There is no cache_control-style API, so the cacheable head is
+        just concatenated into the prompt (same as the Gemini path); Together
+        still reports server-side cache hits via cached_tokens (observed live
+        on DeepSeek-V4-Pro), whether or not a billing discount applies.
         """
         content = (cacheable_prefix or "") + prompt
         kwargs = {
@@ -660,12 +658,9 @@ class ModelClient:
         text = response.choices[0].message.content or ""
         if json_mode:
             text = _strip_json_fences(text)
-        u = response.usage
-        usage = {
-            "input_tokens": getattr(u, "prompt_tokens", 0) or 0,
-            "output_tokens": getattr(u, "completion_tokens", 0) or 0,
-            "total_tokens": getattr(u, "total_tokens", 0) or 0,
-        }
+        usage = _openai_style_usage(
+            response.usage, provider=self.provider, model=self.model, endpoint="sync"
+        )
         return ModelResponse(text=text, usage=usage)
 
     def _stream_openai_compatible(self, kwargs: dict, *, inline_think: bool):
@@ -708,22 +703,15 @@ class ModelClient:
             if piece:
                 pieces.append(piece)
 
-        cached = 0
-        details = getattr(usage_obj, "prompt_tokens_details", None)
-        if details is not None:
-            cached = getattr(details, "cached_tokens", 0) or 0
-        usage = {
-            "input_tokens": getattr(usage_obj, "prompt_tokens", 0) or 0,
-            "output_tokens": getattr(usage_obj, "completion_tokens", 0) or 0,
-            "total_tokens": getattr(usage_obj, "total_tokens", 0) or 0,
-            "cached_tokens": cached,
-        }
+        usage = _openai_style_usage(
+            usage_obj, provider=self.provider, model=self.model, endpoint="stream"
+        )
         return ModelResponse(
             text="".join(pieces),
             usage=usage,
             timing=timer.as_dict(
                 output_tokens=usage["output_tokens"] or None,
-                cache_read_input_tokens=cached,
+                cache_read_input_tokens=usage["cached_tokens"],
             ),
         )
 
@@ -832,7 +820,7 @@ class ModelClient:
         if json_mode:
             text = _strip_json_fences(text)
 
-        usage = _anthropic_usage(response.usage)
+        usage = _anthropic_usage(response.usage, model=self.model, endpoint="sync")
         return ModelResponse(text=text, usage=usage)
 
     def _stream_anthropic(self, kwargs: dict, *, json_mode: bool):
@@ -868,7 +856,7 @@ class ModelClient:
         if json_mode:
             text = _strip_json_fences(text)
 
-        usage = _anthropic_usage(message.usage)
+        usage = _anthropic_usage(message.usage, model=self.model, endpoint="stream")
         return ModelResponse(
             text=text,
             usage=usage,
@@ -986,20 +974,206 @@ def _strip_json_fences(text: str) -> str:
     return stripped.strip()
 
 
-def _anthropic_usage(usage) -> dict:
+# ===================================================================
+# Usage normalization (canonical cost vector)
+# ===================================================================
+#
+# Every LLM call records the same five-bucket vector, built from the exact
+# cached/uncached split the provider reported -- never estimated. `total` is
+# derived from the buckets so there is exactly one definition of "total".
+# Provenance (provider/model/endpoint) rides alongside as strings; only the
+# integer-valued keys are meaningful to sum. The legacy per-provider keys
+# (input_tokens/output_tokens/total_tokens, cached_tokens, cache_*_input_tokens)
+# stay alongside so existing readers and old transcripts keep working.
+
+
+def normalize_usage(
+    provider: str,
+    model: str,
+    endpoint: str,
+    *,
+    input_uncached: int = 0,
+    cache_read: int = 0,
+    cache_write: int = 0,
+    output: int = 0,
+    reasoning: int = 0,
+) -> dict:
+    """Build the canonical usage vector + provenance for one LLM call.
+
+    input_uncached: prompt tokens billed at the full input rate.
+    cache_read: tokens served from the provider's prompt cache.
+    cache_write: tokens written to cache (Anthropic; 0 elsewhere today).
+    output: completion tokens, excluding reasoning where separable.
+    reasoning: thinking tokens billed at the output rate (Gemini reports
+        them separately; other providers fold them into output).
+    endpoint: "sync" | "stream" | "batch" -- batch-tagged usage is what the
+        batch discount applies to in cost computation.
+    """
+    return {
+        "input_uncached": input_uncached,
+        "cache_read": cache_read,
+        "cache_write": cache_write,
+        "output": output,
+        "reasoning": reasoning,
+        "total": input_uncached + cache_read + cache_write + output + reasoning,
+        "provider": provider,
+        "model": model,
+        "endpoint": endpoint,
+    }
+
+
+def _gemini_usage(usage_meta, *, model: str, endpoint: str) -> dict:
+    """Normalize a Gemini usage_metadata object (sync and stream paths).
+
+    prompt_token_count includes the cached share, so the uncached part is the
+    difference. thoughts_token_count is disjoint from candidates_token_count
+    (their sum plus the prompt is total_token_count), which is why the legacy
+    provider total disagrees with input+output on thinking models.
+    """
+    prompt = getattr(usage_meta, "prompt_token_count", 0) or 0
+    candidates = getattr(usage_meta, "candidates_token_count", 0) or 0
+    total = getattr(usage_meta, "total_token_count", 0) or 0
+    cached = getattr(usage_meta, "cached_content_token_count", 0) or 0
+    thoughts = getattr(usage_meta, "thoughts_token_count", 0) or 0
+    return {
+        "input_tokens": prompt,
+        "output_tokens": candidates,
+        "total_tokens": total,
+        **normalize_usage(
+            "gemini",
+            model,
+            endpoint,
+            input_uncached=prompt - cached,
+            cache_read=cached,
+            output=candidates,
+            reasoning=thoughts,
+        ),
+    }
+
+
+def _gemini_batch_usage(usage_meta: dict, *, model: str) -> dict:
+    """Normalize the camelCase usageMetadata dict from a Gemini batch result."""
+    prompt = usage_meta.get("promptTokenCount", 0) or 0
+    candidates = usage_meta.get("candidatesTokenCount", 0) or 0
+    total = usage_meta.get("totalTokenCount", 0) or 0
+    cached = usage_meta.get("cachedContentTokenCount", 0) or 0
+    thoughts = usage_meta.get("thoughtsTokenCount", 0) or 0
+    return {
+        "input_tokens": prompt,
+        "output_tokens": candidates,
+        "total_tokens": total,
+        **normalize_usage(
+            "gemini",
+            model,
+            "batch",
+            input_uncached=prompt - cached,
+            cache_read=cached,
+            output=candidates,
+            reasoning=thoughts,
+        ),
+    }
+
+
+def _openai_style_usage(usage_obj, *, provider: str, model: str, endpoint: str) -> dict:
+    """Normalize an OpenAI-shaped usage object (OpenAI + Together, sync/stream).
+
+    prompt_tokens includes the cached share, reported under
+    prompt_tokens_details.cached_tokens. Together populates it too (observed
+    live on DeepSeek-V4-Pro); whether Together discounts those tokens is a
+    pricing-table question, not a capture question. GPT-5.6-generation models
+    additionally meter cache writes (billed at 1.25x input) under
+    prompt_tokens_details.cache_write_tokens -- also a subset of
+    prompt_tokens, disjoint from cached_tokens (verified live on
+    gpt-5.6-luna: prompt 1120 = 1117 written + 3 uncached). usage_obj may be
+    None (Together streams sometimes never deliver the usage chunk): every
+    bucket records 0 rather than a guess.
+    """
+    prompt = getattr(usage_obj, "prompt_tokens", 0) or 0
+    completion = getattr(usage_obj, "completion_tokens", 0) or 0
+    total = getattr(usage_obj, "total_tokens", 0) or 0
+    details = getattr(usage_obj, "prompt_tokens_details", None)
+    cached = (getattr(details, "cached_tokens", 0) or 0) if details is not None else 0
+    written = (
+        (getattr(details, "cache_write_tokens", 0) or 0) if details is not None else 0
+    )
+    return {
+        "input_tokens": prompt,
+        "output_tokens": completion,
+        "total_tokens": total,
+        "cached_tokens": cached,
+        **normalize_usage(
+            provider,
+            model,
+            endpoint,
+            input_uncached=prompt - cached - written,
+            cache_read=cached,
+            cache_write=written,
+            output=completion,
+        ),
+    }
+
+
+def _openai_batch_usage(usage: dict, *, model: str) -> dict:
+    """Normalize the usage dict from an OpenAI batch result line.
+
+    Prompt caching does not apply on the OpenAI Batch API, so the whole prompt
+    is uncached by construction -- cache_read is forced to 0 even if a
+    cached_tokens field ever appears in a batch response body.
+    """
+    prompt = usage.get("prompt_tokens", 0) or 0
+    completion = usage.get("completion_tokens", 0) or 0
+    total = usage.get("total_tokens", 0) or 0
+    return {
+        "input_tokens": prompt,
+        "output_tokens": completion,
+        "total_tokens": total,
+        **normalize_usage(
+            "openai",
+            model,
+            "batch",
+            input_uncached=prompt,
+            output=completion,
+        ),
+    }
+
+
+def _anthropic_usage(usage, *, model: str, endpoint: str) -> dict:
     """Normalize an Anthropic usage object into the shared usage dict.
 
-    Shared by the streamed and non-streamed paths so both report identically.
+    Shared by the sync, streamed, and batch paths so all report identically.
+    Anthropic's input_tokens already excludes the cache buckets (the three are
+    disjoint), so it maps straight to input_uncached -- the cache buckets must
+    never be re-added at the base input rate.
     """
     input_tokens = usage.input_tokens or 0
     output_tokens = usage.output_tokens or 0
+    cache_write = getattr(usage, "cache_creation_input_tokens", 0) or 0
+    cache_read = getattr(usage, "cache_read_input_tokens", 0) or 0
     return {
         "input_tokens": input_tokens,
         "output_tokens": output_tokens,
         "total_tokens": input_tokens + output_tokens,
-        "cache_creation_input_tokens": getattr(usage, "cache_creation_input_tokens", 0)
-        or 0,
-        "cache_read_input_tokens": getattr(usage, "cache_read_input_tokens", 0) or 0,
+        "cache_creation_input_tokens": cache_write,
+        "cache_read_input_tokens": cache_read,
+        **normalize_usage(
+            "anthropic",
+            model,
+            endpoint,
+            input_uncached=input_tokens,
+            cache_read=cache_read,
+            cache_write=cache_write,
+            output=output_tokens,
+        ),
+    }
+
+
+def _zero_usage(provider: str, model: str, endpoint: str) -> dict:
+    """Zeroed usage row for failed calls -- keeps the canonical keys present."""
+    return {
+        "input_tokens": 0,
+        "output_tokens": 0,
+        "total_tokens": 0,
+        **normalize_usage(provider, model, endpoint),
     }
 
 
@@ -1285,7 +1459,7 @@ def run_sync_entries(
             raw_entries[key] = {
                 "text": "",
                 "error": str(e),
-                "usage": {"input_tokens": 0, "output_tokens": 0, "total_tokens": 0},
+                "usage": _zero_usage(client.provider, client.model, "sync"),
             }
     return raw_entries
 
@@ -1507,21 +1681,17 @@ def _run_batch_gemini(
                     parts = candidates[0].get("content", {}).get("parts", [])
                     if parts:
                         text = parts[0].get("text", "")
-                usage = response.get("usageMetadata", {})
+                usage_meta = response.get("usageMetadata", {})
                 raw_entries[key] = {
                     "text": text,
-                    "usage": {
-                        "input_tokens": usage.get("promptTokenCount", 0),
-                        "output_tokens": usage.get("candidatesTokenCount", 0),
-                        "total_tokens": usage.get("totalTokenCount", 0),
-                    },
+                    "usage": _gemini_batch_usage(usage_meta, model=client.model),
                 }
             else:
                 error = result.get("error")
                 raw_entries[key] = {
                     "text": "",
                     "error": str(error) if error else "No response",
-                    "usage": {"input_tokens": 0, "output_tokens": 0, "total_tokens": 0},
+                    "usage": _zero_usage("gemini", client.model, "batch"),
                 }
         return raw_entries
     finally:
@@ -1666,7 +1836,7 @@ def _run_batch_openai(
                 raw_entries[key] = {
                     "text": "",
                     "error": str(error),
-                    "usage": {"input_tokens": 0, "output_tokens": 0, "total_tokens": 0},
+                    "usage": _zero_usage("openai", client.model, "batch"),
                 }
                 continue
 
@@ -1679,11 +1849,7 @@ def _run_batch_openai(
             usage = response_body.get("usage", {})
             raw_entries[key] = {
                 "text": text,
-                "usage": {
-                    "input_tokens": usage.get("prompt_tokens", 0),
-                    "output_tokens": usage.get("completion_tokens", 0),
-                    "total_tokens": usage.get("total_tokens", 0),
-                },
+                "usage": _openai_batch_usage(usage, model=client.model),
             }
         return raw_entries
     finally:
@@ -1878,12 +2044,9 @@ def _run_batch_anthropic(
             text = _extract_anthropic_text(message.content)
             if json_mode:
                 text = _strip_json_fences(text)
-            usage = {
-                "input_tokens": message.usage.input_tokens or 0,
-                "output_tokens": message.usage.output_tokens or 0,
-                "total_tokens": (message.usage.input_tokens or 0)
-                + (message.usage.output_tokens or 0),
-            }
+            usage = _anthropic_usage(
+                message.usage, model=client.model, endpoint="batch"
+            )
             raw_entries[key] = {"text": text, "usage": usage}
         else:
             error_msg = f"{result.result.type}"
@@ -1892,7 +2055,7 @@ def _run_batch_anthropic(
             raw_entries[key] = {
                 "text": "",
                 "error": error_msg,
-                "usage": {"input_tokens": 0, "output_tokens": 0, "total_tokens": 0},
+                "usage": _zero_usage("anthropic", client.model, "batch"),
             }
 
     return raw_entries
