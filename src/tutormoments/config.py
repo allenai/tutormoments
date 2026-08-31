@@ -1,25 +1,16 @@
 """Config loading and tutor/student registries for tutormoments.
 
-The config boundary normalizes every model-bearing block exactly once, at
-load time, into frozen spec objects:
+The config boundary normalizes model-bearing blocks once, at load time, into
+frozen spec objects. ``benchmark_models:`` is the preferred tutor roster: each
+key is an auditable benchmark arm, ``model`` names the provider model id,
+provider-native thinking knobs state the exact request parameters, and
+``condition`` gives the result grouping label. The older ``models:`` ladder
+roster is still accepted for compatibility.
 
-- the `models:` roster is a map of ARMS -- benchmark conditions. The key is
-  the arm name; `model:` (defaulting to the key) names the provider model id;
-  `thinking:` (required) states the arm's reasoning condition as a canonical
-  ladder level. The same model may appear under several arms.
-- the student/scorer/taxonomy/groundtruth blocks each name a model and its
-  required `thinking:` level.
-
-Every stated level is translated through the model registry
-(tutormoments.models.resolve_thinking) HERE, so an unsatisfiable or
-unregistered condition fails at config load -- before any tokens are spent --
-for every block, not just the ones a particular run touches. The retired raw
-knobs (boolean `thinking`, `thinking_budget`, `reasoning_effort`, `effort`)
-are rejected with a migration hint.
-
-Downstream code consumes the frozen specs; nothing re-reads or re-interprets
-the raw YAML values, so validation-time and request-time semantics cannot
-diverge.
+The student/scorer/taxonomy/groundtruth blocks still use the canonical
+``thinking`` ladder because they are benchmark infrastructure rather than the
+tutor conditions being reported. Downstream code consumes the frozen specs; it
+does not re-read raw YAML values.
 """
 
 import os
@@ -33,6 +24,7 @@ from tutormoments.models import (
     ThinkingConfigError,
     ThinkingLevel,
     infer_provider,
+    resolve_native_thinking,
     resolve_thinking,
 )
 from tutormoments.resources import resource_text
@@ -47,6 +39,13 @@ _DEFAULT_CONFIG_RESOURCE = "default_config.yaml"
 # The retired per-provider knobs. Their meaning moved into the model registry
 # (src/tutormoments/models.yaml); config states a ladder level instead.
 _RAW_KNOB_KEYS = ("thinking_budget", "reasoning_effort", "effort")
+_COMMON_ARM_KEYS = {"model", "condition"}
+_NATIVE_ARM_KEYS = {
+    "anthropic": {"thinking", "effort"},
+    "gemini": {"thinking_budget", "thinking_level", "include_thoughts"},
+    "openai": {"reasoning"},
+    "together": set(),
+}
 _MIGRATION_HINT = (
     "the raw provider knobs were replaced by the thinking ladder "
     "(none/low/high/xhigh/dynamic); see README "
@@ -66,7 +65,10 @@ class ArmSpec:
     name: str
     model: str
     provider: str
-    thinking: ThinkingLevel
+    # Exact provider-native thinking config for benchmark_models entries, or a
+    # legacy ThinkingLevel for models entries.
+    thinking: "dict | ThinkingLevel"
+    condition: str = ""
 
 
 @dataclass(frozen=True)
@@ -127,8 +129,9 @@ def load_config(path: str | os.PathLike | None = None) -> dict:
     """Load, validate, and parse a Tutormoments config file, with caching.
 
     Model-bearing blocks are normalized and validated on first load (see
-    module docstring): a config with an unsatisfiable thinking condition, a
-    retired raw knob, or a missing required `thinking:` raises here.
+    module docstring): a config with malformed provider-native arm params, an
+    unsatisfiable role thinking condition, a retired role raw knob, or a
+    missing required role `thinking:` raises here.
 
     Args:
         path: Optional explicit config path. If omitted, precedence is
@@ -236,18 +239,59 @@ def _validate_wire(block_name: str, model: str, level: ThinkingLevel) -> None:
         raise ThinkingConfigError(f"config {block_name}: {e}") from None
 
 
-def _normalize_arm(name: str, entry) -> ArmSpec:
+def _condition(block_name: str, entry: dict, fallback=None) -> str:
+    condition = entry.get("condition", fallback)
+    if not isinstance(condition, str) or not condition:
+        raise ThinkingConfigError(
+            f"config {block_name}: `condition` must be a non-empty string."
+        )
+    return condition
+
+
+def _normalize_native_arm(name: str, entry) -> ArmSpec:
+    block = f"benchmark_models.{name}"
+    if entry is None:
+        entry = {}
+    if not isinstance(entry, dict):
+        raise ThinkingConfigError(f"config {block}: expected a mapping")
+    model = entry.get("model", name)
+    if not isinstance(model, str) or not model:
+        raise ThinkingConfigError(f"config {block}: `model` must be a non-empty string.")
+    provider = infer_provider(model)
+    allowed = _COMMON_ARM_KEYS | _NATIVE_ARM_KEYS[provider]
+    unknown = set(entry) - allowed
+    if unknown:
+        raise ThinkingConfigError(
+            f"config {block}: unknown key(s) {sorted(unknown)} for provider "
+            f"{provider}. Allowed: {sorted(allowed)}."
+        )
+    thinking = {k: entry[k] for k in _NATIVE_ARM_KEYS[provider] if k in entry}
+    resolve_native_thinking(model, thinking)
+    return ArmSpec(
+        name=name,
+        model=model,
+        provider=provider,
+        condition=_condition(block, entry),
+        thinking=thinking,
+    )
+
+
+def _normalize_legacy_arm(name: str, entry) -> ArmSpec:
     block = f"models.{name}"
     if entry is None:
         entry = {}
     if not isinstance(entry, dict):
         raise ThinkingConfigError(f"config {block}: expected a mapping")
-    _check_keys(block, entry, {"model", "thinking"})
+    _check_keys(block, entry, {"model", "thinking", "condition"})
     model = entry.get("model", name)
     level = _require_thinking(block, entry)
     _validate_wire(block, model, level)
     return ArmSpec(
-        name=name, model=model, provider=infer_provider(model), thinking=level
+        name=name,
+        model=model,
+        provider=infer_provider(model),
+        condition=_condition(block, entry, level.value),
+        thinking=level,
     )
 
 
@@ -255,8 +299,14 @@ def _normalize_config(raw: dict) -> dict:
     """Build the frozen spec bundle from a parsed config dict."""
     bundle: dict = {"arms": {}}
 
-    for name, entry in (raw.get("models") or {}).items():
-        bundle["arms"][name] = _normalize_arm(name, entry)
+    arm_roster = raw.get("benchmark_models")
+    if arm_roster is None:
+        arm_roster = raw.get("models") or {}
+        for name, entry in arm_roster.items():
+            bundle["arms"][name] = _normalize_legacy_arm(name, entry)
+    else:
+        for name, entry in arm_roster.items():
+            bundle["arms"][name] = _normalize_native_arm(name, entry)
 
     student = raw.get("student")
     if student is not None:

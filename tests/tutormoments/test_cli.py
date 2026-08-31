@@ -162,6 +162,7 @@ def _make_run_config(
     arm="claude-opus-4-8",
     model=None,
     thinking="dynamic",
+    condition=None,
 ):
     """Build a fake RunConfig-like object.
 
@@ -182,8 +183,15 @@ def _make_run_config(
     cfg.replay_concurrency = replay_concurrency
     cfg.student = StudentSpec(model="claude-haiku", mode="oracle", thinking="dynamic")
     cfg.scorer = ScorerSpec(model="claude-opus-4-6", thinking="dynamic")
+    condition = condition or str(getattr(thinking, "value", thinking))
     cfg.resolved_tutors = {
-        arm: ArmSpec(name=arm, model=model, provider="anthropic", thinking=thinking)
+        arm: ArmSpec(
+            name=arm,
+            model=model,
+            provider="anthropic",
+            thinking=thinking,
+            condition=condition,
+        )
     }
     cfg.config_source = "test"
     return cfg
@@ -238,6 +246,7 @@ def test_run_cell_writes_all_files(tmp_path):
     assert cfg_data["tutor"] == "claude-opus-4-8"
     assert cfg_data["arm"] == "claude-opus-4-8"
     assert cfg_data["model"] == "claude-opus-4-8"
+    assert cfg_data["condition"] == "dynamic"
     # Frozen specs are serialized as plain dicts with thinking as a string.
     assert cfg_data["student"] == {
         "model": "claude-haiku",
@@ -251,6 +260,7 @@ def test_run_cell_writes_all_files(tmp_path):
             "model": "claude-opus-4-8",
             "provider": "anthropic",
             "thinking": "dynamic",
+            "condition": "dynamic",
         }
     }
 
@@ -273,6 +283,7 @@ def test_run_cell_writes_all_files(tmp_path):
     # Identity block: tutor_model is the ARM name; model the resolved id.
     assert summary["tutor_model"] == "claude-opus-4-8"
     assert summary["model"] == "claude-opus-4-8"
+    assert summary["condition"] == "dynamic"
     assert summary["mode"] == "plain"
 
     # summary metrics == aggregate of the 2 annotations
@@ -981,7 +992,7 @@ def test_report_joins_probe_ttft_onto_the_matching_run(tmp_path):
     main(["report", "--results-root", str(results_root), "--out", out_stem])
 
     rows = {
-        line.split("|")[2].strip(): line
+        line.split("|")[3].strip(): line
         for line in (tmp_path / "leaderboard.md").read_text("utf-8").splitlines()
         if line.startswith("| model-alpha")
     }
@@ -1472,16 +1483,19 @@ def test_run_cell_keys_results_by_arm_name_not_model_id(tmp_path):
     assert cfg_data["arm"] == "sonnet-high"
     assert cfg_data["tutor"] == "sonnet-high"
     assert cfg_data["model"] == "claude-sonnet-4-6"
+    assert cfg_data["condition"] == "high"
     assert cfg_data["resolved_tutors"]["sonnet-high"] == {
         "name": "sonnet-high",
         "model": "claude-sonnet-4-6",
         "provider": "anthropic",
         "thinking": "high",
+        "condition": "high",
     }
 
     summary = json.loads((run_dir / "summary.json").read_text(encoding="utf-8"))
     assert summary["tutor_model"] == "sonnet-high"
     assert summary["model"] == "claude-sonnet-4-6"
+    assert summary["condition"] == "high"
     assert summary["mode"] == "plain"
 
 

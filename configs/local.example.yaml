@@ -15,18 +15,19 @@ providers:
   gemini:    { env: GEMINI_API_KEY }
   together:  { env: TOGETHER_API_KEY }
 
-# Each key is an ARM (a benchmark condition): `model` defaults to the key;
-# `thinking` is required (none/minimal/low/medium/high/xhigh/max/dynamic).
-# The same model may appear under several arms with different conditions:
-#   gpt-5.5-no-thinking: { model: gpt-5.5-2026-04-23, thinking: none }
-models:
-  claude-opus-4-8:             { thinking: xhigh }
-  claude-sonnet-4-6:           { thinking: high }
-  gemini-2.5-pro:              { thinking: dynamic }
-  gemini-3.5-flash:            { thinking: dynamic }
-  gpt-5.4-mini-2026-03-17:     { thinking: high }
-  gpt-5.5-2026-04-23:          { thinking: high }
-  deepseek-ai/DeepSeek-V4-Pro: { thinking: dynamic }
+# Each key is an ARM (a benchmark condition). `model` names the provider model
+# id, provider-native keys state the exact request parameters, and `condition`
+# is the grouping label written into results:
+#   gemini-2.5-low: { model: gemini-2.5-pro, thinking_budget: 4096, condition: low }
+#   gpt-5.5-low:   { model: gpt-5.5-2026-04-23, reasoning: low, condition: low }
+benchmark_models:
+  claude-opus-4-8:         { model: claude-opus-4-8, thinking: { type: adaptive }, effort: xhigh, condition: xhigh }
+  claude-sonnet-4-6:       { model: claude-sonnet-4-6, thinking: { type: adaptive }, effort: high, condition: high }
+  gemini-2.5-pro:          { model: gemini-2.5-pro, include_thoughts: true, thinking_budget: -1, condition: dynamic }
+  gemini-3.5-flash:        { model: gemini-3.5-flash, include_thoughts: true, thinking_budget: -1, condition: dynamic }
+  gpt-5.4-mini-2026-03-17: { model: gpt-5.4-mini-2026-03-17, reasoning: high, condition: high }
+  gpt-5.5-2026-04-23:      { model: gpt-5.5-2026-04-23, reasoning: high, condition: high }
+  deepseek-v4-pro:         { model: deepseek-ai/DeepSeek-V4-Pro, condition: dynamic }
 
 student: { model: claude-opus-4-6, mode: oracle, thinking: none }
 scorer:  { model: claude-opus-4-6, thinking: dynamic }

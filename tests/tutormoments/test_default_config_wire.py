@@ -43,7 +43,7 @@ EXPECTED_ARM_WIRE = {
     ),
     "gpt-5.4-mini-2026-03-17": ("gpt-5.4-mini-2026-03-17", None, None, None, "high"),
     "gpt-5.5-2026-04-23": ("gpt-5.5-2026-04-23", None, None, None, "high"),
-    "deepseek-ai/DeepSeek-V4-Pro": (
+    "deepseek-v4-pro": (
         "deepseek-ai/DeepSeek-V4-Pro",
         None,
         None,
@@ -65,7 +65,7 @@ def _assert_wire(model, level, expected):
 
 def test_default_roster_covers_expected_arms():
     load_config()
-    arms = load_config()["models"]
+    arms = load_config()["benchmark_models"]
     assert set(arms) == set(EXPECTED_ARM_WIRE)
 
 

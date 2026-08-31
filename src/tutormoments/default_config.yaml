@@ -14,26 +14,23 @@ providers:
   together:  { env: TOGETHER_API_KEY }
 
 # Tutor roster: each key is an ARM -- a benchmark condition. `model` names the
-# provider model id (default: the key itself, so an arm that just runs a model
-# under one condition needs no model field). `thinking` is REQUIRED and states
-# the arm's reasoning condition on the canonical ladder
-# (none/low/high/xhigh/dynamic); the model registry
-# (models.yaml) translates it to the provider's wire knob and rejects
-# conditions the model cannot honor. The same model may appear under several
-# arms, e.g.:
-#   gpt-5.5-no-thinking: { model: gpt-5.5-2026-04-23, thinking: none }
-models:
-  claude-opus-4-8:             { thinking: xhigh }
-  claude-sonnet-4-6:           { thinking: high }
-  # Sonnet 5: first Sonnet model with an xhigh effort option
-  claude-sonnet-5:             { thinking: xhigh }
-  # Gemini and DeepSeek arms run model-paced thinking (dynamic): Gemini sends
+# provider model id, provider-native keys state the exact request parameters,
+# and `condition` is the grouping label written into run outputs. The same
+# model may appear under several arms with different parameters, e.g.:
+#   gemini-2.5-low: { model: gemini-2.5-pro, thinking_budget: 4096, condition: low }
+#   gpt-5.5-low:   { model: gpt-5.5-2026-04-23, reasoning: low, condition: low }
+benchmark_models:
+  claude-opus-4-8:         { model: claude-opus-4-8, thinking: { type: adaptive }, effort: xhigh, condition: xhigh }
+  claude-sonnet-4-6:       { model: claude-sonnet-4-6, thinking: { type: adaptive }, effort: high, condition: high }
+  # Sonnet 5: first Sonnet model with an xhigh effort option.
+  claude-sonnet-5:         { model: claude-sonnet-5, thinking: { type: adaptive }, effort: xhigh, condition: xhigh }
+  # Gemini and DeepSeek arms run model-paced thinking: Gemini sends
   # thinking_budget -1; DeepSeek-V4-Pro reasons internally with no wire knob.
-  gemini-2.5-pro:              { thinking: dynamic }
-  gemini-3.5-flash:            { thinking: dynamic }
-  gpt-5.4-mini-2026-03-17:     { thinking: high }
-  gpt-5.5-2026-04-23:          { thinking: high }
-  deepseek-ai/DeepSeek-V4-Pro: { thinking: dynamic }
+  gemini-2.5-pro:          { model: gemini-2.5-pro, include_thoughts: true, thinking_budget: -1, condition: dynamic }
+  gemini-3.5-flash:        { model: gemini-3.5-flash, include_thoughts: true, thinking_budget: -1, condition: dynamic }
+  gpt-5.4-mini-2026-03-17: { model: gpt-5.4-mini-2026-03-17, reasoning: high, condition: high }
+  gpt-5.5-2026-04-23:      { model: gpt-5.5-2026-04-23, reasoning: high, condition: high }
+  deepseek-v4-pro:         { model: deepseek-ai/DeepSeek-V4-Pro, condition: dynamic }
 
 student: { model: claude-opus-4-6, mode: oracle, thinking: none }
 scorer:  { model: claude-opus-4-6, thinking: dynamic }

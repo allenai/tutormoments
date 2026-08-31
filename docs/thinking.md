@@ -1,41 +1,53 @@
-# The thinking ladder and the model registry
+# Benchmark thinking configuration
 
-How TutorMoments states, validates, and transmits each arm's reasoning
-condition. This is benchmark-defining configuration: changing a mapping below
-changes the experiment. Never change it without consulting the benchmark
-owner, and verify any new or changed rung against the live API with
-`tutormoments smoke` before relying on it.
+How TutorMoments states, validates, and transmits model reasoning settings.
+Tutor arms are benchmark-defining: changing a configured provider knob changes
+the experiment. Verify changed arm settings against the live API with
+`tutormoments smoke` before relying on them.
 
-## Why a ladder
+## Tutor arms are explicit
 
-Providers expose reasoning depth through four incompatible knobs
-(`thinking_budget`, `thinking_level`, `reasoning_effort`, `effort`), and
-before this design each config consumer re-interpreted the raw values its own
-way — which produced validation/runtime divergence and made "the same model
-at two thinking levels" inexpressible. Now:
+Providers expose reasoning depth through incompatible knobs
+(`thinking_budget`, `thinking_level`, `reasoning`, `effort`, provider-specific
+`thinking` blocks). Reviewers need to see the exact settings used for each
+benchmarked model in that provider's parlance, so the tutor roster uses
+`benchmark_models:`:
 
-- Config states ONE canonical value per arm/role:
-  `thinking: none | low | high | xhigh | dynamic`
-  (required — every benchmarked condition is explicit). The ladder is
-  deliberately small: a rung exists only when an experiment needs it, and
-  adding one (e.g. `medium` for OpenAI's default effort tier, or `minimal`/
-  `max`) is a reviewed registry line plus a `tutormoments smoke`
-  verification.
-- The model registry (`src/tutormoments/models.yaml`) translates it to the
-  provider's wire knob, exactly once, at config load
-  (`tutormoments.models.resolve_thinking`).
-- The translation is fail-closed: a rung a model cannot honor (e.g. `none`
-  on an always-thinking model), an unregistered model, or a retired raw knob
-  in config is rejected before any tokens are spent.
+```yaml
+benchmark_models:
+  gemini-2.5-low: { model: gemini-2.5-pro, thinking_budget: 4096, condition: low }
+  gpt-5.5-low:    { model: gpt-5.5-2026-04-23, reasoning: low, condition: low }
+  opus-4.8-xhigh: { model: claude-opus-4-8, thinking: { type: adaptive }, effort: xhigh, condition: xhigh }
+```
+
+The arm key is the selectable tutor id and the result join key. `model` is the
+provider model id. Provider-native keys are validated at config load and
+forwarded by the client. `condition` is the grouping label written to
+`config.json`, `summary.json`, latency probe output, and leaderboard rows.
+
+## Infrastructure roles use the ladder
+
+The student/scorer/taxonomy/groundtruth blocks use a smaller canonical ladder:
+
+```yaml
+student: { model: claude-opus-4-6, mode: oracle, thinking: none }
+scorer:  { model: claude-opus-4-6, thinking: dynamic }
+```
+
+Those roles are benchmark apparatus rather than reported tutor arms. Keeping
+their settings on the ladder keeps one reviewed default for the fixed
+evaluation machinery while tutor-arm configs stay fully explicit.
 
 Rung meanings: `none` = thinking verifiably off; `low`/`high`/`xhigh` =
-explicit depth rungs; `dynamic` = the model decides (Gemini budget −1,
+explicit depth rungs; `dynamic` = the model decides (Gemini budget -1,
 Anthropic adaptive, open-weight internal reasoning).
 
-## The ladder -> wire mapping
+## Legacy ladder mapping
 
 The authoritative copy is `src/tutormoments/models.yaml`; the contract tests
-in `tests/tutormoments/test_models.py` pin every cell. Summary:
+in `tests/tutormoments/test_models.py` pin every cell. The mapping is used by
+infrastructure role blocks and by older `models:` configs still accepted for
+compatibility. Summary:
 
 | family | none | low | high | xhigh | dynamic |
 |---|---|---|---|---|---|
@@ -63,10 +75,9 @@ Notes:
   on the wire (the API 400s if both are sent), which is why the family is
   split from 2.5.
 
-## The shared budget ladder (why these numbers)
+## Shared budget rungs
 
-All budget-based families (Gemini 2.5, Anthropic legacy) use one ladder so
-rung names stay comparable across providers:
+Legacy budget-based ladder families use:
 
     low = 4096   high = 16384
 
@@ -77,10 +88,8 @@ Anchors, from provider guidance and the literature:
 - 4096 sits a quarter of the way there — a genuinely shallow condition that
   is still above Anthropic's documented 1,024 minimum on every family.
 
-The ladder deliberately omits rungs no experiment uses today (`minimal`,
-`medium` — OpenAI's default effort tier, `max` — provider caps, which would
-mean a different depth per family). Re-adding one is a reviewed registry
-line plus a smoke verification.
+Tutor arms that need a different numeric operating point should state it
+directly in `benchmark_models:` instead of adding a ladder rung.
 
 Sources: Anthropic extended-thinking docs
 (https://docs.claude.com/en/docs/build-with-claude/extended-thinking), Gemini
@@ -88,10 +97,6 @@ thinking docs (https://ai.google.dev/gemini-api/docs/thinking), LiteLLM's
 reasoning_effort-to-budget mapping
 (https://docs.litellm.ai/docs/providers/anthropic), and budget-vs-accuracy
 findings (e.g. https://arxiv.org/pdf/2507.04023).
-
-An exact numeric budget (say 3000 tokens) is deliberately inexpressible from
-config: if an experiment needs a new operating point, add a rung value in the
-registry (a reviewed, benchmark-defining change), not a per-config knob.
 
 ## Adding a model
 

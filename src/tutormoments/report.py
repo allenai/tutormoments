@@ -187,6 +187,7 @@ def leaderboard_row(summary_or_metrics: dict) -> dict:
 _LEADERBOARD_COLS = [
     # (summary_key, header_label)
     ("tutor_model", "tutor_model"),
+    ("condition", "condition"),
     ("mode", "mode"),
     ("n", "n"),
     ("appropriate_scaffolding", "appropriate_scaffolding"),
@@ -235,6 +236,7 @@ def _extract_row(summary: dict, probes: dict | None = None) -> dict:
 
     return {
         "tutor_model": tutor_model,
+        "condition": summary.get("condition", ""),
         "mode": mode,
         "n": summary.get("n_scenarios", 0),
         "appropriate_scaffolding": cal_s.get("score"),
@@ -535,6 +537,8 @@ tr:hover td { background: #f9f9fc; }
 <div class="controls">
   <span><label>Filter model</label>
   <select id="model-filter"><option value="">All models</option></select></span>
+  <span><label>Filter condition</label>
+  <select id="condition-filter"><option value="">All conditions</option></select></span>
   <span><label>Filter mode</label>
   <select id="mode-filter"><option value="">All modes</option></select></span>
 </div>
@@ -542,6 +546,7 @@ tr:hover td { background: #f9f9fc; }
   <thead>
     <tr>
       <th>tutor_model</th>
+      <th>condition</th>
       <th>mode</th>
       <th class="num">n</th>
       <th class="num">appropriate_scaffolding</th>
@@ -585,6 +590,7 @@ function buildRow(r, isTop) {
   return (
     '<tr' + rowCls + '>' +
     '<td>' + (r.tutor_model || '') + '</td>' +
+    '<td>' + (r.condition || '') + '</td>' +
     '<td>' + (r.mode || '') + '</td>' +
     cell(r.n, '', 0) +
     cell(r.appropriate_scaffolding, '') +
@@ -599,9 +605,11 @@ function buildRow(r, isTop) {
 
 function render() {
   const mf = document.getElementById('model-filter').value;
+  const cf = document.getElementById('condition-filter').value;
   const pf = document.getElementById('mode-filter').value;
   const filtered = RUNS.filter(r =>
     (!mf || r.tutor_model === mf) &&
+    (!cf || r.condition === cf) &&
     (!pf || r.mode === pf)
   );
   // Sorted desc by appropriate_scaffolding (null last) -- already sorted
@@ -619,14 +627,19 @@ function render() {
 
 // Populate filter dropdowns
 const models = [...new Set(RUNS.map(r => r.tutor_model).filter(Boolean))].sort();
+const conditions = [...new Set(RUNS.map(r => r.condition).filter(Boolean))].sort();
 const modes  = [...new Set(RUNS.map(r => r.mode).filter(Boolean))].sort();
 models.forEach(m => {
   document.getElementById('model-filter').add(new Option(m, m));
+});
+conditions.forEach(c => {
+  document.getElementById('condition-filter').add(new Option(c, c));
 });
 modes.forEach(m => {
   document.getElementById('mode-filter').add(new Option(m, m));
 });
 document.getElementById('model-filter').addEventListener('change', render);
+document.getElementById('condition-filter').addEventListener('change', render);
 document.getElementById('mode-filter').addEventListener('change', render);
 
 render();

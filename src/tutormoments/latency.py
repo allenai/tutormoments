@@ -493,6 +493,7 @@ def run_probe(
         "source": "probe",
         "tutor_model": tutor,
         "model": arm_spec.model if arm_spec is not None else None,
+        "condition": arm_spec.condition if arm_spec is not None else None,
         "mode": mode,
         "tutor": aggregate_timings(tutor_timings),
         "student": aggregate_timings(student_timings),

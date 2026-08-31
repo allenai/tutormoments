@@ -129,7 +129,9 @@ def build_smoke_plan(
         return providers is None or provider in providers
 
     if "tutor" in roles:
-        arm_names = arms if arms is not None else list(cfg.get("models") or {})
+        arm_names = arms if arms is not None else list(
+            cfg.get("benchmark_models") or cfg.get("models") or {}
+        )
         for name in arm_names:
             arm = resolve_arm(name, config_path)  # raises on unknown arm
             if _selected(arm.provider):

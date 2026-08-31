@@ -457,6 +457,7 @@ def run_cell(
             "tutor": tutor,
             "arm": tutor,
             "model": arm_spec.model if arm_spec is not None else None,
+            "condition": arm_spec.condition if arm_spec is not None else None,
             "mode": mode,
             "dataset": {
                 "id": cfg.dataset,
@@ -891,6 +892,7 @@ def run_cell(
         # provider model id so the arm's provenance is explicit.
         metrics["tutor_model"] = tutor
         metrics["model"] = arm_spec.model if arm_spec is not None else None
+        metrics["condition"] = arm_spec.condition if arm_spec is not None else None
         metrics["mode"] = mode
         metrics["latency"] = latency_block
         metrics["tokens"] = token_block

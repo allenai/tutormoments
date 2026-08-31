@@ -272,12 +272,11 @@ class ModelClient:
     ) -> "ModelResponse":
         """Generate a response from the model with retry logic.
 
-        thinking: a canonical ladder level (ThinkingLevel or its string form).
-        The model registry translates it to the provider's wire knob and
-        rejects levels this model cannot honor. None means "no stated
-        condition": nothing is sent and nothing is checked -- a path for
-        non-benchmark direct calls only (config-driven callers always pass an
-        explicit level).
+        thinking: provider-native thinking params from benchmark_models, or a
+        canonical ladder level for role/legacy callers. The resolver translates
+        this to the provider's wire shape and rejects malformed or unsupported
+        settings before the retry loop. None means "no stated condition":
+        nothing is sent and nothing is checked.
 
         output_schema: optional JSON Schema for structured output. When set,
         the Anthropic path constrains the response via output_config.format
@@ -1354,8 +1353,9 @@ def run_sync_entries(
     """Run entries synchronously one at a time.
 
     Returns {key: {text, usage}} dict (same shape as run_batch). `thinking`
-    takes the same ladder level run_batch does, so a caller switching between
-    the two paths keeps the same benchmark condition.
+    takes the same provider-native mapping or legacy ladder value run_batch
+    does, so a caller switching between the two paths keeps the same benchmark
+    condition.
     """
     raw_entries = {}
     total = len(entries)
@@ -1407,9 +1407,9 @@ def run_batch(
 ) -> dict:
     """Run entries as a batch job via the provider's batch API.
 
-    thinking: the same canonical ladder level generate() takes; the registry
-    translates it per provider and rejects levels the model cannot honor
-    (before anything is uploaded).
+    thinking: the same provider-native mapping or legacy ladder value
+    generate() takes; the resolver translates it per provider and rejects
+    malformed or unsupported settings before anything is uploaded.
 
     Resume support: if `existing_batch_id` is set, skip submission and resume
     polling on that batch (the entries list still drives result parsing, so
@@ -1479,7 +1479,7 @@ def submit_batch(
     The submission half of run_batch, exposed for `tutormoments smoke`:
     verifying that a provider ACCEPTS the batch wire format does not require
     paying for (or waiting on) the batch's completion -- pair with
-    cancel_batch. The same thinking ladder contract as run_batch applies.
+    cancel_batch. The same thinking contract as run_batch applies.
     """
     wire = resolve_thinking(client.model, thinking)
     provider = client.provider

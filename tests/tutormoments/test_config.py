@@ -35,7 +35,7 @@ def test_packaged_default_config_parses_and_has_expected_roster():
     cfgmod._reset_config_cache()
     cfg = cfgmod.load_config()
     assert set(cfg["providers"]) == {"anthropic", "openai", "gemini", "together"}
-    assert set(cfg["models"]) == {
+    assert set(cfg["benchmark_models"]) == {
         "claude-opus-4-8",
         "claude-sonnet-4-6",
         "claude-sonnet-5",
@@ -43,11 +43,23 @@ def test_packaged_default_config_parses_and_has_expected_roster():
         "gemini-3.5-flash",
         "gpt-5.4-mini-2026-03-17",
         "gpt-5.5-2026-04-23",
-        "deepseek-ai/DeepSeek-V4-Pro",
+        "deepseek-v4-pro",
     }
-    assert cfg["models"]["claude-opus-4-8"] == {"thinking": "xhigh"}
-    assert cfg["models"]["claude-sonnet-5"] == {"thinking": "xhigh"}
-    assert cfg["models"]["deepseek-ai/DeepSeek-V4-Pro"] == {"thinking": "dynamic"}
+    assert cfg["benchmark_models"]["claude-opus-4-8"] == {
+        "model": "claude-opus-4-8",
+        "thinking": {"type": "adaptive"},
+        "effort": "xhigh",
+        "condition": "xhigh",
+    }
+    assert cfg["benchmark_models"]["gpt-5.5-2026-04-23"] == {
+        "model": "gpt-5.5-2026-04-23",
+        "reasoning": "high",
+        "condition": "high",
+    }
+    assert cfg["benchmark_models"]["deepseek-v4-pro"] == {
+        "model": "deepseek-ai/DeepSeek-V4-Pro",
+        "condition": "dynamic",
+    }
     assert cfg["student"] == {
         "model": "claude-opus-4-6",
         "mode": "oracle",
@@ -78,7 +90,7 @@ def test_load_config_returns_parsed_dict():
     cfgmod._reset_config_cache()
     c = cfgmod.load_config()
     assert c["scorer"]["model"] == "claude-opus-4-6"
-    assert "models" in c and "providers" in c
+    assert "benchmark_models" in c and "providers" in c
     assert cfgmod.describe_config_source() == "tutormoments:default_config.yaml"
 
 
@@ -101,20 +113,23 @@ def test_resolve_arm_known():
     assert arm.name == "claude-opus-4-8"
     assert arm.model == "claude-opus-4-8"
     assert arm.provider == "anthropic"
-    assert arm.thinking == ThinkingLevel.XHIGH
-    assert arm.thinking == "xhigh"  # str-Enum: string comparison works
+    assert arm.thinking == {"thinking": {"type": "adaptive"}, "effort": "xhigh"}
+    assert arm.condition == "xhigh"
 
 
 def test_resolve_arm_together():
-    arm = cfgmod.resolve_arm("deepseek-ai/DeepSeek-V4-Pro")
+    arm = cfgmod.resolve_arm("deepseek-v4-pro")
     assert arm.provider == "together"
-    assert arm.thinking == "dynamic"
+    assert arm.model == "deepseek-ai/DeepSeek-V4-Pro"
+    assert arm.thinking == {}
+    assert arm.condition == "dynamic"
 
 
 def test_resolve_arm_gemini():
     arm = cfgmod.resolve_arm("gemini-2.5-pro")
     assert arm.provider == "gemini"
-    assert arm.thinking == "dynamic"
+    assert arm.thinking == {"include_thoughts": True, "thinking_budget": -1}
+    assert arm.condition == "dynamic"
 
 
 def test_resolve_arm_unknown_raises():
@@ -145,7 +160,8 @@ def test_build_run_config_defaults():
     arm = rc.resolved_tutors["claude-opus-4-8"]
     assert isinstance(arm, ArmSpec)
     assert arm.model == "claude-opus-4-8"
-    assert arm.thinking == "xhigh"
+    assert arm.thinking == {"thinking": {"type": "adaptive"}, "effort": "xhigh"}
+    assert arm.condition == "xhigh"
 
 
 def test_build_run_config_overrides():
@@ -157,7 +173,8 @@ def test_build_run_config_overrides():
     assert isinstance(arm, ArmSpec)
     assert arm.model == "gpt-5.5-2026-04-23"
     assert arm.provider == "openai"
-    assert arm.thinking == "high"
+    assert arm.thinking == {"reasoning": "high"}
+    assert arm.condition == "high"
 
 
 def test_register_and_lookup_tutor():
@@ -211,7 +228,7 @@ def test_get_labeller_config_routes_by_type():
 
 
 # ---------------------------------------------------------------------------
-# New-contract tests: the arm roster (thinking ladder registry).
+# Arm roster contract tests.
 # ---------------------------------------------------------------------------
 
 
@@ -256,6 +273,55 @@ def test_arm_missing_thinking_fails_at_load(tmp_path):
         cfgmod.load_config(config_path)
     # ThinkingConfigError is a ValueError, so broad callers still catch it.
     assert issubclass(ThinkingConfigError, ValueError)
+
+
+def test_benchmark_models_accept_provider_native_params(tmp_path):
+    """benchmark_models states the exact provider-native knobs in config."""
+    config_path = _write_config(
+        tmp_path,
+        _BASE_YAML.replace(
+            "models:\n  claude-opus-4-8: { thinking: xhigh }",
+            "benchmark_models:\n"
+            "  gemini-low: { model: gemini-2.5-pro, thinking_budget: 4096, condition: low }\n"
+            "  gpt-low:    { model: gpt-5.5-2026-04-23, reasoning: low, condition: low }\n"
+            "  sonnet-hi:  { model: claude-sonnet-4-6, thinking: { type: adaptive }, effort: high, condition: high }\n",
+        ),
+    )
+    gemini = cfgmod.resolve_arm("gemini-low", config_path=config_path)
+    gpt = cfgmod.resolve_arm("gpt-low", config_path=config_path)
+    sonnet = cfgmod.resolve_arm("sonnet-hi", config_path=config_path)
+    assert gemini.thinking == {"thinking_budget": 4096}
+    assert gemini.condition == "low"
+    assert gpt.thinking == {"reasoning": "low"}
+    assert gpt.condition == "low"
+    assert sonnet.thinking == {"thinking": {"type": "adaptive"}, "effort": "high"}
+    assert sonnet.condition == "high"
+
+
+def test_benchmark_models_reject_provider_mismatched_keys(tmp_path):
+    config_path = _write_config(
+        tmp_path,
+        _BASE_YAML.replace(
+            "models:\n  claude-opus-4-8: { thinking: xhigh }",
+            "benchmark_models:\n"
+            "  gpt-bad: { model: gpt-5.5-2026-04-23, thinking_budget: 4096, condition: low }\n",
+        ),
+    )
+    with pytest.raises(ThinkingConfigError, match="unknown key"):
+        cfgmod.load_config(config_path)
+
+
+def test_benchmark_models_require_condition(tmp_path):
+    config_path = _write_config(
+        tmp_path,
+        _BASE_YAML.replace(
+            "models:\n  claude-opus-4-8: { thinking: xhigh }",
+            "benchmark_models:\n"
+            "  gpt-low: { model: gpt-5.5-2026-04-23, reasoning: low }\n",
+        ),
+    )
+    with pytest.raises(ThinkingConfigError, match="`condition`"):
+        cfgmod.load_config(config_path)
 
 
 @pytest.mark.parametrize(
@@ -335,7 +401,10 @@ def test_specs_are_frozen():
     with pytest.raises(dataclasses.FrozenInstanceError):
         cfgmod.scorer_spec().thinking = ThinkingLevel.NONE
     # The cached spec is unchanged.
-    assert cfgmod.resolve_arm("claude-opus-4-8").thinking == "xhigh"
+    assert cfgmod.resolve_arm("claude-opus-4-8").thinking == {
+        "thinking": {"type": "adaptive"},
+        "effort": "xhigh",
+    }
 
 
 def test_build_run_config_mixes_registered_and_roster_tutors(tmp_path):

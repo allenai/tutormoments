@@ -15,6 +15,7 @@ from tutormoments.models import (
     get_pricing,
     infer_provider,
     max_output_cap,
+    resolve_native_thinking,
     resolve_thinking,
 )
 
@@ -300,6 +301,45 @@ def test_describe_renders_wire_form():
         resolve_thinking("deepseek-ai/DeepSeek-V4-Pro", "dynamic").describe()
         == "(none sent)"
     )
+
+
+def test_resolve_native_thinking_accepts_provider_native_configs():
+    gemini = resolve_native_thinking("gemini-2.5-pro", {"thinking_budget": 4096})
+    assert gemini.gemini_thinking_config == {
+        "include_thoughts": True,
+        "thinking_budget": 4096,
+    }
+    openai = resolve_native_thinking("gpt-5.5-2026-04-23", {"reasoning": "low"})
+    assert openai.openai_reasoning_effort == "low"
+    anthropic = resolve_native_thinking(
+        "claude-opus-4-8", {"thinking": {"type": "adaptive"}, "effort": "xhigh"}
+    )
+    assert anthropic.anthropic_thinking == {"type": "adaptive"}
+    assert anthropic.anthropic_effort == "xhigh"
+    together = resolve_native_thinking("deepseek-ai/DeepSeek-V4-Pro", {})
+    assert together.describe() == "(none sent)"
+
+
+def test_resolve_native_thinking_rejects_mismatched_provider_keys():
+    with pytest.raises(ThinkingConfigError, match="unknown key"):
+        resolve_native_thinking("gpt-5.5-2026-04-23", {"thinking_budget": 4096})
+    with pytest.raises(ThinkingConfigError, match="cannot set both"):
+        resolve_native_thinking(
+            "gemini-2.5-pro", {"thinking_budget": 4096, "thinking_level": "low"}
+        )
+
+
+def test_resolve_native_thinking_rejects_bad_anthropic_shapes():
+    with pytest.raises(ThinkingConfigError, match="thinking.type"):
+        resolve_native_thinking("claude-opus-4-8", {"thinking": {"type": "vibes"}})
+    with pytest.raises(ThinkingConfigError, match="positive integer"):
+        resolve_native_thinking(
+            "claude-opus-4-8", {"thinking": {"type": "enabled"}}
+        )
+    with pytest.raises(ThinkingConfigError, match="effort requires"):
+        resolve_native_thinking(
+            "claude-opus-4-8", {"thinking": {"type": "disabled"}, "effort": "high"}
+        )
 
 
 # ---------------------------------------------------------------------------

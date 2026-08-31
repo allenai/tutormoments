@@ -126,30 +126,27 @@ The report and viewer commands read `summary.json` files from run directories.
 
 ## Running new tutor models
 
-The `models:` roster maps **arms** — benchmark conditions — not bare models.
-Each entry names a model (`model:` defaults to the key) and states its
-reasoning condition with a required `thinking:` level from the canonical
-ladder (`none | low | high | xhigh | dynamic`).
-The model registry (`src/tutormoments/models.yaml`) translates the level to
-each provider's wire knob and rejects conditions the model cannot honor —
-see `docs/thinking.md`. The same model can run under several arms:
+The `benchmark_models:` roster maps **arms** — benchmark conditions — not
+bare models. Each entry names the provider model id, states the exact
+provider-native reasoning parameters the run will send, and includes a
+`condition:` label for grouping results. This keeps the benchmark config
+auditable in provider parlance. The same model can run under several arms:
 
 ```yaml
-models:
-  my-new-model-id:        { thinking: high }
-  my-model-no-thinking:   { model: my-new-model-id, thinking: none }
+benchmark_models:
+  gemini-2.5-low: { model: gemini-2.5-pro, thinking_budget: 4096, condition: low }
+  gemini-2.5-dyn: { model: gemini-2.5-pro, thinking_budget: -1, condition: dynamic }
+  gpt-5.5-low:    { model: gpt-5.5-2026-04-23, reasoning: low, condition: low }
 ```
 
 ```bash
-tutormoments run --tutors my-new-model-id my-model-no-thinking --data_path <release dir>
+tutormoments run --tutors gemini-2.5-low gpt-5.5-low --data_path <release dir>
 ```
 
-Running a model for the first time needs (1) a `models:` entry for it in
-`src/tutormoments/models.yaml` (one reviewed entry: family + pricing — this
-is benchmark-defining configuration) and (2) the provider API key exported.
-The retired raw knobs (`thinking: true/false`, `thinking_budget`,
-`reasoning_effort`, `effort`) are rejected at config load with a migration
-hint.
+Running a model for the first time needs the provider API key exported and a
+model id whose provider can be inferred. `src/tutormoments/models.yaml` still
+holds stable per-model facts such as pricing and output caps; it no longer
+hides tutor-arm reasoning parameters from the run config.
 
 Tutors are selectable per-run via the CLI. The Student model is set in the config; changing the student model would change the shape of the evaluation. Modify your 
 config to swap the student model with another API-callable model:
@@ -158,11 +155,10 @@ config to swap the student model with another API-callable model:
 student: { model: claude-opus-4-6, mode: oracle, thinking: none } # default
 ```
 
-The student/scorer/taxonomy/groundtruth blocks use the same `{model, thinking}`
-shape as arms but deliberately do NOT reference an arm by name: the roster is
-the set of selectable tutor conditions, while the role blocks are the fixed
-evaluation apparatus. Keeping them inline means retuning a tutor arm can never
-silently change the student or the scoring regime as a side effect.
+The student/scorer/taxonomy/groundtruth blocks still use `{model, thinking}`
+with the canonical ladder because they are the fixed evaluation apparatus,
+not the tutor conditions being reported. Keeping them inline means retuning a
+tutor arm can never silently change the student or scoring regime.
 
 ## Custom Tutor / Student Models
 

@@ -1,19 +1,20 @@
-"""The model registry: provider routing and thinking-ladder wire translation.
+"""Provider routing plus thinking-parameter validation/translation.
 
-This module is the single source of truth for per-model facts. The data lives
-in the packaged ``models.yaml`` (families = capability shapes, models =
-per-model entries with pricing); this module loads it, validates it, and
-translates the canonical thinking ladder into each provider's wire knob.
+The packaged ``models.yaml`` stores stable per-model facts (families, pricing,
+output caps) and the legacy/role thinking ladder. Tutor benchmark arms can
+also pass provider-native thinking mappings from ``benchmark_models`` so the
+run config remains auditable in provider parlance.
 
-The translation is fail-closed: an explicit thinking level on a model that is
-not registered, or a rung the model's family does not support, raises
+Validation is fail-closed: malformed native mappings, an explicit ladder level
+on an unregistered model, or a rung the model's family does not support raises
 ThinkingConfigError at config-load time rather than letting a run proceed
-under a condition the provider cannot honor (or would silently ignore).
+under parameters the provider cannot honor or would silently ignore.
 
 Deliberately SDK-free: config loading must not drag provider SDKs in.
 """
 
 import threading
+from copy import deepcopy
 from dataclasses import dataclass
 from enum import Enum
 
@@ -52,6 +53,10 @@ _KNOWN_MECHANISMS = {
 _ANTHROPIC_ADAPTIVE_SPECIALS = {"omit", "disabled", "adaptive"}
 _ANTHROPIC_EFFORT_LEVELS = {"low", "high", "xhigh"}
 _LADDER_DOC = "none/low/high/xhigh/dynamic"
+_GEMINI_NATIVE_KEYS = {"thinking_budget", "thinking_level", "include_thoughts"}
+_OPENAI_NATIVE_KEYS = {"reasoning"}
+_ANTHROPIC_NATIVE_KEYS = {"thinking", "effort"}
+_TOGETHER_NATIVE_KEYS: set[str] = set()
 
 
 class ThinkingConfigError(ValueError):
@@ -59,7 +64,7 @@ class ThinkingConfigError(ValueError):
 
 
 class ThinkingLevel(str, Enum):
-    """The canonical thinking ladder.
+    """The canonical thinking ladder for roles and legacy roster entries.
 
     `none` means thinking verifiably off; `low`/`high`/`xhigh` are explicit
     depth rungs; `dynamic` means the model decides (provider auto mechanisms).
@@ -79,10 +84,9 @@ class ThinkingLevel(str, Enum):
     def coerce(cls, value) -> "ThinkingLevel | None":
         """Coerce a config value to a ladder level (None passes through).
 
-        Rejects the retired raw-knob spellings with a migration hint. Booleans
-        are called out specially because YAML 1.1 parses no/on/off as bools --
-        a user who wrote `thinking: off` meant the string and needs the quoted
-        ladder spelling instead.
+        Booleans are called out specially because YAML 1.1 parses no/on/off
+        as bools -- a user who wrote `thinking: off` meant the string and
+        needs the quoted ladder spelling instead.
         """
         if value is None or isinstance(value, cls):
             return value
@@ -327,16 +331,19 @@ def get_pricing(model: str) -> dict:
 
 
 def resolve_thinking(model: str, level) -> WireThinking:
-    """Translate a thinking level into the wire fragment for `model`.
+    """Translate configured thinking parameters into the wire fragment for `model`.
 
-    THE fail-closed chokepoint: called at config load (so unsatisfiable
-    conditions die before any tokens are spent) and again by the client before
-    the retry loop (so direct callers get the same contract).
+    Accepts either a legacy canonical ladder level or a provider-native config
+    mapping from ``benchmark_models``. The native mapping is the preferred
+    benchmark path because it keeps exact run parameters in the config YAML.
 
     level=None means no stated condition -- nothing is sent and nothing is
     checked. That path exists for non-benchmark direct calls only; every
     config-driven path passes an explicit level (config requires one).
     """
+    if isinstance(level, dict):
+        return resolve_native_thinking(model, level)
+
     level = ThinkingLevel.coerce(level)
     if level is None:
         return WireThinking(provider=infer_provider(model), level=None)
@@ -419,3 +426,132 @@ def resolve_thinking(model: str, level) -> WireThinking:
         )
     # noop
     return WireThinking(provider=provider, level=level)
+
+
+def resolve_native_thinking(model: str, params: dict | None) -> WireThinking:
+    """Validate and translate provider-native thinking params from config.
+
+    The mapping is intentionally small and mirrors the knobs this client knows
+    how to send today:
+
+    - Gemini: ``thinking_budget`` or ``thinking_level`` plus optional
+      ``include_thoughts``.
+    - OpenAI: ``reasoning`` (forwarded by the chat adapter as
+      ``reasoning_effort``).
+    - Anthropic: ``thinking`` plus optional ``effort``.
+    - Together/open-weight reasoners: no exposed knobs.
+    """
+    provider = infer_provider(model)
+    params = dict(params or {})
+    if provider == "gemini":
+        return _resolve_native_gemini(params)
+    if provider == "openai":
+        return _resolve_native_openai(params)
+    if provider == "anthropic":
+        return _resolve_native_anthropic(params)
+    if provider == "together":
+        _check_native_keys(provider, params, _TOGETHER_NATIVE_KEYS)
+        return WireThinking(provider=provider, level=None)
+    raise ValueError(f"Unsupported provider: {provider}")
+
+
+def _check_native_keys(provider: str, params: dict, allowed: set[str]) -> None:
+    unknown = set(params) - allowed
+    if unknown:
+        raise ThinkingConfigError(
+            f"{provider} thinking config has unknown key(s) {sorted(unknown)}. "
+            f"Allowed: {sorted(allowed)}."
+        )
+
+
+def _resolve_native_gemini(params: dict) -> WireThinking:
+    _check_native_keys("gemini", params, _GEMINI_NATIVE_KEYS)
+    if "thinking_budget" in params and "thinking_level" in params:
+        raise ThinkingConfigError(
+            "gemini thinking config cannot set both thinking_budget and "
+            "thinking_level."
+        )
+    if "thinking_budget" not in params and "thinking_level" not in params:
+        raise ThinkingConfigError(
+            "gemini thinking config must set thinking_budget or thinking_level."
+        )
+    if "include_thoughts" in params and not isinstance(params["include_thoughts"], bool):
+        raise ThinkingConfigError("gemini include_thoughts must be true or false.")
+    config: dict = {}
+    if "include_thoughts" in params:
+        config["include_thoughts"] = params["include_thoughts"]
+    if "thinking_budget" in params:
+        budget = params["thinking_budget"]
+        if not isinstance(budget, int) or isinstance(budget, bool):
+            raise ThinkingConfigError("gemini thinking_budget must be an integer.")
+        config["thinking_budget"] = budget
+        config.setdefault("include_thoughts", budget != 0)
+    else:
+        level = params["thinking_level"]
+        if not isinstance(level, str) or not level:
+            raise ThinkingConfigError("gemini thinking_level must be a non-empty string.")
+        config["thinking_level"] = level
+        config.setdefault("include_thoughts", True)
+    return WireThinking(
+        provider="gemini",
+        level=None,
+        gemini_thinking_config=config,
+    )
+
+
+def _resolve_native_openai(params: dict) -> WireThinking:
+    _check_native_keys("openai", params, _OPENAI_NATIVE_KEYS)
+    if "reasoning" not in params:
+        raise ThinkingConfigError("openai thinking config must set reasoning.")
+    reasoning = params["reasoning"]
+    if not isinstance(reasoning, str) or not reasoning:
+        raise ThinkingConfigError("openai reasoning must be a non-empty string.")
+    return WireThinking(
+        provider="openai",
+        level=None,
+        openai_reasoning_effort=reasoning,
+    )
+
+
+def _resolve_native_anthropic(params: dict) -> WireThinking:
+    _check_native_keys("anthropic", params, _ANTHROPIC_NATIVE_KEYS)
+    if "thinking" not in params:
+        raise ThinkingConfigError("anthropic thinking config must set thinking.")
+    thinking = params["thinking"]
+    if thinking is None:
+        thinking_config = None
+    elif isinstance(thinking, dict):
+        thinking_config = deepcopy(thinking)
+    else:
+        raise ThinkingConfigError("anthropic thinking must be a mapping or null.")
+    effort = params.get("effort")
+    if effort is not None and (not isinstance(effort, str) or not effort):
+        raise ThinkingConfigError("anthropic effort must be a non-empty string.")
+    if thinking_config is None:
+        if effort is not None:
+            raise ThinkingConfigError("anthropic effort requires thinking.type adaptive.")
+    else:
+        kind = thinking_config.get("type")
+        if kind not in {"adaptive", "enabled", "disabled"}:
+            raise ThinkingConfigError(
+                "anthropic thinking.type must be adaptive, enabled, or disabled."
+            )
+        if kind == "enabled":
+            budget = thinking_config.get("budget_tokens")
+            if not isinstance(budget, int) or isinstance(budget, bool) or budget <= 0:
+                raise ThinkingConfigError(
+                    "anthropic enabled thinking requires a positive integer "
+                    "budget_tokens."
+                )
+        elif "budget_tokens" in thinking_config:
+            raise ThinkingConfigError(
+                "anthropic budget_tokens is only valid with thinking.type enabled."
+            )
+        if effort is not None and kind != "adaptive":
+            raise ThinkingConfigError("anthropic effort requires thinking.type adaptive.")
+    return WireThinking(
+        provider="anthropic",
+        level=None,
+        anthropic_thinking=thinking_config,
+        anthropic_effort=effort,
+    )
