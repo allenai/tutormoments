@@ -817,7 +817,7 @@ def _build_structure_entries(
 #   Pass 3 (structure): build action entries in one batch,
 #                       assign action_label back onto the annotation dict
 #
-# Scorer model/params from config.scorer_spec() (claude-opus-4-6, thinking=dynamic).
+# Scorer model/params from config.scorer_spec() (claude-opus-4-6, adaptive thinking).
 # context_window=0 always (benchmark-only override; see annotate pass docstring).
 # Usage accumulated across all 3 passes is attached as Annotation.usage.
 # ---------------------------------------------------------------------------

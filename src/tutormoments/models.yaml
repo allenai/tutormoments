@@ -1,255 +1,100 @@
-# Model registry: the single place a model is defined for this benchmark.
+# Model registry: stable per-model facts.
 #
-# BENCHMARK-DEFINING CONFIGURATION. The thinking-ladder wire mappings below
-# decide what is actually sent to each provider for every benchmarked
-# condition; changing a rung changes the experiment. Never edit without
-# consulting the benchmark owner (see AGENTS.md), and verify new or changed
-# rungs against the live API with `tutormoments smoke` before relying on them.
+# One entry per model. The key is matched against configured model ids
+# case-insensitively, exact id first, then longest matching prefix (so
+# `claude-haiku-4-5-20251001` resolves to the `claude-haiku-4-5` entry).
+# Each entry states:
 #
-# Two sections:
+#   provider: which API client and key the model routes to (unlisted models
+#     fall back to the prefix table in models.py).
+#   max_output_cap: per-model output token ceiling (requests above it are
+#     rejected by the API); omit when the provider default rules.
+#   pricing: per-MTok token costs -- populated by the cost-tracking
+#     workstream; empty means "not priced yet", never "free".
 #
-#   families: a capability *shape* shared by models -- which provider, which
-#     thinking mechanism the API exposes, and how each canonical ladder rung
-#     (none/low/high/xhigh/dynamic) translates to the wire.
-#     A rung that is absent is unsatisfiable on that family and is rejected at
-#     config load. `unverified` lists rungs whose wire form is documented but
-#     has not yet been proven against the live API -- they are rejected with a
-#     "not yet verified" error until someone runs `tutormoments smoke` on them
-#     and removes them from the list.
-#
-#   models: one entry per model. The key is matched against configured model
-#     ids case-insensitively, exact id first, then longest matching prefix
-#     (so `claude-haiku-4-5-20251001` resolves to the `claude-haiku-4-5`
-#     entry). Each entry names its family and carries per-model facts:
-#     `max_output_cap` (requests above it are rejected by the API) and
-#     `pricing` (per-MTok token costs -- populated by the cost-tracking
-#     workstream; empty means "not priced yet", never "free").
-#
-# Mechanisms (interpreted by models.py):
-#   anthropic-adaptive: rung values are `omit` (send no thinking param),
-#     `disabled` ({"type": "disabled"}), `adaptive` ({"type": "adaptive"}, no
-#     effort), or an effort level ({"type": "adaptive"} + output_config.effort).
-#   anthropic-budget: rung values are `omit` or an integer budget
-#     ({"type": "enabled", "budget_tokens": N}; the client keeps max_tokens at
-#     least N + 64 as the API requires).
-#   gemini: integer rung values map to thinking_config.thinking_budget
-#     (-1 = model-paced dynamic; 0 = off, sent with include_thoughts: false);
-#     string values map to thinking_config.thinking_level (Gemini 3.x --
-#     thinking_level and thinking_budget are mutually exclusive on the wire).
-#   openai-effort: rung values map to reasoning_effort.
-#   noop: the model reasons internally and exposes no knob; the only
-#     expressible condition is `dynamic`, which sends nothing.
-#
-# The shared budget ladder (low=4096, high=16384) is anchored in provider
-# guidance: 16k+ is Anthropic's complex-task guidance (and where the
-# literature finds diminishing returns). The ladder is deliberately small --
-# a rung exists only when an experiment needs it; add one as a reviewed
-# registry line verified with `tutormoments smoke`. See docs/thinking.md.
-
-families:
-  anthropic-adaptive-4-6:
-    provider: anthropic
-    thinking:
-      mechanism: anthropic-adaptive
-      # The 4.6 tier has no xhigh effort level.
-      rungs:
-        none: omit
-        low: low
-        high: high
-        dynamic: adaptive
-
-  anthropic-adaptive-4-7-plus:
-    provider: anthropic
-    thinking:
-      mechanism: anthropic-adaptive
-      rungs:
-        none: omit
-        low: low
-        high: high
-        xhigh: xhigh
-        dynamic: adaptive
-
-  anthropic-sonnet-5:
-    provider: anthropic
-    thinking:
-      mechanism: anthropic-adaptive
-      # Sonnet 5 defaults to adaptive thinking when the param is omitted, so
-      # "off" must be stated explicitly ({"type": "disabled"}), unlike the
-      # omit-means-off 4.x adaptive tiers.
-      rungs:
-        none: disabled
-        low: low
-        high: high
-        xhigh: xhigh
-        dynamic: adaptive
-
-  anthropic-legacy:
-    provider: anthropic
-    # Closed, frozen set of pre-adaptive models (extended thinking via
-    # enabled+budget_tokens only; the effort parameter is rejected).
-    thinking:
-      mechanism: anthropic-budget
-      rungs:
-        none: omit
-        low: 4096
-        high: 16384
-
-  gemini-2-5-pro:
-    provider: gemini
-    notes: >-
-      Always-thinking: the API rejects thinking_budget: 0, so `none` is
-      unsatisfiable.
-    thinking:
-      mechanism: gemini
-      rungs:
-        low: 4096
-        high: 16384
-        # 2x high, continuing the doubling ladder; also the model's budget cap
-        # and the >32k-needs-batch boundary. Pro only: Flash caps at 24576, so
-        # an xhigh there could not mean the same number.
-        xhigh: 32768
-        dynamic: -1
-
-  gemini-2-5-flash:
-    provider: gemini
-    thinking:
-      mechanism: gemini
-      rungs:
-        none: 0
-        low: 4096
-        high: 16384
-        dynamic: -1
-
-  gemini-3:
-    provider: gemini
-    notes: >-
-      The 3.x line replaced thinking_budget with thinking_level, whose floor
-      (minimal) does not guarantee thinking is off, so `none` is
-      unsatisfiable. `dynamic` keeps the budget -1 wire shape that every
-      published 3.x run has used.
-    thinking:
-      mechanism: gemini
-      rungs:
-        low: low
-        high: high
-        dynamic: -1
-      # thinking_level has not been exercised live from this codebase yet.
-      unverified: [low, high]
-
-  openai-gpt-5:
-    provider: openai
-    thinking:
-      mechanism: openai-effort
-      rungs:
-        none: none
-        low: low
-        high: high
-        xhigh: xhigh
-      # none/xhigh support varies by point release; unproven live here.
-      unverified: [none, xhigh]
-
-  openai-o-series:
-    provider: openai
-    notes: >-
-      The o-series exposes only a depth knob (reasoning_effort),
-      never an off switch, so `none` is unsatisfiable.
-    thinking:
-      mechanism: openai-effort
-      rungs:
-        low: low
-        high: high
-
-  together-internal-reasoner:
-    provider: together
-    notes: >-
-      Open-weight always-on reasoners (DeepSeek, Kimi): the chain of thought
-      is internal and there is no wire knob, so `dynamic` is the only
-      expressible condition and it sends nothing.
-    thinking:
-      mechanism: noop
-      rungs:
-        dynamic: null
+# Reasoning conditions do NOT live here: every configured arm and role states
+# its provider-native thinking parameters in the config YAML itself, so a
+# reviewer can read what was sent without consulting a mapping. See
+# docs/thinking.md.
 
 models:
-  # --- Anthropic, adaptive tiers ---
+  # --- Anthropic ---
   claude-opus-4-6:
-    family: anthropic-adaptive-4-6
+    provider: anthropic
     pricing: {}
   claude-sonnet-4-6:
-    family: anthropic-adaptive-4-6
+    provider: anthropic
     pricing: {}
   claude-opus-4-7:
-    family: anthropic-adaptive-4-7-plus
+    provider: anthropic
     pricing: {}
   claude-opus-4-8:
-    family: anthropic-adaptive-4-7-plus
+    provider: anthropic
     pricing: {}
   claude-sonnet-5:
-    family: anthropic-sonnet-5
+    provider: anthropic
     pricing: {}
-
-  # --- Anthropic, frozen legacy (enabled+budget) set ---
   claude-3-7-sonnet:
-    family: anthropic-legacy
+    provider: anthropic
     pricing: {}
   claude-haiku-4-5:
-    family: anthropic-legacy
+    provider: anthropic
     # Verified against the Models API (client.models.retrieve(id).max_tokens)
     # on 2026-08-17; re-check there rather than trusting this value if the
     # model 400s on max_tokens.
     max_output_cap: 64000
     pricing: {}
   claude-opus-4-0:
-    family: anthropic-legacy
+    provider: anthropic
     pricing: {}
   claude-opus-4-20250514:
-    family: anthropic-legacy
+    provider: anthropic
     pricing: {}
   claude-opus-4-1:
-    family: anthropic-legacy
+    provider: anthropic
     pricing: {}
   claude-opus-4-5:
-    family: anthropic-legacy
+    provider: anthropic
     pricing: {}
   claude-sonnet-4-0:
-    family: anthropic-legacy
+    provider: anthropic
     pricing: {}
   claude-sonnet-4-20250514:
-    family: anthropic-legacy
+    provider: anthropic
     pricing: {}
   claude-sonnet-4-5:
-    family: anthropic-legacy
+    provider: anthropic
     pricing: {}
 
   # --- Gemini ---
   gemini-2.5-pro:
-    family: gemini-2-5-pro
+    provider: gemini
     pricing: {}
   gemini-2.5-flash:
-    family: gemini-2-5-flash
+    provider: gemini
     pricing: {}
   gemini-3.5-flash:
-    family: gemini-3
+    provider: gemini
     pricing: {}
 
   # --- OpenAI ---
   gpt-5.4-mini:
-    family: openai-gpt-5
+    provider: openai
     pricing: {}
   gpt-5.5:
-    family: openai-gpt-5
+    provider: openai
     pricing: {}
   o1:
-    family: openai-o-series
+    provider: openai
     pricing: {}
   o3:
-    family: openai-o-series
+    provider: openai
     pricing: {}
   o4:
-    family: openai-o-series
+    provider: openai
     pricing: {}
 
   # --- Together (open-weight) ---
   deepseek-ai/DeepSeek-V4-Pro:
-    family: together-internal-reasoner
+    provider: together
     pricing: {}

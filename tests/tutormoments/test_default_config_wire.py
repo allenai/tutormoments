@@ -1,10 +1,17 @@
 """Pin the shipped config's effective wire behavior.
 
-This is the machine-checkable statement that the arm/ladder migration changed
-zero wire bytes for the packaged default_config.yaml: every arm and role spec
-must translate to exactly the fragment the pre-migration code sent. If a
-registry or config edit changes any row here, that is a benchmark-condition
-change and must be deliberate (and called out in the PR).
+This is the machine-checkable statement of exactly what the packaged
+default_config.yaml sends. If a config edit changes any row here, that is a
+benchmark-condition change and must be deliberate (and called out in the PR).
+
+The provider-native config migration changed zero wire bytes for the tutor
+arms and the scorer/groundtruth roles. One deliberate change was made for the
+thinking-off roles (student, taxonomy): they now send an explicit
+`thinking: {"type": "disabled"}` instead of omitting the param. On the
+Anthropic 4.x models these roles use, omission already meant thinking off, so
+the *condition* is unchanged -- but omission means adaptive on Sonnet 5+, so
+the explicit block keeps the condition stable under model swaps and lets
+`tutormoments smoke` assert it (an omitted param judges as "na").
 """
 
 import pytest
@@ -20,6 +27,7 @@ from tutormoments.config import (
 from tutormoments.models import resolve_thinking
 
 ADAPTIVE = {"type": "adaptive"}
+DISABLED = {"type": "disabled"}
 
 # arm/role -> (model, anthropic_thinking, anthropic_effort,
 #              gemini_thinking_config, openai_reasoning_effort)
@@ -76,10 +84,12 @@ def test_default_arm_wire(arm_name):
 
 
 def test_default_student_wire():
-    # Pre-migration: student thinking=false on claude-opus-4-6 omitted the
-    # thinking param entirely.
+    # Deliberate change from the pre-migration config (see module docstring):
+    # explicit disabled instead of omitting the param. Same condition on 4.x.
     spec = student_spec()
-    _assert_wire(spec.model, spec.thinking, ("claude-opus-4-6", None, None, None, None))
+    _assert_wire(
+        spec.model, spec.thinking, ("claude-opus-4-6", DISABLED, None, None, None)
+    )
 
 
 def test_default_scorer_wire():
@@ -91,9 +101,12 @@ def test_default_scorer_wire():
 
 
 def test_default_taxonomy_wire():
-    # Pre-migration: taxonomy thinking=false omitted the thinking param.
+    # Deliberate change from the pre-migration config (see module docstring):
+    # explicit disabled instead of omitting the param. Same condition on 4.x.
     spec = taxonomy_spec()
-    _assert_wire(spec.model, spec.thinking, ("claude-opus-4-8", None, None, None, None))
+    _assert_wire(
+        spec.model, spec.thinking, ("claude-opus-4-8", DISABLED, None, None, None)
+    )
 
 
 def test_default_groundtruth_wire():

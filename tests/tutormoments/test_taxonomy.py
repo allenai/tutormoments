@@ -384,6 +384,34 @@ def test_classifier_resume_skips_completed_batches(tmp_path):
     assert second.calls == []
 
 
+def test_classifier_requires_taxonomy_config(tmp_path, monkeypatch):
+    """A config without a taxonomy block raises; the classifier must never
+    silently substitute its own LM settings (there is no module fallback)."""
+    from tutormoments import config as cfgmod
+
+    config_path = tmp_path / "config.yaml"
+    config_path.write_text(
+        """
+providers:
+  anthropic: { env: ANTHROPIC_API_KEY }
+benchmark_models:
+  claude-opus-4-8: { thinking: { type: adaptive }, effort: xhigh, condition: xhigh }
+defaults: { trials: 1, max_turns: 5 }
+retry:    { max_retries: 5, base_delay: 5 }
+batch:    { timeout: 86400 }
+""",
+        encoding="utf-8",
+    )
+    monkeypatch.setenv("TUTORMOMENTS_CONFIG", str(config_path))
+    cfgmod._reset_config_cache()
+    try:
+        facets = [_mk_facet("The tutor asks a guiding question.")]
+        with pytest.raises(ValueError, match="no taxonomy block"):
+            tx.classify_pool(facets, tmp_path / "out", client=_FakeClient())
+    finally:
+        cfgmod._reset_config_cache()
+
+
 # ---------------------------------------------------------------------------
 # 7. CLI extras guard
 # ---------------------------------------------------------------------------
@@ -499,12 +527,11 @@ def test_classify_run_writes_classified_and_counts(tmp_path):
 
 def test_taxonomy_spec_reads_config():
     from tutormoments import config as cfgmod
-    from tutormoments.models import ThinkingLevel
 
     cfgmod._reset_config_cache()
     spec = cfgmod.taxonomy_spec()
     assert spec.model == "claude-opus-4-8"
-    assert spec.thinking == ThinkingLevel.NONE
+    assert spec.thinking == {"thinking": {"type": "disabled"}}
     assert spec.batch_size == 50
 
 

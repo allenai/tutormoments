@@ -199,18 +199,14 @@ def _json_sha256(data) -> str:
 def _spec_json(spec) -> dict | None:
     """JSON-safe dict for a frozen config spec (ArmSpec/StudentSpec/...).
 
-    ThinkingLevel serializes as its string value (it is a str-Enum). None
-    passes through (registered tutors have no spec).
+    Thinking configs are plain provider-native dicts (or None), so asdict is
+    already JSON-safe. None passes through (registered tutors have no spec).
     """
     if spec is None:
         return None
     from dataclasses import asdict
 
-    out = asdict(spec)
-    thinking = out.get("thinking")
-    if thinking is not None:
-        out["thinking"] = str(getattr(thinking, "value", thinking))
-    return out
+    return asdict(spec)
 
 
 def _package_version() -> str | None:

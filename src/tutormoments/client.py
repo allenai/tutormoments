@@ -11,10 +11,11 @@ from dataclasses import dataclass, field
 from dotenv import load_dotenv
 from google.genai import types
 
-# Model facts (provider routing, thinking-ladder wire translation, per-model
-# caps) live in the model registry; the client consumes WireThinking
-# fragments and never interprets thinking levels itself. infer_provider is
-# re-exported because callers historically import it from here.
+# Model facts (provider routing, per-model caps, pricing) live in the model
+# registry, and thinking params are validated/translated by models.py; the
+# client consumes WireThinking fragments and never interprets thinking
+# settings itself. infer_provider is re-exported because callers historically
+# import it from here.
 from tutormoments.models import (
     WireThinking,
     infer_provider,
@@ -272,11 +273,13 @@ class ModelClient:
     ) -> "ModelResponse":
         """Generate a response from the model with retry logic.
 
-        thinking: provider-native thinking params from benchmark_models, or a
-        canonical ladder level for role/legacy callers. The resolver translates
-        this to the provider's wire shape and rejects malformed or unsupported
-        settings before the retry loop. None means "no stated condition":
-        nothing is sent and nothing is checked.
+        thinking: provider-native thinking params (the same mapping the
+        benchmark_models arms and role blocks state in config). The resolver
+        translates this to the provider's wire shape and rejects malformed or
+        unsupported settings before the retry loop. None means "no stated
+        condition": nothing is sent and nothing is checked -- a path for
+        non-benchmark direct calls only (config-driven callers always pass an
+        explicit mapping).
 
         output_schema: optional JSON Schema for structured output. When set,
         the Anthropic path constrains the response via output_config.format
@@ -1353,10 +1356,13 @@ def run_sync_entries(
     """Run entries synchronously one at a time.
 
     Returns {key: {text, usage}} dict (same shape as run_batch). `thinking`
-    takes the same provider-native mapping or legacy ladder value run_batch
-    does, so a caller switching between the two paths keeps the same benchmark
-    condition.
+    takes the same provider-native mapping run_batch does, so a caller
+    switching between the two paths keeps the same benchmark condition.
     """
+    # Fail-fast parity with run_batch: a malformed thinking mapping dies here,
+    # before the loop, instead of being demoted to N identical per-entry
+    # errors by the per-entry exception handler below.
+    resolve_thinking(client.model, thinking)
     raw_entries = {}
     total = len(entries)
     for i, entry in enumerate(entries):
@@ -1407,9 +1413,9 @@ def run_batch(
 ) -> dict:
     """Run entries as a batch job via the provider's batch API.
 
-    thinking: the same provider-native mapping or legacy ladder value
-    generate() takes; the resolver translates it per provider and rejects
-    malformed or unsupported settings before anything is uploaded.
+    thinking: the same provider-native mapping generate() takes; the resolver
+    translates it per provider and rejects malformed or unsupported settings
+    before anything is uploaded.
 
     Resume support: if `existing_batch_id` is set, skip submission and resume
     polling on that batch (the entries list still drives result parsing, so

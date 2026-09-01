@@ -32,14 +32,19 @@ benchmark_models:
   gpt-5.5-2026-04-23:      { model: gpt-5.5-2026-04-23, reasoning: high, condition: high }
   deepseek-v4-pro:         { model: deepseek-ai/DeepSeek-V4-Pro, condition: dynamic }
 
-student: { model: claude-opus-4-6, mode: oracle, thinking: none }
-scorer:  { model: claude-opus-4-6, thinking: dynamic }
+# Role blocks state provider-native thinking parameters the same way arms do.
+# "Off" is stated explicitly ({type: disabled}) rather than by omitting the
+# param: what omission means depends on the model generation (no thinking on
+# Anthropic 4.x, adaptive on Sonnet 5+), so an explicit block keeps the
+# condition stable under model swaps and lets smoke assert it.
+student: { model: claude-opus-4-6, mode: oracle, thinking: { type: disabled } }
+scorer:  { model: claude-opus-4-6, thinking: { type: adaptive } }
 
 # Action-taxonomy classification. Runs on every `tutormoments run` (writes
 # results/<run_id>/taxonomy/classified.csv + a taxonomy block in summary.json)
 # and backs the dev `tutormoments taxonomy` command. Pinned to opus-4-8 with
 # thinking off for reproducibility of the published action distribution.
-taxonomy: { model: claude-opus-4-8, thinking: none, batch_size: 50 }
+taxonomy: { model: claude-opus-4-8, thinking: { type: disabled }, batch_size: 50 }
 
 defaults: { trials: 1, max_turns: 5 }
 retry:    { max_retries: 5, base_delay: 5 }
@@ -53,12 +58,11 @@ execution: { replay_concurrency: 4 }
 
 # Ground-truth build phase (dev-only `tutormoments dataset build-ground-truth`).
 # The paper's ground truth was built on opus-4-8 with adaptive (model-paced)
-# thinking -- `dynamic` sends the same {type: adaptive} wire shape; keep this
-# pinned for reproducibility.
+# thinking; keep this pinned for reproducibility.
 groundtruth:
   model: claude-opus-4-8
   poll_interval: 60
-  thinking: dynamic
+  thinking: { type: adaptive }
   labeller:                 # per-annotation_type effectiveness templates (hybrid routing)
     scaffolding: classify_scaffolding
     rapport: classify_rapport

@@ -64,14 +64,18 @@ def _factory(clients):
     return get
 
 
-def _sync_check(model="claude-opus-4-8", thinking="xhigh", label="arm:test"):
-    from tutormoments.models import ThinkingLevel, infer_provider
+ADAPTIVE_XHIGH = {"thinking": {"type": "adaptive"}, "effort": "xhigh"}
+ENABLED_16K = {"thinking": {"type": "enabled", "budget_tokens": 16384}}
+
+
+def _sync_check(model="claude-opus-4-8", thinking=None, label="arm:test"):
+    from tutormoments.models import infer_provider
 
     return SyncCheck(
         label=label,
         model=model,
         provider=infer_provider(model),
-        thinking=ThinkingLevel.coerce(thinking),
+        thinking=ADAPTIVE_XHIGH if thinking is None else thinking,
         json_mode=False,
     )
 
@@ -97,11 +101,11 @@ def smoke_config(tmp_path, monkeypatch):
 providers:
   anthropic: { env: ANTHROPIC_API_KEY }
   gemini:    { env: GEMINI_API_KEY }
-models:
-  sonnet-high: { model: claude-sonnet-4-6, thinking: high }
-  gemini-dyn:  { model: gemini-2.5-pro, thinking: dynamic }
-student: { model: claude-opus-4-6, mode: oracle, thinking: none }
-scorer:  { model: claude-opus-4-6, thinking: dynamic }
+benchmark_models:
+  sonnet-high: { model: claude-sonnet-4-6, thinking: { type: adaptive }, effort: high, condition: high }
+  gemini-dyn:  { model: gemini-2.5-pro, thinking_budget: -1, condition: dynamic }
+student: { model: claude-opus-4-6, mode: oracle, thinking: null }
+scorer:  { model: claude-opus-4-6, thinking: { type: adaptive } }
 defaults: { trials: 1, max_turns: 5 }
 retry:    { max_retries: 5, base_delay: 5 }
 batch:    { timeout: 86400 }
@@ -120,7 +124,7 @@ def test_build_plan_enumerates_arms_and_roles(smoke_config):
     arm = plan.sync_checks[0]
     assert arm.model == "claude-sonnet-4-6"
     assert arm.provider == "anthropic"
-    assert arm.thinking == "high"
+    assert arm.thinking == {"thinking": {"type": "adaptive"}, "effort": "high"}
     # One batch representative per batch-capable provider; the scorer's model
     # is preferred for its provider.
     by_provider = {b.provider: b for b in plan.batch_checks}
@@ -152,7 +156,7 @@ def test_build_plan_unknown_arm_raises(smoke_config):
 
 
 def test_sync_pass_with_thinking_evidence():
-    check = _sync_check("claude-haiku-4-5", "high")  # legacy enabled: required
+    check = _sync_check("claude-haiku-4-5", ENABLED_16K)  # enabled: required
     client = _FakeClient(
         "claude-haiku-4-5",
         response=SimpleNamespace(
@@ -166,7 +170,7 @@ def test_sync_pass_with_thinking_evidence():
     assert row.status == PASS
     assert row.thinking_evidence == "2"
     # The check must send the arm's real condition.
-    assert client.calls[0]["thinking"] == "high"
+    assert client.calls[0]["thinking"] == ENABLED_16K
 
 
 def test_sync_fail_on_empty_text():
@@ -196,7 +200,7 @@ def test_sync_fail_on_missing_usage():
 
 def test_required_thinking_without_evidence_fails():
     # Gemini fixed budget: thinking is required; zero reasoning tokens = FAIL.
-    check = _sync_check("gemini-2.5-pro", "high")
+    check = _sync_check("gemini-2.5-pro", {"thinking_budget": 16384})
     client = _FakeClient(
         "gemini-2.5-pro",
         response=SimpleNamespace(
@@ -211,7 +215,7 @@ def test_required_thinking_without_evidence_fails():
 
 
 def test_thinking_off_with_evidence_fails():
-    check = _sync_check("gemini-2.5-flash", "none")
+    check = _sync_check("gemini-2.5-flash", {"thinking_budget": 0})
     client = _FakeClient(
         "gemini-2.5-flash",
         response=SimpleNamespace(
@@ -226,7 +230,7 @@ def test_thinking_off_with_evidence_fails():
 
 
 def test_dynamic_without_evidence_warns_then_fails_strict():
-    check = _sync_check("gemini-2.5-pro", "dynamic")
+    check = _sync_check("gemini-2.5-pro", {"thinking_budget": -1})
     response = SimpleNamespace(
         text="answer", usage=_usage(provider="gemini", reasoning=0)
     )
@@ -247,7 +251,7 @@ def test_openai_reasoning_tokens_are_evidence():
     # surfaced by the client as the informational reasoning_tokens key (the
     # canonical `reasoning` bucket stays 0 there -- it is a subset of output,
     # not a separate cost). The smoke must read it as evidence.
-    check = _sync_check("gpt-5.5", "high")
+    check = _sync_check("gpt-5.5", {"reasoning": "high"})
     client = _FakeClient(
         "gpt-5.5",
         response=SimpleNamespace(
@@ -275,7 +279,7 @@ def test_openai_reasoning_tokens_are_evidence():
 
 
 def test_together_evidence_not_asserted():
-    check = _sync_check("deepseek-ai/DeepSeek-V4-Pro", "dynamic")
+    check = _sync_check("deepseek-ai/DeepSeek-V4-Pro", {})
     client = _FakeClient(
         "deepseek-ai/DeepSeek-V4-Pro",
         response=SimpleNamespace(
@@ -291,8 +295,12 @@ def test_together_evidence_not_asserted():
 
 
 def test_one_check_exception_does_not_abort_others():
-    bad = _sync_check("claude-opus-4-8", "xhigh", label="arm:bad")
-    good = _sync_check("claude-sonnet-4-6", "high", label="arm:good")
+    bad = _sync_check("claude-opus-4-8", label="arm:bad")
+    good = _sync_check(
+        "claude-sonnet-4-6",
+        {"thinking": {"type": "adaptive"}, "effort": "high"},
+        label="arm:good",
+    )
     clients = {
         "claude-opus-4-8": _FakeClient("claude-opus-4-8", error=RuntimeError("boom")),
         "claude-sonnet-4-6": _FakeClient(
@@ -315,13 +323,13 @@ def test_one_check_exception_does_not_abort_others():
 # ---------------------------------------------------------------------------
 
 
-def _batch_check(model="claude-opus-4-6", thinking="dynamic"):
-    from tutormoments.models import ThinkingLevel, infer_provider
+def _batch_check(model="claude-opus-4-6", thinking=None):
+    from tutormoments.models import infer_provider
 
     return BatchCheck(
         provider=infer_provider(model),
         model=model,
-        thinking=ThinkingLevel.coerce(thinking),
+        thinking={"thinking": {"type": "adaptive"}} if thinking is None else thinking,
     )
 
 
@@ -349,7 +357,7 @@ def test_batch_submit_and_cancel_pass():
     assert row.batch_id == "batch-123"
     assert cancelled["id"] == "batch-123"
     assert len(submitted["entries"]) == 2
-    assert submitted["thinking"] == "dynamic"
+    assert submitted["thinking"] == {"thinking": {"type": "adaptive"}}
 
 
 def test_batch_cancel_failure_warns_with_id():
@@ -393,7 +401,7 @@ def test_batch_submit_failure_fails():
 
 
 def test_report_renders_ascii_and_json():
-    check = _sync_check("claude-opus-4-8", "xhigh")
+    check = _sync_check("claude-opus-4-8", ADAPTIVE_XHIGH)
     client = _FakeClient(
         "claude-opus-4-8",
         response=SimpleNamespace(

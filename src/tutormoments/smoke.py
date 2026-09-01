@@ -21,7 +21,7 @@ import json
 import logging
 from dataclasses import dataclass, field
 
-from tutormoments.models import ThinkingLevel, resolve_thinking
+from tutormoments.models import resolve_thinking
 from tutormoments.resources import resource_text
 
 logger = logging.getLogger(__name__)
@@ -38,7 +38,7 @@ class SyncCheck:
     label: str  # e.g. "arm:claude-opus-4-8" or "student"
     model: str
     provider: str
-    thinking: "ThinkingLevel | None"
+    thinking: dict | None  # provider-native thinking config from the spec
     json_mode: bool
 
 
@@ -46,7 +46,7 @@ class SyncCheck:
 class BatchCheck:
     provider: str
     model: str
-    thinking: "ThinkingLevel | None"
+    thinking: dict | None
 
 
 @dataclass
@@ -129,8 +129,8 @@ def build_smoke_plan(
         return providers is None or provider in providers
 
     if "tutor" in roles:
-        arm_names = arms if arms is not None else list(
-            cfg.get("benchmark_models") or cfg.get("models") or {}
+        arm_names = (
+            arms if arms is not None else list(cfg.get("benchmark_models") or {})
         )
         for name in arm_names:
             arm = resolve_arm(name, config_path)  # raises on unknown arm
@@ -211,10 +211,13 @@ def build_smoke_plan(
     )
 
 
-def _thinking_expectation(wire, level) -> str:
-    """What the wire fragment promises: required / optional / off / na."""
-    if level is None:
-        return "na"
+def _thinking_expectation(wire) -> str:
+    """What the wire fragment promises: required / optional / off / na.
+
+    Derived from the wire fragment alone. When nothing is sent, the model's
+    own default rules (omit means off on some Anthropic tiers, adaptive on
+    others), so the expectation is unknowable from config: "na".
+    """
     if wire.gemini_thinking_config is not None:
         cfgd = wire.gemini_thinking_config
         budget = cfgd.get("thinking_budget")
@@ -232,9 +235,7 @@ def _thinking_expectation(wire, level) -> str:
         return "optional"  # adaptive: the model decides
     if wire.openai_reasoning_effort is not None:
         return "off" if wire.openai_reasoning_effort == "none" else "required"
-    if level == ThinkingLevel.NONE:
-        return "off"  # omit-style off (anthropic 4.x tiers)
-    return "na"  # noop mechanism (together internal reasoners)
+    return "na"  # nothing sent: provider default / internal reasoners
 
 
 def _thinking_evidence(usage: dict) -> "int | None":
@@ -323,7 +324,7 @@ def run_smoke(
                 row.status = FAIL
                 row.detail = "no token usage recorded"
             else:
-                expectation = _thinking_expectation(wire, check.thinking)
+                expectation = _thinking_expectation(wire)
                 evidence = _thinking_evidence(usage)
                 row.thinking_evidence = "n/a" if evidence is None else str(evidence)
                 status, note = _judge_thinking(expectation, evidence, strict_thinking)

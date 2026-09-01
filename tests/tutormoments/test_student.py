@@ -106,14 +106,13 @@ class TestResolveStudent:
     """Tests for resolve_student() -- hosted model resolution + registry."""
 
     def test_resolve_student_no_id_returns_hosted_claude_opus(self, monkeypatch):
-        """resolve_student() with no args returns hosted claude-opus-4-6 with thinking none."""
+        """resolve_student() with no args returns hosted claude-opus-4-6 with thinking off."""
         monkeypatch.setenv("ANTHROPIC_API_KEY", "test-key")
 
         # Patch anthropic.Anthropic so no real HTTP call is made.
         import unittest.mock as mock
 
         from tutormoments.config import _reset_config_cache
-        from tutormoments.models import ThinkingLevel
 
         _reset_config_cache()
         with mock.patch("anthropic.Anthropic"):
@@ -123,9 +122,9 @@ class TestResolveStudent:
 
         assert result["kind"] == "hosted"
         assert result["client"] is not None
-        # The default config states the student's condition as a ladder level.
-        assert result["kwargs"]["thinking"] == ThinkingLevel.NONE
-        assert result["kwargs"]["thinking"] == "none"
+        # The default config states the student's thinking-off condition
+        # explicitly ({type: disabled}) so it survives model swaps.
+        assert result["kwargs"]["thinking"] == {"thinking": {"type": "disabled"}}
 
     def test_resolve_student_registered(self, monkeypatch):
         """A @register_student-decorated callable is returned by resolve_student(name)."""
@@ -167,12 +166,12 @@ providers:
   openai:    { env: OPENAI_API_KEY }
   gemini:    { env: GEMINI_API_KEY }
   together:  { env: TOGETHER_API_KEY }
-models:
-  claude-opus-4-8: { thinking: xhigh }
-# A registered (scripted) student model skips wire validation but still
-# states a thinking level on the canonical ladder.
-student: { model: dummy-from-config, mode: oracle, thinking: none }
-scorer:  { model: claude-opus-4-6, thinking: dynamic }
+benchmark_models:
+  claude-opus-4-8: { thinking: { type: adaptive }, effort: xhigh, condition: xhigh }
+# A registered (scripted) student model is a code callable: no wire form,
+# no thinking keys.
+student: { model: dummy-from-config, mode: oracle }
+scorer:  { model: claude-opus-4-6, thinking: { type: adaptive } }
 defaults: { trials: 1, max_turns: 5 }
 retry:    { max_retries: 5, base_delay: 5 }
 batch:    { timeout: 86400 }

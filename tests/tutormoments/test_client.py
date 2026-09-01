@@ -55,13 +55,12 @@ def test_infer_provider_unknown_raises():
 
 
 class TestGenerateThinkingWire:
-    """The thinking ladder resolves to the exact wire bytes the raw knobs sent.
+    """Provider-native thinking configs resolve to the exact wire bytes.
 
-    The full (family, rung) -> wire matrix is pinned in test_models.py; these
+    The full native-config -> wire matrix is pinned in test_models.py; these
     tests prove the client actually places each resolved fragment on the
-    request. Each expected payload is byte-identical to what the pre-ladder
-    client produced for the equivalent raw-knob inputs (thinking=True,
-    thinking_budget, effort, reasoning_effort) -- the wire-level
+    request. Each expected payload is byte-identical to what earlier client
+    revisions produced for the equivalent inputs -- the wire-level
     reproducibility proof for the refactor.
     """
 
@@ -74,25 +73,29 @@ class TestGenerateThinkingWire:
             ModelClient(model).generate("Q", json_mode=False, **gen_kwargs)
         return client_obj.messages.create.call_args.kwargs
 
-    def test_anthropic_dynamic_sends_adaptive(self, monkeypatch):
-        # Old thinking=True on adaptive-tier models.
-        kwargs = self._anthropic(monkeypatch, "claude-opus-4-6", thinking="dynamic")
+    def test_anthropic_adaptive_sends_adaptive(self, monkeypatch):
+        kwargs = self._anthropic(
+            monkeypatch, "claude-opus-4-6", thinking={"thinking": {"type": "adaptive"}}
+        )
         assert kwargs["thinking"] == {"type": "adaptive"}
         assert "extra_body" not in kwargs  # no effort alongside plain adaptive
 
-    def test_anthropic_xhigh_sends_adaptive_plus_effort(self, monkeypatch):
-        # Old thinking=True + effort="xhigh".
-        kwargs = self._anthropic(monkeypatch, "claude-opus-4-8", thinking="xhigh")
+    def test_anthropic_adaptive_plus_effort(self, monkeypatch):
+        kwargs = self._anthropic(
+            monkeypatch,
+            "claude-opus-4-8",
+            thinking={"thinking": {"type": "adaptive"}, "effort": "xhigh"},
+        )
         assert kwargs["thinking"] == {"type": "adaptive"}
         assert kwargs["extra_body"]["output_config"] == {"effort": "xhigh"}
 
-    def test_anthropic_legacy_high_sends_enabled_budget_and_bumps_max_tokens(
-        self, monkeypatch
-    ):
-        # Old haiku-4-5 thinking=True (legacy enabled + default budget 16384).
+    def test_anthropic_enabled_budget_bumps_max_tokens(self, monkeypatch):
         # Enabled mode requires max_tokens >= budget + headroom.
         kwargs = self._anthropic(
-            monkeypatch, "claude-haiku-4-5", thinking="high", max_tokens=100
+            monkeypatch,
+            "claude-haiku-4-5",
+            thinking={"thinking": {"type": "enabled", "budget_tokens": 16384}},
+            max_tokens=100,
         )
         assert kwargs["thinking"] == {"type": "enabled", "budget_tokens": 16384}
         assert kwargs["max_tokens"] == 16384 + 64
@@ -104,8 +107,10 @@ class TestGenerateThinkingWire:
         kwargs = self._anthropic(monkeypatch, "claude-haiku-4-5-20251001")
         assert kwargs["max_tokens"] == 64000
 
-    def test_anthropic_none_level_sends_no_thinking_param(self, monkeypatch):
-        kwargs = self._anthropic(monkeypatch, "claude-opus-4-6", thinking="none")
+    def test_anthropic_null_thinking_sends_no_thinking_param(self, monkeypatch):
+        kwargs = self._anthropic(
+            monkeypatch, "claude-opus-4-6", thinking={"thinking": None}
+        )
         assert "thinking" not in kwargs
         assert "extra_body" not in kwargs
 
@@ -129,16 +134,19 @@ class TestGenerateThinkingWire:
         return client_obj.models.generate_content.call_args.kwargs
 
     def test_gemini_dynamic_sends_budget_minus_one(self, monkeypatch):
-        # Old thinking=True + thinking_budget=-1.
-        kwargs = self._gemini(monkeypatch, "gemini-2.5-pro", thinking="dynamic")
+        kwargs = self._gemini(
+            monkeypatch, "gemini-2.5-pro", thinking={"thinking_budget": -1}
+        )
         assert kwargs["config"]["thinking_config"] == {
             "include_thoughts": True,
             "thinking_budget": -1,
         }
 
-    def test_gemini_flash_none_sends_zero_budget(self, monkeypatch):
-        # Old thinking=False; only valid where the API accepts budget 0.
-        kwargs = self._gemini(monkeypatch, "gemini-2.5-flash", thinking="none")
+    def test_gemini_flash_zero_budget_disables_thoughts(self, monkeypatch):
+        # Only valid where the API accepts budget 0.
+        kwargs = self._gemini(
+            monkeypatch, "gemini-2.5-flash", thinking={"thinking_budget": 0}
+        )
         assert kwargs["config"]["thinking_config"] == {
             "include_thoughts": False,
             "thinking_budget": 0,
@@ -161,18 +169,15 @@ class TestGenerateThinkingWire:
         return client_obj.chat.completions.create.call_args.kwargs
 
     def test_openai_high_sends_reasoning_effort(self, monkeypatch):
-        # Old reasoning_effort="high".
-        kwargs = self._openai(monkeypatch, "gpt-5.5", thinking="high")
+        kwargs = self._openai(monkeypatch, "gpt-5.5", thinking={"reasoning": "high"})
         assert kwargs["reasoning_effort"] == "high"
 
     def test_openai_no_condition_omits_reasoning_effort(self, monkeypatch):
         kwargs = self._openai(monkeypatch, "gpt-5.5")
         assert "reasoning_effort" not in kwargs
 
-    def test_unsatisfiable_level_fails_before_sdk_call_without_retries(
-        self, monkeypatch
-    ):
-        # gemini-2.5-pro is always-thinking: `none` must die at resolve time,
+    def test_malformed_config_fails_before_sdk_call_without_retries(self, monkeypatch):
+        # A provider-mismatched thinking config must die at resolve time,
         # before any request is made and without burning the retry budget.
         monkeypatch.setenv("GEMINI_API_KEY", "k")
         with (
@@ -183,16 +188,17 @@ class TestGenerateThinkingWire:
             MockGenai.return_value = client_obj
             c = ModelClient("gemini-2.5-pro")
             with pytest.raises(ThinkingConfigError):
-                c.generate("Q", json_mode=False, thinking="none")
+                c.generate("Q", json_mode=False, thinking={"reasoning": "high"})
         client_obj.models.generate_content.assert_not_called()
         mock_sleep.assert_not_called()
 
-    def test_unregistered_model_with_explicit_level_fails_closed(self, monkeypatch):
+    def test_retired_ladder_level_fails_closed(self, monkeypatch):
+        # A stray ladder-level string must not silently configure anything.
         monkeypatch.setenv("ANTHROPIC_API_KEY", "sk-test")
         with patch("anthropic.Anthropic") as MockAnthropic:
             client_obj = MagicMock()
             MockAnthropic.return_value = client_obj
-            c = ModelClient("claude-experimental-dev-model")
+            c = ModelClient("claude-opus-4-8")
             with pytest.raises(ThinkingConfigError):
                 c.generate("Q", json_mode=False, thinking="high")
         client_obj.messages.create.assert_not_called()
@@ -675,9 +681,7 @@ def test_run_batch_anthropic_remaps_custom_ids(monkeypatch):
 def test_run_batch_anthropic_sends_thinking_and_effort(monkeypatch):
     """Batch requests must carry the same wire thinking/effort fragment as sync
     calls (benchmark fidelity: batch mode may not silently diverge from
-    run_conversation). thinking="xhigh" resolves to adaptive thinking plus
-    output_config.effort -- the exact bytes the retired thinking=True +
-    effort="xhigh" knobs produced."""
+    run_conversation): adaptive thinking plus output_config.effort."""
     monkeypatch.setenv("ANTHROPIC_API_KEY", "sk-test")
     with (
         patch("anthropic.Anthropic") as MockAnthropic,
@@ -696,15 +700,15 @@ def test_run_batch_anthropic_sends_thinking_and_effort(monkeypatch):
             c,
             [build_batch_entry("kA", "pA")],
             poll_interval=0,
-            thinking="xhigh",
+            thinking={"thinking": {"type": "adaptive"}, "effort": "xhigh"},
         )
         (submitted,) = client_obj.messages.batches.create.call_args.kwargs["requests"]
     assert submitted["params"]["thinking"] == {"type": "adaptive"}
     assert submitted["params"]["output_config"] == {"effort": "xhigh"}
 
 
-def test_run_batch_anthropic_legacy_budget_and_registry_cap(monkeypatch):
-    """Legacy (enabled+budget) models get budget_tokens on batch requests, no
+def test_run_batch_anthropic_enabled_budget_and_registry_cap(monkeypatch):
+    """Enabled+budget thinking gets budget_tokens on batch requests, no
     output_config, and the registry's per-model output cap clamps the entry's
     max_tokens (build_batch_entry's 65536 default > haiku's 64000 cap)."""
     monkeypatch.setenv("ANTHROPIC_API_KEY", "sk-test")
@@ -725,7 +729,7 @@ def test_run_batch_anthropic_legacy_budget_and_registry_cap(monkeypatch):
             c,
             [build_batch_entry("kA", "pA")],
             poll_interval=0,
-            thinking="high",
+            thinking={"thinking": {"type": "enabled", "budget_tokens": 16384}},
         )
         (submitted,) = client_obj.messages.batches.create.call_args.kwargs["requests"]
     assert submitted["params"]["thinking"] == {
@@ -1305,7 +1309,7 @@ def _mock_gemini_batch_client(result_text: str):
 def test_run_batch_gemini_injects_thinking_config_without_mutating_entries(
     monkeypatch,
 ):
-    """thinking="dynamic" lands in every uploaded JSONL line's
+    """A model-paced thinking config lands in every uploaded JSONL line's
     generation_config as the include_thoughts/budget -1 wire shape, and the
     caller's entry dicts stay untouched (resume flows re-submit them)."""
     monkeypatch.setenv("GEMINI_API_KEY", "key-test")
@@ -1330,7 +1334,7 @@ def test_run_batch_gemini_injects_thinking_config_without_mutating_entries(
         client_obj, captured = _mock_gemini_batch_client(result_text)
         MockGenai.return_value = client_obj
         c = ModelClient("gemini-2.5-pro")
-        out = run_batch(c, entries, poll_interval=0, thinking="dynamic")
+        out = run_batch(c, entries, poll_interval=0, thinking={"thinking_budget": -1})
     lines = [json.loads(ln) for ln in captured["jsonl"].strip().splitlines()]
     assert len(lines) == 2
     for line in lines:
@@ -1376,13 +1380,16 @@ def test_run_batch_gemini_skips_thought_parts_and_joins_text(monkeypatch):
         MockGenai.return_value = client_obj
         c = ModelClient("gemini-2.5-pro")
         out = run_batch(
-            c, [build_batch_entry("kA", "pA")], poll_interval=0, thinking="dynamic"
+            c,
+            [build_batch_entry("kA", "pA")],
+            poll_interval=0,
+            thinking={"thinking_budget": -1},
         )
     assert out["kA"]["text"] == '{"a": 1}'
 
 
-def test_run_batch_unsatisfiable_level_fails_before_upload(monkeypatch):
-    """A level the model cannot honor dies at resolve time -- nothing is
+def test_run_batch_malformed_config_fails_before_upload(monkeypatch):
+    """A malformed thinking config dies at resolve time -- nothing is
     uploaded and no batch job is created."""
     monkeypatch.setenv("GEMINI_API_KEY", "key-test")
     with patch("google.genai.Client") as MockGenai:
@@ -1391,22 +1398,43 @@ def test_run_batch_unsatisfiable_level_fails_before_upload(monkeypatch):
         c = ModelClient("gemini-2.5-pro")
         with pytest.raises(ThinkingConfigError):
             run_batch(
-                c, [build_batch_entry("k", "p")], poll_interval=0, thinking="none"
+                c,
+                [build_batch_entry("k", "p")],
+                poll_interval=0,
+                thinking={"reasoning": "high"},
             )
     client_obj.files.upload.assert_not_called()
     client_obj.batches.create.assert_not_called()
 
 
+def test_run_sync_entries_malformed_config_fails_before_loop(monkeypatch):
+    """Fail-fast parity with run_batch: a malformed thinking mapping raises
+    up front instead of being demoted to N identical per-entry errors."""
+    monkeypatch.setenv("ANTHROPIC_API_KEY", "sk-test")
+    with patch("anthropic.Anthropic"):
+        c = ModelClient("claude-opus-4-6")
+    with patch.object(c, "generate") as mock_gen:
+        with pytest.raises(ThinkingConfigError):
+            run_sync_entries(
+                c, [build_batch_entry("k1", "p1")], thinking={"reasoning": "high"}
+            )
+    mock_gen.assert_not_called()
+
+
 def test_run_sync_entries_forwards_thinking_to_generate(monkeypatch):
-    """run_sync_entries takes the same ladder level run_batch does and passes
-    it straight through to generate(), so switching between the sync and batch
-    paths keeps the same benchmark condition."""
+    """run_sync_entries takes the same thinking mapping run_batch does and
+    passes it straight through to generate(), so switching between the sync
+    and batch paths keeps the same benchmark condition."""
     monkeypatch.setenv("ANTHROPIC_API_KEY", "sk-test")
     with patch("anthropic.Anthropic"):
         c = ModelClient("claude-opus-4-6")
     with patch.object(c, "generate", return_value=ModelResponse("R")) as mock_gen:
-        out = run_sync_entries(c, [build_batch_entry("k1", "p1")], thinking="dynamic")
-    assert mock_gen.call_args.kwargs["thinking"] == "dynamic"
+        out = run_sync_entries(
+            c,
+            [build_batch_entry("k1", "p1")],
+            thinking={"thinking": {"type": "adaptive"}},
+        )
+    assert mock_gen.call_args.kwargs["thinking"] == {"thinking": {"type": "adaptive"}}
     assert out["k1"]["text"] == "R"
 
 

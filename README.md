@@ -143,22 +143,25 @@ benchmark_models:
 tutormoments run --tutors gemini-2.5-low gpt-5.5-low --data_path <release dir>
 ```
 
-Running a model for the first time needs the provider API key exported and a
-model id whose provider can be inferred. `src/tutormoments/models.yaml` still
-holds stable per-model facts such as pricing and output caps; it no longer
-hides tutor-arm reasoning parameters from the run config.
+Running a model for the first time needs the provider API key exported and an
+entry in `src/tutormoments/models.yaml` — the per-model facts table (provider
+routing, pricing for cost tracking, output caps). It holds no reasoning
+configuration: what each arm sends is stated in the config YAML itself, in
+provider parlance, and validated at load (see `docs/thinking.md`). Verify a
+new arm live with `tutormoments smoke` before benchmarking it.
 
 Tutors are selectable per-run via the CLI. The Student model is set in the config; changing the student model would change the shape of the evaluation. Modify your 
 config to swap the student model with another API-callable model:
 
 ```yaml
-student: { model: claude-opus-4-6, mode: oracle, thinking: none } # default
+student: { model: claude-opus-4-6, mode: oracle, thinking: { type: disabled } } # default
 ```
 
-The student/scorer/taxonomy/groundtruth blocks still use `{model, thinking}`
-with the canonical ladder because they are the fixed evaluation apparatus,
-not the tutor conditions being reported. Keeping them inline means retuning a
-tutor arm can never silently change the student or scoring regime.
+The student/scorer/taxonomy/groundtruth blocks state their thinking
+parameters the same provider-native way as arms (minus `condition` — they are
+the fixed evaluation apparatus, not the tutor conditions being reported).
+Keeping them inline means retuning a tutor arm can never silently change the
+student or scoring regime.
 
 ## Custom Tutor / Student Models
 

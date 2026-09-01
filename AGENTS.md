@@ -51,17 +51,17 @@ imports them.
   response, which is recorded as `"..."` and scored as if the tutor said it.
   Never reintroduce a cap to save tokens.
 - Never make choices about which language model to use or language model configuration for any API call without consulting the user; this is a language model benchmark, the choice of model matters
-- Tutor benchmark arms live in `benchmark_models:` and state exact
-  provider-native reasoning parameters in the config YAML, plus a `condition`
-  label for grouping results. Reviewers should not have to reverse-engineer
-  hidden ladder mappings to know what was run. The student/scorer/taxonomy/
-  groundtruth role blocks still use canonical `thinking:` ladder levels
-  (none/low/high/xhigh/dynamic) because they are fixed evaluation apparatus.
-  See docs/thinking.md.
-- `src/tutormoments/models.yaml` (the model registry) remains benchmark-
-  defining for stable model facts and the legacy/role thinking ladder. Never
-  edit it without consulting the user, and verify new or changed ladder rungs
-  live with `tutormoments smoke` before relying on them.
+- Every model-bearing config block states exact provider-native reasoning
+  parameters in the config YAML: tutor arms live in `benchmark_models:` (plus
+  a `condition` label for grouping results), and the student/scorer/taxonomy/
+  groundtruth role blocks use the same provider-native keys. Reviewers should
+  never have to reverse-engineer a hidden mapping to know what was run. There
+  is no thinking ladder; parameters are shape-validated at config load and
+  proven live with `tutormoments smoke`. See docs/thinking.md.
+- `src/tutormoments/models.yaml` (the model registry) holds stable per-model
+  facts only: provider routing, pricing (the cost-tracking data), and output
+  caps. It is still benchmark-relevant (pricing and caps affect runs), so
+  never edit it without consulting the user.
 - The offline suite can only prove the code agrees with itself. The live
   verification layer is `tutormoments smoke` (one tiny real call per
   configured arm/role plus a submit-then-cancel batch per provider): run it

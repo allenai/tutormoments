@@ -161,8 +161,8 @@ def _make_run_config(
     replay_concurrency=1,
     arm="claude-opus-4-8",
     model=None,
-    thinking="dynamic",
-    condition=None,
+    thinking=None,
+    condition="dynamic",
 ):
     """Build a fake RunConfig-like object.
 
@@ -170,6 +170,8 @@ def _make_run_config(
     provider model id (defaults to the arm name, as in the config schema).
     """
     model = model or arm
+    if thinking is None:
+        thinking = {"thinking": {"type": "adaptive"}}
     cfg = MagicMock()
     cfg.dataset = dataset
     cfg.data_path = None
@@ -181,9 +183,12 @@ def _make_run_config(
     cfg.modes = ["plain"]
     cfg.trials = 1
     cfg.replay_concurrency = replay_concurrency
-    cfg.student = StudentSpec(model="claude-haiku", mode="oracle", thinking="dynamic")
-    cfg.scorer = ScorerSpec(model="claude-opus-4-6", thinking="dynamic")
-    condition = condition or str(getattr(thinking, "value", thinking))
+    cfg.student = StudentSpec(
+        model="claude-haiku", mode="oracle", thinking={"thinking": None}
+    )
+    cfg.scorer = ScorerSpec(
+        model="claude-opus-4-6", thinking={"thinking": {"type": "adaptive"}}
+    )
     cfg.resolved_tutors = {
         arm: ArmSpec(
             name=arm,
@@ -247,19 +252,23 @@ def test_run_cell_writes_all_files(tmp_path):
     assert cfg_data["arm"] == "claude-opus-4-8"
     assert cfg_data["model"] == "claude-opus-4-8"
     assert cfg_data["condition"] == "dynamic"
-    # Frozen specs are serialized as plain dicts with thinking as a string.
+    # Frozen specs are serialized as plain dicts; thinking is the exact
+    # provider-native mapping the run sent.
     assert cfg_data["student"] == {
         "model": "claude-haiku",
         "mode": "oracle",
-        "thinking": "dynamic",
+        "thinking": {"thinking": None},
     }
-    assert cfg_data["scorer"] == {"model": "claude-opus-4-6", "thinking": "dynamic"}
+    assert cfg_data["scorer"] == {
+        "model": "claude-opus-4-6",
+        "thinking": {"thinking": {"type": "adaptive"}},
+    }
     assert cfg_data["resolved_tutors"] == {
         "claude-opus-4-8": {
             "name": "claude-opus-4-8",
             "model": "claude-opus-4-8",
             "provider": "anthropic",
-            "thinking": "dynamic",
+            "thinking": {"thinking": {"type": "adaptive"}},
             "condition": "dynamic",
         }
     }
@@ -558,15 +567,15 @@ providers:
   openai:    { env: OPENAI_API_KEY }
   gemini:    { env: GEMINI_API_KEY }
 
-models:
-  claude-opus-4-8:   { thinking: dynamic }
-  claude-sonnet-4-6: { thinking: dynamic }
-  gemini-2.5-pro:    { thinking: dynamic }
-  gpt-5.5:           { thinking: high }
-  sonnet-high:       { model: claude-sonnet-4-6, thinking: high }
+benchmark_models:
+  claude-opus-4-8:   { thinking: { type: adaptive }, condition: dynamic }
+  claude-sonnet-4-6: { thinking: { type: adaptive }, condition: dynamic }
+  gemini-2.5-pro:    { thinking_budget: -1, condition: dynamic }
+  gpt-5.5:           { reasoning: high, condition: high }
+  sonnet-high:       { model: claude-sonnet-4-6, thinking: { type: adaptive }, effort: high, condition: high }
 
-student: { model: claude-haiku-4-5, mode: oracle, thinking: none }
-scorer:  { model: claude-opus-4-6, thinking: dynamic }
+student: { model: claude-haiku-4-5, mode: oracle, thinking: null }
+scorer:  { model: claude-opus-4-6, thinking: { type: adaptive } }
 
 defaults: { trials: 1, max_turns: 4 }
 retry: { max_retries: 1, base_delay: 1 }
@@ -1219,11 +1228,11 @@ def test_run_config_argument_becomes_active_config_for_late_resolution(
 providers:
   openai: { env: OPENAI_API_KEY }
 
-models:
-  gpt-5.5: { thinking: high }
+benchmark_models:
+  gpt-5.5: { reasoning: high, condition: high }
 
-student: { model: claude-haiku-4-5, mode: oracle, thinking: none }
-scorer: { model: gpt-5.5, thinking: high }
+student: { model: claude-haiku-4-5, mode: oracle, thinking: null }
+scorer: { model: gpt-5.5, reasoning: high }
 
 defaults: { trials: 1, max_turns: 1 }
 retry: { max_retries: 1, base_delay: 1 }
@@ -1452,7 +1461,11 @@ def test_run_cell_keys_results_by_arm_name_not_model_id(tmp_path):
     annotations = [_make_annotation(s.id) for s in scenarios]
 
     cfg_mock = _make_run_config(
-        sample=2, arm="sonnet-high", model="claude-sonnet-4-6", thinking="high"
+        sample=2,
+        arm="sonnet-high",
+        model="claude-sonnet-4-6",
+        thinking={"thinking": {"type": "adaptive"}, "effort": "high"},
+        condition="high",
     )
 
     with (
@@ -1488,7 +1501,7 @@ def test_run_cell_keys_results_by_arm_name_not_model_id(tmp_path):
         "name": "sonnet-high",
         "model": "claude-sonnet-4-6",
         "provider": "anthropic",
-        "thinking": "high",
+        "thinking": {"thinking": {"type": "adaptive"}, "effort": "high"},
         "condition": "high",
     }
 
