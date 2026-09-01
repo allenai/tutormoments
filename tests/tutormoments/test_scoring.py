@@ -1316,6 +1316,8 @@ def test_score_accumulates_usage_across_passes(fixture_scenario, fixture_transcr
     annotate_key = f"{sid}__scaffolding__0"
 
     def make_resp(keys_vals, tokens_per_key):
+        # Legacy counters + canonical cost vector + provenance, as the
+        # post-capture batch paths emit them.
         return {
             k: {
                 "text": v if isinstance(v, str) else _json.dumps(v),
@@ -1323,6 +1325,15 @@ def test_score_accumulates_usage_across_passes(fixture_scenario, fixture_transcr
                     "input_tokens": tokens_per_key,
                     "output_tokens": tokens_per_key,
                     "total_tokens": tokens_per_key * 2,
+                    "input_uncached": tokens_per_key,
+                    "cache_read": 0,
+                    "cache_write": 0,
+                    "output": tokens_per_key,
+                    "reasoning": 0,
+                    "total": tokens_per_key * 2,
+                    "provider": "anthropic",
+                    "model": "claude-opus-4-6",
+                    "endpoint": "batch",
                 },
             }
             for k, v in keys_vals.items()
@@ -1364,6 +1375,12 @@ def test_score_accumulates_usage_across_passes(fixture_scenario, fixture_transcr
     usage = result.usage
     assert isinstance(usage, dict), "usage must be a dict"
     assert usage.get("total_tokens", 0) > 0, "total_tokens must be > 0"
+    # The canonical vector survives the 3-pass accumulation onto the
+    # Annotation, provenance included (scorer usage is always batch).
+    assert usage["total"] == usage["total_tokens"]
+    assert usage["input_uncached"] == usage["input_tokens"]
+    assert usage["endpoint"] == "batch"
+    assert usage["provider"] == "anthropic"
 
 
 # ---------------------------------------------------------------------------

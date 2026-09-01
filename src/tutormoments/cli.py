@@ -178,6 +178,7 @@ from tutormoments.moments import (
     load_manifest,
     load_moments,
 )
+from tutormoments.usage import add_usage, sum_usage
 
 
 def _dataset_label(cfg) -> str:
@@ -817,35 +818,32 @@ def run_cell(
         student_lat_samples: list = []
         tutor_timings: list = []
         student_timings: list = []
-        tutor_input = tutor_output = 0
-        student_input = student_output = 0
+        tutor_tokens = sum_usage()
+        student_tokens = sum_usage()
         for tx in all_trial_transcripts:
             tutor_lat_samples.extend(getattr(tx, "tutor_latencies", []) or [])
             student_lat_samples.extend(getattr(tx, "student_latencies", []) or [])
             tutor_timings.extend(getattr(tx, "tutor_timings", []) or [])
             student_timings.extend(getattr(tx, "student_timings", []) or [])
-            tu = getattr(tx, "tutor_usage", {}) or {}
-            su = getattr(tx, "student_usage", {}) or {}
-            tutor_input += tu.get("input_tokens", 0) or 0
-            tutor_output += tu.get("output_tokens", 0) or 0
-            student_input += su.get("input_tokens", 0) or 0
-            student_output += su.get("output_tokens", 0) or 0
+            add_usage(tutor_tokens, getattr(tx, "tutor_usage", {}) or {})
+            add_usage(student_tokens, getattr(tx, "student_usage", {}) or {})
 
-        tutor_tokens = {
-            "input_tokens": tutor_input,
-            "output_tokens": tutor_output,
-            "total_tokens": tutor_input + tutor_output,
-        }
-        student_tokens = {
-            "input_tokens": student_input,
-            "output_tokens": student_output,
-            "total_tokens": student_input + student_output,
-        }
-        total_tokens = {
-            "input_tokens": tutor_input + student_input,
-            "output_tokens": tutor_output + student_output,
-            "total_tokens": tutor_input + tutor_output + student_input + student_output,
-        }
+        # Scorer usage: the three pooled scoring passes per moment, accumulated
+        # onto each Annotation by score_batch. Endpoint provenance ("batch")
+        # rides along -- that is what the batch discount applies to in costing.
+        scorer_tokens = sum_usage()
+        for ann in all_trial_annotations:
+            ann_usage = (
+                ann.get("usage")
+                if isinstance(ann, dict)
+                else getattr(ann, "usage", None)
+            )
+            add_usage(scorer_tokens, ann_usage or {})
+
+        # Role sums keep every usage key: legacy provider counters (summed
+        # as-is, never recomputed -- the canonical `total` is the single
+        # consistent definition) plus the canonical cost vector + provenance.
+        total_tokens = sum_usage(tutor_tokens, student_tokens, scorer_tokens)
         # `tutor`/`student` keep their historical shape and meaning
         # (end-to-end wall-clock seconds per call) so report.py, the paper's
         # figure pipeline and the website refresh script keep working
@@ -863,6 +861,7 @@ def run_cell(
         token_block = {
             "tutor": tutor_tokens,
             "student": student_tokens,
+            "scorer": scorer_tokens,
             "total": total_tokens,
         }
 
@@ -908,9 +907,7 @@ def run_cell(
         tax_usage = (tax or {}).get("usage") or {}
         if tax_usage:
             metrics["tokens"]["taxonomy"] = tax_usage
-            total = metrics["tokens"]["total"]
-            for k in ("input_tokens", "output_tokens", "total_tokens"):
-                total[k] = total.get(k, 0) + int(tax_usage.get(k, 0) or 0)
+            add_usage(metrics["tokens"]["total"], tax_usage)
 
         results.write_summary(run_id, metrics, results_root=results_root)
         run_counts = metrics["run_counts"]

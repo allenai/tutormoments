@@ -127,13 +127,16 @@ def test_imports():
 def test_transcript_defaults():
     """Transcript has sensible defaults."""
     from tutormoments.conversation import Transcript
+    from tutormoments.usage import EMPTY_USAGE
 
     t = Transcript(scenario_id="abc", tutor_model="m")
     assert t.scenario_id == "abc"
     assert t.tutor_model == "m"
     assert t.generated_turns == []
-    assert t.tutor_usage == {"input_tokens": 0, "output_tokens": 0, "total_tokens": 0}
-    assert t.student_usage == {"input_tokens": 0, "output_tokens": 0, "total_tokens": 0}
+    # Zero legacy counters plus the canonical cost vector, all zero.
+    assert t.tutor_usage == EMPTY_USAGE
+    assert t.student_usage == EMPTY_USAGE
+    assert t.tutor_usage is not t.student_usage
     assert t.tutor_latencies == []
     assert t.student_latencies == []
     assert t.completed is False
@@ -235,19 +238,19 @@ def test_split_messages_whitespace_only():
 
 
 def test_add_usage():
-    from tutormoments.conversation import _add_usage
+    from tutormoments.usage import add_usage
 
     total = {"input_tokens": 10, "output_tokens": 5, "total_tokens": 15}
-    _add_usage(total, {"input_tokens": 3, "output_tokens": 2, "total_tokens": 5})
+    add_usage(total, {"input_tokens": 3, "output_tokens": 2, "total_tokens": 5})
     assert total == {"input_tokens": 13, "output_tokens": 7, "total_tokens": 20}
 
 
 def test_add_usage_missing_keys():
     """Missing keys in new dict are treated as 0."""
-    from tutormoments.conversation import _add_usage
+    from tutormoments.usage import add_usage
 
     total = {"input_tokens": 10, "output_tokens": 0, "total_tokens": 10}
-    _add_usage(total, {})
+    add_usage(total, {})
     assert total["input_tokens"] == 10
 
 

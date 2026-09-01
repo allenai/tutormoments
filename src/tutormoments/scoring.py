@@ -19,6 +19,7 @@ from dataclasses import asdict, dataclass, field
 from typing import Any
 
 from tutormoments.resources import resource_text
+from tutormoments.usage import EMPTY_USAGE, add_usage, sum_usage
 
 logger = logging.getLogger(__name__)
 
@@ -261,10 +262,7 @@ def _parse_and_merge(
 
     for conv_id, conv_data in detections_by_conv.items():
         detections = conv_data.get("detections", [])
-        p1_usage = conv_data.get(
-            "usage", {"input_tokens": 0, "output_tokens": 0, "total_tokens": 0}
-        )
-        total_usage = dict(p1_usage)
+        total_usage = sum_usage(conv_data.get("usage", {}))
 
         annotations = []
         for idx, det in enumerate(detections):
@@ -284,11 +282,7 @@ def _parse_and_merge(
                     }
                 )
 
-                p2_usage = a.get("_usage", {})
-                for field in ("input_tokens", "output_tokens", "total_tokens"):
-                    total_usage[field] = total_usage.get(field, 0) + p2_usage.get(
-                        field, 0
-                    )
+                add_usage(total_usage, a.get("_usage", {}))
             else:
                 annotations.append(
                     {
@@ -340,13 +334,7 @@ class Annotation:
     action_decomposed: list  # action decomposition phrases
     overscaffold_decomposed: list  # over-scaffolding decomposition phrases
     action_label: str  # "scaffolding" | "rigor" | "both" | "neither" | "unclear"
-    usage: dict = field(
-        default_factory=lambda: {
-            "input_tokens": 0,
-            "output_tokens": 0,
-            "total_tokens": 0,
-        }
-    )
+    usage: dict = field(default_factory=lambda: dict(EMPTY_USAGE))
 
     def to_dict(self) -> dict[str, Any]:
         """Return all fields as a plain dict."""
@@ -747,17 +735,6 @@ def _parse_result_label(text: str) -> tuple:
     return "unclear", True
 
 
-def _sum_usage(*usages: dict) -> dict:
-    """Sum input/output/total tokens across N usage dicts."""
-    out = {"input_tokens": 0, "output_tokens": 0, "total_tokens": 0}
-    for u in usages:
-        if not isinstance(u, dict):
-            continue
-        for k in out:
-            out[k] += int(u.get(k, 0) or 0)
-    return out
-
-
 def _build_structure_entries(
     results: dict,
     target: str = "scaffolding",
@@ -852,8 +829,6 @@ def score_batch(pairs: "list[tuple[Any, Any]]") -> "dict[str, Annotation]":
 
     client = ModelClient(scorer_model)
 
-    _ZERO = {"input_tokens": 0, "output_tokens": 0, "total_tokens": 0}
-
     # -------------------------------------------------------------------------
     # Build synthetic conversations + detections, merged across all pairs
     # -------------------------------------------------------------------------
@@ -876,7 +851,7 @@ def score_batch(pairs: "list[tuple[Any, Any]]") -> "dict[str, Annotation]":
                 action_decomposed=[],
                 overscaffold_decomposed=[],
                 action_label=DEFAULT_ACTION_LABEL,
-                usage=dict(_ZERO),
+                usage=dict(EMPTY_USAGE),
             )
             continue
         conversations.update(conv_dict)
@@ -885,7 +860,7 @@ def score_batch(pairs: "list[tuple[Any, Any]]") -> "dict[str, Annotation]":
     if not detections:
         return annotations_out
 
-    usage_by_sid = {sid: dict(_ZERO) for sid in detections}
+    usage_by_sid = {sid: dict(EMPTY_USAGE) for sid in detections}
 
     # -------------------------------------------------------------------------
     # Pass 1: Annotate (one pooled batch)
@@ -908,9 +883,7 @@ def score_batch(pairs: "list[tuple[Any, Any]]") -> "dict[str, Annotation]":
 
     for sid, conv_data in parsed.items():
         if sid in usage_by_sid:
-            usage_by_sid[sid] = _sum_usage(
-                usage_by_sid[sid], conv_data.get("usage", {})
-            )
+            usage_by_sid[sid] = sum_usage(usage_by_sid[sid], conv_data.get("usage", {}))
 
     # Build the results shape expected by _build_decompose_entries /
     # _build_structure_entries: {sid: {"annotations": [ann_dict, ...]}}
@@ -965,7 +938,7 @@ def score_batch(pairs: "list[tuple[Any, Any]]") -> "dict[str, Annotation]":
             key = entry["key"]
             raw = decompose_raw.get(key, {})
             if conv_id in usage_by_sid:
-                usage_by_sid[conv_id] = _sum_usage(
+                usage_by_sid[conv_id] = sum_usage(
                     usage_by_sid[conv_id], raw.get("usage", {})
                 )
             text = raw.get("text", "")
@@ -1035,7 +1008,7 @@ def score_batch(pairs: "list[tuple[Any, Any]]") -> "dict[str, Annotation]":
             except ValueError:
                 continue
             if conv_id in usage_by_sid:
-                usage_by_sid[conv_id] = _sum_usage(
+                usage_by_sid[conv_id] = sum_usage(
                     usage_by_sid[conv_id], raw.get("usage", {})
                 )
             label, _ = parse_fn(raw.get("text", ""))

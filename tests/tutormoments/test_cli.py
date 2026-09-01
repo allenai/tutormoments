@@ -332,13 +332,29 @@ def test_run_cell_writes_latency_and_tokens(tmp_path):
 
     scenarios = list(FIXTURE_SCENARIOS)
 
-    # Two transcripts with known latencies and token counts
+    # Two transcripts with known latencies and token counts. The first tutor
+    # usage carries the full canonical vector + provenance (what Phase 1
+    # capture produces); the second is legacy-only, as an old resumed
+    # transcript would be.
     transcripts = [
         _make_transcript(
             "scenario_001",
             tutor_latencies=[1.0, 3.0],
             student_latencies=[0.5],
-            tutor_usage={"input_tokens": 100, "output_tokens": 50, "total_tokens": 150},
+            tutor_usage={
+                "input_tokens": 100,
+                "output_tokens": 50,
+                "total_tokens": 150,
+                "input_uncached": 20,
+                "cache_read": 80,
+                "cache_write": 0,
+                "output": 50,
+                "reasoning": 0,
+                "total": 150,
+                "provider": "anthropic",
+                "model": "claude-opus-4-8",
+                "endpoint": "sync",
+            },
             student_usage={
                 "input_tokens": 80,
                 "output_tokens": 20,
@@ -399,15 +415,39 @@ def test_run_cell_writes_latency_and_tokens(tmp_path):
         f"p95 expected 3.0, got {lat['p95_seconds']}"
     )
 
-    # tokens.total block must be present
+    # tokens block must carry per-role components (tutor/student/scorer/total)
     assert "tokens" in summary, "summary must have 'tokens' key"
-    assert "total" in summary["tokens"], "summary['tokens'] must have 'total' key"
-    tok = summary["tokens"]["total"]
-    assert "total_tokens" in tok, "tokens.total must have total_tokens"
-    # tutor: 150+300=450, student: 100+200=300, total: 750
-    assert tok["total_tokens"] == 750, (
-        f"total_tokens expected 750, got {tok['total_tokens']}"
+    tokens = summary["tokens"]
+    for role in ("tutor", "student", "scorer", "total"):
+        assert role in tokens, f"summary['tokens'] must have '{role}' key"
+    # tutor: 150+300=450, student: 100+200=300 -- legacy totals summed as-is,
+    # never recomputed from input+output.
+    assert tokens["tutor"]["total_tokens"] == 450
+    assert tokens["student"]["total_tokens"] == 300
+    # scorer: the two mocked annotations carry 15 total_tokens each, and the
+    # run total includes them (they were omitted before the cost-tracking fix).
+    assert tokens["scorer"]["total_tokens"] == 30
+    tok = tokens["total"]
+    assert tok["total_tokens"] == 780, (
+        f"total_tokens expected 780 (450+300+30), got {tok['total_tokens']}"
     )
+    # The canonical cost vector's keys survive aggregation to disk.
+    for key in (
+        "input_uncached",
+        "cache_read",
+        "cache_write",
+        "output",
+        "reasoning",
+        "total",
+    ):
+        assert key in tok, f"tokens.total must carry canonical key '{key}'"
+    # ... with the captured values intact (scenario_001's tutor vector), and
+    # provenance preserved when uniform.
+    tutor_tok = tokens["tutor"]
+    assert tutor_tok["cache_read"] == 80
+    assert tutor_tok["input_uncached"] == 20
+    assert tutor_tok["provider"] == "anthropic"
+    assert tutor_tok["endpoint"] == "sync"
 
 
 # ---------------------------------------------------------------------------
