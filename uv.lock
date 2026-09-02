@@ -6,10 +6,10 @@ resolution-markers = [
     "python_full_version >= '3.14' and sys_platform == 'emscripten'",
     "python_full_version >= '3.14' and sys_platform != 'emscripten' and sys_platform != 'win32'",
     "python_full_version >= '3.12' and python_full_version < '3.14' and sys_platform == 'win32'",
-    "python_full_version < '3.12' and sys_platform == 'win32'",
     "python_full_version >= '3.12' and python_full_version < '3.14' and sys_platform == 'emscripten'",
-    "python_full_version < '3.12' and sys_platform == 'emscripten'",
     "python_full_version >= '3.12' and python_full_version < '3.14' and sys_platform != 'emscripten' and sys_platform != 'win32'",
+    "python_full_version < '3.12' and sys_platform == 'win32'",
+    "python_full_version < '3.12' and sys_platform == 'emscripten'",
     "python_full_version < '3.12' and sys_platform != 'emscripten' and sys_platform != 'win32'",
 ]
 
@@ -164,7 +164,7 @@ wheels = [
 
 [[package]]
 name = "anthropic"
-version = "1.0.0"
+version = "1.1.0"
 source = { registry = "https://pypi.org/simple" }
 dependencies = [
     { name = "anyio" },
@@ -175,9 +175,9 @@ dependencies = [
     { name = "sniffio" },
     { name = "typing-extensions" },
 ]
-sdist = { url = "https://files.pythonhosted.org/packages/25/aa/4978e58035bd6c638c7b483450a68b7ef2d732ab78885e27bb9db0cff1a2/anthropic-1.0.0.tar.gz", hash = "sha256:42be3c97604af7252c5898413aee076ace6c46e9bca0d0d90ceb77c7d3719027", size = 1077769, upload-time = "2026-08-20T19:59:00.565Z" }
+sdist = { url = "https://files.pythonhosted.org/packages/c6/40/8249e272c9bba8b4b5802f90717fcdb55996da243a712dca449f2d81c95b/anthropic-1.1.0.tar.gz", hash = "sha256:03d180143ca61177772a35350c78e6ff975b636fd226d221b122b1595f284f3e", size = 1132609, upload-time = "2026-08-26T17:14:53.335Z" }
 wheels = [
-    { url = "https://files.pythonhosted.org/packages/ad/5b/db4a854aebf5d33a5ab714c46af6eb85ee44f390ed29b7b325c00b9f11ed/anthropic-1.0.0-py3-none-any.whl", hash = "sha256:32dd52e9e1d774393b27182f451398ba4262287a4d0eab30887f89f1481b3ae4", size = 1171725, upload-time = "2026-08-20T19:58:58.725Z" },
+    { url = "https://files.pythonhosted.org/packages/93/9a/37a5d1913434913ed89bef960693870a1dd9478e76fd12e7b9f2c066270a/anthropic-1.1.0-py3-none-any.whl", hash = "sha256:babf7b217a6f289059a25ba4871c167411c747bbf233a4f1fb8ececc8a22f875", size = 1289646, upload-time = "2026-08-26T17:14:51.773Z" },
 ]
 
 [[package]]
@@ -204,30 +204,30 @@ wheels = [
 
 [[package]]
 name = "boto3"
-version = "1.43.77"
+version = "1.43.81"
 source = { registry = "https://pypi.org/simple" }
 dependencies = [
     { name = "botocore" },
     { name = "jmespath" },
     { name = "s3transfer" },
 ]
-sdist = { url = "https://files.pythonhosted.org/packages/3c/6b/45cbf87e918e8a970b83feca75148787e084e60cad1de791cd2da089c926/boto3-1.43.77.tar.gz", hash = "sha256:790082cca710ce8b49b69960731df49fa7cef709823c162e4697412f35d6c813", size = 112639, upload-time = "2026-08-21T03:46:43.044Z" }
+sdist = { url = "https://files.pythonhosted.org/packages/60/41/7ac74a53ca5f59875324394e219f4494309c513df6d05bed9ac4c6c82a1f/boto3-1.43.81.tar.gz", hash = "sha256:62ecf695088e06f37500d6cc49a240dc1331379bd5ae992d185fef212038ca29", size = 112699, upload-time = "2026-08-26T19:42:56.662Z" }
 wheels = [
-    { url = "https://files.pythonhosted.org/packages/9f/e1/d0ddad94091eae29b14d974d02fd6f30e7dfca71e36bc0484d64f921dc0f/boto3-1.43.77-py3-none-any.whl", hash = "sha256:3be161c9edf7645ba09651a442899b5fda9a7e5529f94eb4d9e2a276f1fc1208", size = 140028, upload-time = "2026-08-21T03:46:40.987Z" },
+    { url = "https://files.pythonhosted.org/packages/4a/b5/5dff3a52a7882a94537112ecd167f81d8384964c28833f03737a2375a64e/boto3-1.43.81-py3-none-any.whl", hash = "sha256:6e24f98974400a3845223bba77f457be92517f78e2cffadfa273e18ea1fe1944", size = 140025, upload-time = "2026-08-26T19:42:54.996Z" },
 ]
 
 [[package]]
 name = "botocore"
-version = "1.43.78"
+version = "1.43.83"
 source = { registry = "https://pypi.org/simple" }
 dependencies = [
     { name = "jmespath" },
     { name = "python-dateutil" },
     { name = "urllib3" },
 ]
-sdist = { url = "https://files.pythonhosted.org/packages/67/71/490aaa384855bf3b69405ded52ae77a0e5f4eeb2165044fa65466c4d3a73/botocore-1.43.78.tar.gz", hash = "sha256:e8238d22c1e1342025d75d2e33d154a375e7caad0fc67f77d77faa2d82668b94", size = 15982895, upload-time = "2026-08-21T19:37:32.402Z" }
+sdist = { url = "https://files.pythonhosted.org/packages/ed/6f/cf16418004c832e6eb9abc6905fa323a3bf96a76ca7f2e97858801a4103e/botocore-1.43.83.tar.gz", hash = "sha256:d9389b3b74400c34219965a2fb858c1d48744718865ee0496fd03bd5b21b943f", size = 16010078, upload-time = "2026-08-28T19:35:46.211Z" }
 wheels = [
-    { url = "https://files.pythonhosted.org/packages/c5/5b/b7c5c22767c0e8eb4bb2bd0a972d77bd0be3dd9908e15d4487094a31fa4b/botocore-1.43.78-py3-none-any.whl", hash = "sha256:ddd020493235e264b3bd12606f239a3d3b2dd7cfb1d25a0691061183c290c228", size = 15677214, upload-time = "2026-08-21T19:37:28.894Z" },
+    { url = "https://files.pythonhosted.org/packages/98/50/332d6713fa09b05ff0882f5d194569fa70d1c8735aca9829b1286fef32ba/botocore-1.43.83-py3-none-any.whl", hash = "sha256:bf75a6cf587c22d968e43e79fe122c39f82deafbe9c3422bc5d3e80b6210fc98", size = 15704489, upload-time = "2026-08-28T19:35:40.603Z" },
 ]
 
 [[package]]
@@ -817,7 +817,7 @@ requests = [
 
 [[package]]
 name = "google-genai"
-version = "2.19.0"
+version = "2.20.0"
 source = { registry = "https://pypi.org/simple" }
 dependencies = [
     { name = "anyio" },
@@ -831,9 +831,9 @@ dependencies = [
     { name = "typing-extensions" },
     { name = "websockets" },
 ]
-sdist = { url = "https://files.pythonhosted.org/packages/37/1a/a834dfed90cf32dba900b533a1d14dcdefbda398bda5661d2a5a60fdc9fc/google_genai-2.19.0.tar.gz", hash = "sha256:d8f4126643793a7de230c396bcd142d21c948c8bb57507580e152549a7a41d9d", size = 659496, upload-time = "2026-08-19T23:05:43.276Z" }
+sdist = { url = "https://files.pythonhosted.org/packages/87/dd/eacd43097318ea6b3e648862713a964d5de261a2eabcc7826db9b9de9758/google_genai-2.20.0.tar.gz", hash = "sha256:d382186f024e9050a7a4b25af6eacba9aa16c6e09594f5d1b530f22ff7f9d76f", size = 664965, upload-time = "2026-08-25T21:28:27.136Z" }
 wheels = [
-    { url = "https://files.pythonhosted.org/packages/01/e8/de0accd8cd004cf11252ca53fc5c3dda59bcf1856abfc7609842ceba7363/google_genai-2.19.0-py3-none-any.whl", hash = "sha256:36e0326dd886b52ef765be4c46042732b46b21f637abbe060e3db7c3de23974c", size = 1051056, upload-time = "2026-08-19T23:05:41.462Z" },
+    { url = "https://files.pythonhosted.org/packages/ae/a7/a979230234c9df019e008085c923726dc4d92c14a5701ad698e369c9ab2a/google_genai-2.20.0-py3-none-any.whl", hash = "sha256:49bddeccd29a4e6bf1706c5de67735f7115f537f08b6c36a70b8023c99399095", size = 1064276, upload-time = "2026-08-25T21:28:25.287Z" },
 ]
 
 [[package]]
@@ -1647,7 +1647,7 @@ wheels = [
 
 [[package]]
 name = "openai"
-version = "3.3.1"
+version = "3.4.0"
 source = { registry = "https://pypi.org/simple" }
 dependencies = [
     { name = "anyio" },
@@ -1657,9 +1657,9 @@ dependencies = [
     { name = "sniffio" },
     { name = "typing-extensions" },
 ]
-sdist = { url = "https://files.pythonhosted.org/packages/7d/9c/ba0c292b4032ede74c249ca314ad64eb1bb5a03a843f6e01facb02f80cd8/openai-3.3.1.tar.gz", hash = "sha256:6f22807de1a976c932cecda620e8172a8c3fdbaeed29c7f21564e0c2410edf56", size = 1282113, upload-time = "2026-08-19T16:31:35.006Z" }
+sdist = { url = "https://files.pythonhosted.org/packages/70/2b/1a90f5383fe2ee218a9b1bf2aea7bee19ec321936196aadc336f0fb5c17d/openai-3.4.0.tar.gz", hash = "sha256:6b946c2aef1965559ec2de4e28b56ea278a985ac428369e3aefa6e6a5334b4dc", size = 1355398, upload-time = "2026-08-26T21:49:33.068Z" }
 wheels = [
-    { url = "https://files.pythonhosted.org/packages/6a/db/2b7a1b3de659bb82aef979116c74e809982b13e42c057759767552b5155f/openai-3.3.1-py3-none-any.whl", hash = "sha256:9652df7fdf8ee6f5bd58e0a12f2b1d414a18e0f06bb7a9a57c8643a5f5469bd3", size = 1690337, upload-time = "2026-08-19T16:31:32.812Z" },
+    { url = "https://files.pythonhosted.org/packages/06/ff/c4c6b62ad0886916776936805cf0d5075be28a48ab267329affdb60790f9/openai-3.4.0-py3-none-any.whl", hash = "sha256:b641bb1e5a9d977530f451bdc8d01e8f4b23df395d49e5428f8fdbce07ac14f0", size = 1697926, upload-time = "2026-08-26T21:49:31.103Z" },
 ]
 
 [[package]]
