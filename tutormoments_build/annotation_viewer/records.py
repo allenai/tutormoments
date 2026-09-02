@@ -2,9 +2,9 @@
 
 One line of the export is one moment with every annotation saved against it, or a
 "no key moments" verdict on a whole transcript. What the viewer needs from that is
-per moment: the latest pass of each role, each pass reduced to its coarse axes,
-where the two passes differ, and where the moment actually sits in the transcript
-once a reannotator has moved its boundaries.
+per moment: the latest pass of every rater who worked it, each pass reduced to its
+coarse axes, where the two passes differ, and where the moment actually sits in the
+transcript once a reannotator has moved its boundaries.
 """
 
 import json
@@ -29,25 +29,61 @@ def read_records(path):
     ]
 
 
-def latest_by_role(annotations):
-    """The newest pass of each role.
+def latest_passes(annotations):
+    """The newest pass of every rater on a moment, in the order the card shows them.
 
     Re-saving appends a revision rather than replacing one, so only the highest
-    revision of a role is that rater's standing judgment. Ties break on the save
-    time, which matters only for exports where revisions were not bumped.
+    revision a rater filed is their standing judgment. Ties break on the save time,
+    which matters only for exports where revisions were not bumped.
+
+    Keyed by rater rather than by role alone: a moment can go to two adjudicators, and
+    keying on the role would let the second one quietly replace the first instead of
+    standing beside it.
+
+    Within a role they come in the order they first ruled, so the card can number two
+    adjudicators 1 and 2. That order is taken from the first pass a rater filed and not
+    the one that stands, so revising a judgment does not renumber the columns.
     """
     newest = {}
+    first_ruled = {}
     for a in annotations:
         role = a.get("role")
         if role not in axes_mod.ROLES:
             continue
-        prior = newest.get(role)
+        key = (role, a["annotator_id"])
+        created = a["created_at"] or ""
+        first_ruled[key] = min(first_ruled.get(key, created), created)
+        prior = newest.get(key)
         if prior is None or (a["revision"], a["created_at"]) > (
             prior["revision"],
             prior["created_at"],
         ):
-            newest[role] = a
-    return newest
+            newest[key] = a
+    return [
+        newest[key]
+        for key in sorted(
+            newest, key=lambda k: (axes_mod.ROLES.index(k[0]), first_ruled[k], k[1])
+        )
+    ]
+
+
+def by_role(passes):
+    """The passes of each role, in filing order. Only adjudicators run to more than one."""
+    grouped = {role: [] for role in axes_mod.ROLES}
+    for pass_ in passes:
+        grouped[pass_["role"]].append(pass_)
+    return grouped
+
+
+def _sole(grouped, role):
+    """The pass that anchors agreement for a role filed once per moment.
+
+    Selection and reannotation are single-rater passes -- the first pass and the second
+    pass are exactly what agreement is measured between. Were an export ever to carry
+    two of either, the earlier one anchors the comparison and both still get a column.
+    """
+    passes = grouped[role]
+    return passes[0] if passes else None
 
 
 def _name(row):
@@ -99,10 +135,8 @@ def _observations(role, payload):
     return ((source or {}).get("other_observations") or "").strip()
 
 
-def _outcome(passes):
+def _outcome(first, second):
     """How the second pass came out, or that there was not one."""
-    first = passes.get("selector")
-    second = passes.get("reannotator")
     if first is None or second is None or first["axes"] is None:
         return SINGLE_PASS
     if second["axes"] is None:
@@ -112,13 +146,18 @@ def _outcome(passes):
     )
 
 
-def _meta(passes):
-    """The reannotator's (else adjudicator's) meta block, which moves boundaries."""
+def _meta(grouped):
+    """The reannotator's (else an adjudicator's) meta block, which moves boundaries.
+
+    Where two adjudicators ruled, the first of them to record a block is the one whose
+    boundaries stand -- the same reading as before, which is that the earliest later
+    pass carrying one wins.
+    """
     for role in ("reannotator", "adjudicator"):
-        pass_ = passes.get(role)
-        meta = (pass_ or {}).get("payload", {}).get("meta")
-        if meta:
-            return meta
+        for pass_ in grouped[role]:
+            meta = pass_.get("payload", {}).get("meta")
+            if meta:
+                return meta
     return {}
 
 
@@ -130,7 +169,7 @@ def _span(source, suffix):
     return {f"{edge}_{suffix}": source[f"{edge}_{suffix}"] for edge in _SPAN}
 
 
-def _boundaries(moment, passes):
+def _boundaries(moment, grouped):
     """Where the moment sits now, and where it sat before a reannotator moved it.
 
     Both are in the dialogue turn numbering the export records and the cards print.
@@ -141,7 +180,7 @@ def _boundaries(moment, passes):
     moment row, so the moved boundaries live in their meta block -- and only the edges
     that actually moved are named there.
     """
-    meta = _meta(passes)
+    meta = _meta(grouped)
     original = _span(moment, "turn")
     moved = dict(original)
     if meta.get("changed_boundaries"):
@@ -158,13 +197,14 @@ def _move(moved, meta, edge):
         moved[f"{edge}_turn"] = meta[f"new_{edge}_turn"]
 
 
-def _thrown_out(moment, passes):
+def _thrown_out(moment, grouped):
     """Whether any later pass marked the moment for removal."""
     if moment.get("status") == "thrown_out":
         return True
     return any(
-        (passes.get(role) or {}).get("payload", {}).get("meta", {}).get("throw_out")
+        (pass_.get("payload", {}).get("meta") or {}).get("throw_out")
         for role in ("reannotator", "adjudicator")
+        for pass_ in grouped[role]
     )
 
 
@@ -181,11 +221,12 @@ def build_moments(records, excluded=()):
             for a in record.get("annotations") or []
             if a["annotator_id"] not in excluded
         ]
-        passes = {role: _pass(a) for role, a in latest_by_role(kept).items()}
+        passes = [_pass(a) for a in latest_passes(kept)]
         if not passes:
             continue
-        first, second = passes.get("selector"), passes.get("reannotator")
-        moved, original = _boundaries(moment, passes)
+        grouped = by_role(passes)
+        first, second = _sole(grouped, "selector"), _sole(grouped, "reannotator")
+        moved, original = _boundaries(moment, grouped)
         moments.append(
             {
                 "id": moment["moment_id"],
@@ -200,9 +241,9 @@ def build_moments(records, excluded=()):
                 or moment.get("created_by")
                 or "",
                 "is_test": int(moment.get("is_test") or 0),
-                "passes": [passes[role] for role in axes_mod.ROLES if role in passes],
-                "outcome": _outcome(passes),
-                "thrown_out": _thrown_out(moment, passes),
+                "passes": passes,
+                "outcome": _outcome(first, second),
+                "thrown_out": _thrown_out(moment, grouped),
                 "boundaries": moved,
                 "original_boundaries": original,
                 "diff": sorted(

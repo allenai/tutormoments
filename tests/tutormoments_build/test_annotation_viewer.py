@@ -21,7 +21,7 @@ from tutormoments_build.annotation_viewer import (
     build_site,
     coarse_axes,
     diff_axes,
-    latest_by_role,
+    latest_passes,
     locate_span,
     no_key_moment_verdicts,
     sar_of,
@@ -254,9 +254,14 @@ class TestAxisPairs:
         assert pairs["scaffolding_present"] == [True, False]
 
 
-class TestLatestByRole:
-    def test_keeps_the_highest_revision_of_each_role(self):
-        passes = latest_by_role(
+def whos_who(passes):
+    """Each pass as (role, rater), which is what the columns of a card come down to."""
+    return [(p["role"], p["annotator_id"]) for p in passes]
+
+
+class TestLatestPasses:
+    def test_keeps_the_highest_revision_of_each_rater(self):
+        passes = latest_passes(
             [
                 annotation(
                     "a", "selector", revision=1, situation=situation(why="first")
@@ -267,11 +272,11 @@ class TestLatestByRole:
                 annotation("b", "reannotator", revision=1),
             ]
         )
-        assert passes["selector"]["payload"]["situation"]["why"] == "second"
-        assert set(passes) == {"selector", "reannotator"}
+        assert passes[0]["payload"]["situation"]["why"] == "second"
+        assert whos_who(passes) == [("selector", "a"), ("reannotator", "b")]
 
     def test_breaks_ties_on_save_time(self):
-        passes = latest_by_role(
+        passes = latest_passes(
             [
                 annotation(
                     "a",
@@ -287,10 +292,49 @@ class TestLatestByRole:
                 ),
             ]
         )
-        assert passes["selector"]["payload"]["situation"]["why"] == "late"
+        assert passes[0]["payload"]["situation"]["why"] == "late"
+
+    def test_two_adjudicators_stand_side_by_side_in_the_order_they_ruled(self):
+        # Keying on the role alone made the later adjudicator replace the earlier one,
+        # which took a real second opinion out of the page without saying so.
+        passes = latest_passes(
+            [
+                annotation("tara", "adjudicator", created_at="2026-08-05T00:00:00Z"),
+                annotation("a", "selector"),
+                annotation("erika", "adjudicator", created_at="2026-08-03T00:00:00Z"),
+            ]
+        )
+        assert whos_who(passes) == [
+            ("selector", "a"),
+            ("adjudicator", "erika"),
+            ("adjudicator", "tara"),
+        ]
+
+    def test_one_adjudicators_revisions_do_not_displace_the_other(self):
+        passes = latest_passes(
+            [
+                annotation(
+                    "erika",
+                    "adjudicator",
+                    revision=1,
+                    created_at="2026-08-03T00:00:00Z",
+                    rationale="first go",
+                ),
+                annotation(
+                    "erika",
+                    "adjudicator",
+                    revision=2,
+                    created_at="2026-08-06T00:00:00Z",
+                    rationale="revised",
+                ),
+                annotation("tara", "adjudicator", created_at="2026-08-05T00:00:00Z"),
+            ]
+        )
+        assert whos_who(passes) == [("adjudicator", "erika"), ("adjudicator", "tara")]
+        assert passes[0]["payload"]["rationale"] == "revised"
 
     def test_ignores_roles_the_viewer_does_not_render(self):
-        assert latest_by_role([annotation("a", "spectator")]) == {}
+        assert latest_passes([annotation("a", "spectator")]) == []
 
 
 class TestBuildMoments:
@@ -581,6 +625,148 @@ class TestAdjudicatorPasses:
         assert adjudicator["untouched"] is None
         assert adjudicator["labelled"]["axes"] is not None
         assert adjudicator["thrown"]["axes"] is None
+
+    def test_a_re_saving_adjudicator_is_one_adjudicator_not_two(self):
+        """What the page's singly/doubly adjudicated counts slice on: how many
+        adjudicators ruled, which is a count of raters and not of saved passes.
+
+        Doubly adjudicated moments are the only place two raters answered the same
+        questions in the same role, so they are what adjudicator agreement is measured
+        on. Counting one rater's revision as a second adjudicator would put a moment
+        nobody disagreed on into that set.
+        """
+        moments = build_moments(
+            [
+                record(
+                    [
+                        annotation("a", "selector", **judged()),
+                        annotation(
+                            "erika",
+                            "adjudicator",
+                            revision=1,
+                            created_at="2026-08-03T00:00:00Z",
+                            final=judged(),
+                            meta={},
+                        ),
+                        annotation(
+                            "erika",
+                            "adjudicator",
+                            revision=2,
+                            created_at="2026-08-03T00:05:00Z",
+                            final=judged(),
+                            meta={},
+                        ),
+                    ],
+                    moment_id="re-saved",
+                ),
+                record(
+                    [
+                        annotation("a", "selector", **judged()),
+                        annotation(
+                            "erika",
+                            "adjudicator",
+                            created_at="2026-08-03T00:00:00Z",
+                            final=judged(),
+                            meta={},
+                        ),
+                        annotation(
+                            "tara",
+                            "adjudicator",
+                            created_at="2026-08-04T00:00:00Z",
+                            final=judged(),
+                            meta={},
+                        ),
+                    ],
+                    moment_id="two-raters",
+                ),
+            ]
+        )
+        adjudicators = {
+            m["id"]: [p for p in m["passes"] if p["role"] == "adjudicator"]
+            for m in moments
+        }
+        assert len(adjudicators["re-saved"]) == 1
+        assert adjudicators["re-saved"][0]["revision"] == 2
+        assert len(adjudicators["two-raters"]) == 2
+
+
+class TestTwoAdjudicators:
+    """Most adjudicated moments went to two adjudicators, so the card is four columns
+    wide: the two passes, then each adjudicator's own call."""
+
+    def _moments(self, second_adjudicator):
+        return build_moments(
+            [
+                record(
+                    [
+                        annotation("a", "selector", **judged()),
+                        annotation("b", "reannotator", **judged()),
+                        annotation(
+                            "erika",
+                            "adjudicator",
+                            created_at="2026-08-03T00:00:00Z",
+                            final=judged(),
+                            rationale="kept the first read",
+                            meta={},
+                        ),
+                        second_adjudicator,
+                    ]
+                )
+            ]
+        )
+
+    def _tara(self, **payload):
+        return annotation(
+            "tara", "adjudicator", created_at="2026-08-04T00:00:00Z", **payload
+        )
+
+    def test_both_adjudicators_get_a_column_in_the_order_they_ruled(self):
+        moment = self._moments(self._tara(final=judged(), meta={}))[0]
+        assert whos_who(moment["passes"]) == [
+            ("selector", "a"),
+            ("reannotator", "b"),
+            ("adjudicator", "erika"),
+            ("adjudicator", "tara"),
+        ]
+
+    def test_each_adjudicator_keeps_their_own_judgment_and_rationale(self):
+        # The point of showing both: where two adjudicators split, the page has to say
+        # so rather than picking one of them to be the final call.
+        moment = self._moments(
+            self._tara(
+                final=judged(situation=situation(rigor=True)),
+                rationale="read the rigor the other way",
+                meta={},
+            )
+        )[0]
+        erika, tara = moment["passes"][2], moment["passes"][3]
+        assert erika["axes"]["rigor_appropriate"] is False
+        assert tara["axes"]["rigor_appropriate"] is True
+        assert erika["rationale"] == "kept the first read"
+        assert tara["rationale"] == "read the rigor the other way"
+
+    def test_agreement_is_still_measured_between_the_first_two_passes(self):
+        # Adjudication settles a moment; it is not a third rater to pool into kappa.
+        moment = self._moments(
+            self._tara(final=judged(situation=situation(rigor=True)), meta={})
+        )[0]
+        assert moment["outcome"] == "agreement"
+        assert moment["diff"] == []
+        assert moment["pairs"]["rigor_appropriate"] == [False, False]
+
+    def test_either_adjudicator_can_mark_the_moment_for_removal(self):
+        moment = self._moments(self._tara(final={}, meta={"throw_out": True}))[0]
+        assert moment["thrown_out"] is True
+        assert moment["passes"][3]["axes"] is None
+
+    def test_the_second_adjudicator_can_be_the_one_who_moved_the_boundaries(self):
+        moment = self._moments(
+            self._tara(
+                final=judged(), meta={"changed_boundaries": True, "new_end_turn": 18}
+            )
+        )[0]
+        assert moment["boundaries"]["end_turn"] == 18
+        assert moment["original_boundaries"]["end_turn"] == 20
 
 
 class TestNoKeyMomentVerdicts:

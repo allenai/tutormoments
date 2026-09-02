@@ -2,8 +2,9 @@
 
 The page browses one transcript at a time, filtered by annotator, construct, outcome and
 date, alongside distribution analytics for whatever the filters select and an agreement
-table over the whole export. It reads a pair of exported JSONL files instead of the
-annotation platform's database, and needs no server.
+table -- over the whole export, or over one rater's moments when the annotator filter
+names one. It reads a pair of exported JSONL files instead of the annotation platform's
+database, and needs no server.
 
 Maintainer-only. The generated page carries real annotator names and student transcript
 text, so it is written under `data/` (gitignored) and must never be committed or shared.
@@ -25,7 +26,8 @@ from tutormoments_build.annotation_viewer.records import (
     THROWN_OUT,
     annotator_roster,
     build_moments,
-    latest_by_role,
+    by_role,
+    latest_passes,
     no_key_moment_verdicts,
     read_records,
 )
@@ -49,9 +51,10 @@ __all__ = [
     "build_moments",
     "build_payload",
     "build_site",
+    "by_role",
     "coarse_axes",
     "diff_axes",
-    "latest_by_role",
+    "latest_passes",
     "locate_span",
     "no_key_moment_verdicts",
     "read_records",

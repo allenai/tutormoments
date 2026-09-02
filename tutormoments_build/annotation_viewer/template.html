@@ -198,13 +198,15 @@
   .colhead {
     display: grid; border-bottom: 1px solid rgba(0, 0, 0, .06); align-items: end; gap: 14px; padding: 0 0 7px;
   }
-  .ch { display: flex; flex-direction: column; gap: 2px; font-size: 12px; }
+  /* min-width: 0 on the grid items: a card with two adjudicators is four columns wide,
+     and without it a long annotator name would widen its column instead of ellipsing. */
+  .ch { display: flex; flex-direction: column; gap: 2px; min-width: 0; font-size: 12px; }
   .ch .pass { font-weight: 600; }
   .ch .pass.final { color: var(--primary); }
   .ch .meta { color: var(--muted); font-size: 11px; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
   .row { display: grid; border-bottom: 1px solid rgba(0, 0, 0, .06); align-items: start; gap: 14px; padding: 8px 0; }
   .row .k { letter-spacing: .06em; color: var(--muted); padding-top: 3px; font-size: 10px; font-weight: 700; }
-  .cell { display: flex; flex-wrap: wrap; align-items: center; gap: 5px; }
+  .cell { display: flex; flex-wrap: wrap; align-items: center; gap: 5px; min-width: 0; }
   .cell .none { color: var(--faint); font-size: 11.5px; font-style: italic; }
   .chip {
     color: var(--muted); background: #f2f3f5; border-radius: 20px; align-items: center; gap: 4px;
@@ -246,7 +248,7 @@
   .adj .adj-why { white-space: pre-wrap; }
   .adj .secondary-tags { margin-top: 6px; }
   .why-cols { display: grid; gap: 14px; margin-top: 6px; }
-  .why-col { color: var(--text); white-space: pre-wrap; font-size: 12px; }
+  .why-col { color: var(--text); white-space: pre-wrap; overflow-wrap: anywhere; min-width: 0; font-size: 12px; }
   .why-none { color: var(--faint); }
   .no-key { color: var(--muted); font-size: 12.5px; margin: 6px 0 10px; }
   .no-key .who { color: var(--ink); font-weight: 600; }
@@ -331,6 +333,15 @@ const REPORTED_AXES = AXES.filter((a) => a.reported);
 const CONSTRUCTS = ["sit", "act", "res"];
 const CONSTRUCT_LABEL = { sit: "SIT", act: "ACT", res: "RES" };
 const PASS_LABEL = { selector: "Selector", reannotator: "Reannotator", adjudicator: "Adjudicator (final)" };
+
+/** The column heading for one pass.
+ *
+ *  Two adjudicators on a moment are numbered in the order they ruled: neither of them
+ *  is "the" final call, and telling the two apart is the point of showing both. */
+function passLabel(pass, v) {
+  if (pass.role !== "adjudicator" || v.adjudicators.length < 2) return PASS_LABEL[pass.role];
+  return `Adjudicator ${v.adjudicators.indexOf(pass) + 1}`;
+}
 const SINGLE_PASS = "single pass";
 
 const TRANSCRIPTS = new Map(DATA.transcripts.map((t) => [t.transcript_id, t]));
@@ -371,12 +382,19 @@ function view(moment) {
   if (state.excludeTesters && moment.is_test) return null;
   if (!passes.length) return null;
   const byRole = {};
-  for (const p of passes) byRole[p.role] = p;
+  const adjudicators = [];
+  for (const p of passes) {
+    // A moment can go to two adjudicators, so they are a list; the other roles are
+    // one pass each and stay addressable by name.
+    if (p.role === "adjudicator") adjudicators.push(p);
+    else byRole[p.role] = p;
+  }
   const bothPasses = !!byRole.selector && !!byRole.reannotator;
   return {
     moment,
     passes,
     byRole,
+    adjudicators,
     bothPasses,
     outcome: bothPasses ? moment.outcome : SINGLE_PASS,
     diff: new Set(bothPasses ? moment.diff : []),
@@ -415,11 +433,22 @@ function matchesAxis(v) {
  *  tester takes their adjudication out of view with them. */
 function matchesAdjudication(v) {
   if (!state.adjudication) return true;
-  const adj = v.byRole.adjudicator;
-  if (state.adjudication === "none") return !adj;
-  if (!adj) return false;
-  if (state.adjudication === "labels") return !!adj.axes;
-  if (state.adjudication === "thrown") return !adj.axes;
+  const adj = v.adjudicators;
+  if (state.adjudication === "none") return !adj.length;
+  if (!adj.length) return false;
+  // Where two adjudicators ruled they can split on whether the moment survives, so the
+  // two options are read as "anyone left labels" against "everyone removed it" -- which
+  // keeps them a partition of the adjudicated moments rather than double-counting one.
+  if (state.adjudication === "labels") return adj.some((p) => p.axes);
+  if (state.adjudication === "thrown") return adj.every((p) => !p.axes);
+  // How many adjudicators ruled, which is a different cut of the same moments than
+  // what they decided. Doubly adjudicated moments are the only place in the export
+  // where two raters answered the same questions in the same role, so they are the
+  // ones adjudicator agreement can be measured on -- worth being able to see the size
+  // of. "Two or more" rather than exactly two: the export carries no moment with
+  // three, but a later one that did would otherwise fall out of both options.
+  if (state.adjudication === "single") return adj.length === 1;
+  if (state.adjudication === "double") return adj.length >= 2;
   return true;
 }
 
@@ -438,17 +467,37 @@ function selectedViews({ ignoreAdjudication = false } = {}) {
   return out;
 }
 
-/** Moments the agreement table is computed over: everything in the export, narrowed
- *  only by the date range. Kappa is a property of the annotation effort as a whole, so
- *  the annotator and axis filters deliberately leave it alone -- a κ over one rater's
- *  moments, or over the moments already known to disagree on an axis, is not a
- *  reliability estimate and should not move as someone browses. Testers are still
- *  dropped: their passes are not annotation work. */
+/** Whether a rater filed one of the two passes agreement is measured between.
+ *
+ *  Adjudication is not one of them: it settles a moment the two passes split on rather
+ *  than adding a third judgment to pool, so a rater who only adjudicated a moment did
+ *  not take part in the comparison it contributes. */
+function judgedAsComparedPass(v, annotatorId) {
+  return [v.byRole.selector, v.byRole.reannotator]
+    .some((p) => p && p.annotator_id === annotatorId);
+}
+
+/** Moments the agreement table is computed over: everything in the export, narrowed by
+ *  the date range and, with an annotator selected, to the moments they were one of the
+ *  two compared passes on.
+ *
+ *  The two readings are different numbers and the heading says which one is on screen.
+ *  Unfiltered it is the reliability of the annotation effort as a whole. With a rater
+ *  selected it is that rater against whoever sat on the other side of their moments --
+ *  a per-rater read on a much smaller n, useful for spotting someone drifting from the
+ *  rest, not a second estimate of the same quantity.
+ *
+ *  The axis filter still leaves it alone either way: a κ over the moments already known
+ *  to agree or disagree on an axis is not an agreement estimate at all, and would swing
+ *  between 1 and 0 as someone browsed. Testers are dropped: their passes are not
+ *  annotation work. */
 function agreementViews() {
   const out = [];
   for (const moment of DATA.moments) {
     const v = view(moment);
-    if (v && matchesDates(v)) out.push(v);
+    if (!v || !matchesDates(v)) continue;
+    if (state.annotator && !judgedAsComparedPass(v, state.annotator)) continue;
+    out.push(v);
   }
   return out;
 }
@@ -709,8 +758,8 @@ function momentCard(v) {
     : v.outcome));
   card.append(head);
   card.append(el("hr", "m-head-divider"));
-  for (const role of ["reannotator", "adjudicator"]) {
-    const note = v.byRole[role] && metaNote(v.byRole[role]);
+  for (const p of [v.byRole.reannotator, ...v.adjudicators]) {
+    const note = p && metaNote(p);
     if (note) card.append(note);
   }
 
@@ -721,7 +770,7 @@ function momentCard(v) {
   colhead.append(el("div", "k"));
   for (const p of v.passes) {
     const col = el("div", "ch");
-    col.append(el("div", "pass" + (p.role === "adjudicator" ? " final" : ""), PASS_LABEL[p.role]));
+    col.append(el("div", "pass" + (p.role === "adjudicator" ? " final" : ""), passLabel(p, v)));
     col.append(el("div", "meta", `${p.annotator_name} · rev${p.revision} · ${fmtDate(p.created_at)}`));
     colhead.append(col);
   }
@@ -772,8 +821,10 @@ function momentCard(v) {
     cmp.append(row);
   }
   card.append(cmp);
-  const adj = adjudicationNote(v.byRole.adjudicator);
-  if (adj) card.append(adj);
+  for (const p of v.adjudicators) {
+    const note = adjudicationNote(p);
+    if (note) card.append(note);
+  }
   return card;
 }
 
@@ -934,7 +985,7 @@ function analytics(views) {
 }
 
 /** Agreement scores per reported axis, pooled over every moment judged twice in the
- *  date range. See agreementViews for why only the dates narrow it. */
+ *  set agreementViews selects -- the whole export, or one rater's moments. */
 function agreement() {
   const pairs = Object.fromEntries(REPORTED_AXES.map((a) => [a.key, []]));
   let n = 0;
@@ -1025,8 +1076,13 @@ function renderAnalytics(views) {
   body.append(res);
 
   const right = el("div", "an-col");
-  right.append(el("h4", null,
-    `Inter-annotator agreement · judged twice (n=${iaa.n}, date filter only)`));
+  // With a rater selected the table is theirs against whoever sat on the other side of
+  // their moments, so the heading names them rather than leaving a much smaller n
+  // reading as the effort-wide number it is not.
+  const rater = state.annotator ? annotatorName(state.annotator) : "";
+  right.append(el("h4", null, rater
+    ? `Agreement · ${rater} vs. the other pass · judged twice (n=${iaa.n})`
+    : `Inter-annotator agreement · judged twice (n=${iaa.n}, date filter only)`));
   const table = el("table", "agree");
   const thead = el("thead");
   const hrow = el("tr");
@@ -1085,9 +1141,21 @@ function renderAnalytics(views) {
   const scroller = el("div", "table-scroll");
   scroller.append(table);
   right.append(scroller);
-  right.append(el("p", "an-legend-note",
-    "P · R · F1 score the second pass against the first as ground truth, with “axis true” "
-    + "as the positive class."));
+  const note = "P · R · F1 score the second pass against the first as ground truth, with "
+    + "“axis true” as the positive class.";
+  // A rater cuts some of their moments and reviews others, so which side of the
+  // comparison they are on varies within their own table. κ does not care -- it is
+  // symmetric -- but P and R do, and reading them as "how often this rater was right"
+  // would be wrong.
+  right.append(el("p", "an-legend-note", rater
+    ? `${note} Pooled over the moments ${rater} selected or reannotated, so they are the `
+      + "first pass on some and the second on others: κ is symmetric, P · R · F1 are not. "
+      + "The axis filter does not narrow this table."
+    : `${note} The axis filter does not narrow this table.`));
+  if (rater && !iaa.n) {
+    right.append(el("p", "hint",
+      `No moment in range was judged twice with ${rater} as one of the two passes.`));
+  }
   body.append(right);
 }
 
@@ -1217,6 +1285,8 @@ const ADJUDICATION_OPTIONS = [
   ["any", "Adjudicated"],
   ["labels", "Adjudicated · final labels"],
   ["thrown", "Adjudicated · thrown out"],
+  ["single", "Adjudicated · one adjudicator"],
+  ["double", "Adjudicated · two or more adjudicators"],
   ["none", "Not adjudicated"],
 ];
 const adjudicationSelect = $("f-adjudication");
