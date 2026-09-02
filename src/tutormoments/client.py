@@ -11,68 +11,23 @@ from dataclasses import dataclass, field
 from dotenv import load_dotenv
 from google.genai import types
 
+# Model facts (provider routing, per-model caps, pricing) live in the model
+# registry, and thinking params are validated/translated by models.py; the
+# client consumes WireThinking fragments and never interprets thinking
+# settings itself. infer_provider is re-exported because callers historically
+# import it from here.
+from tutormoments.models import (
+    WireThinking,
+    infer_provider,
+    max_output_cap,
+    resolve_thinking,
+)
+
 load_dotenv(override=True)
 
 logger = logging.getLogger(__name__)
 
-# Order matters (first match wins).
-PROVIDER_PREFIXES = [
-    ("gemini", "gemini"),
-    ("gpt", "openai"),
-    ("o1", "openai"),
-    ("o3", "openai"),
-    ("o4", "openai"),
-    ("claude", "anthropic"),
-    ("deepseek-ai/", "together"),
-    ("moonshotai/", "together"),
-    ("minimaxai/", "together"),
-    ("google/gemma", "together"),
-    ("meta-llama/", "together"),
-    ("qwen/", "together"),
-]
-
-
-VISION_CAPABLE_PREFIXES = (
-    "claude-opus-4",
-    "claude-sonnet-4",
-    "claude-sonnet-5",
-    "claude-fable-5",
-    "gemini-2",
-    "gemini-3",
-    "gpt-4o",
-    "gpt-4.1",
-    "gpt-5",
-    "o4",
-)
-
-
-def validate_vision_support(model: str) -> None:
-    """Raise ValueError if the model is not known to support vision input."""
-    m = model.lower()
-    if not any(m.startswith(p) for p in VISION_CAPABLE_PREFIXES):
-        raise ValueError(
-            f"Model '{model}' is not in the vision-capable list. "
-            f"Vision-capable prefixes: {', '.join(VISION_CAPABLE_PREFIXES)}."
-        )
-
-
-def infer_provider(model: str) -> str:
-    """Infer provider from model name string.
-
-    Examples:
-        'gemini-3.1-pro-preview' -> 'gemini'
-        'gpt-4o'               -> 'openai'
-        'o3-mini'              -> 'openai'
-        'claude-sonnet-4-6'    -> 'anthropic'
-    """
-    model_lower = model.lower()
-    for prefix, provider in PROVIDER_PREFIXES:
-        if model_lower.startswith(prefix):
-            return provider
-    raise ValueError(
-        f"Cannot infer provider for model '{model}'. "
-        f"Expected prefix: {', '.join(p for p, _ in PROVIDER_PREFIXES)}"
-    )
+__all__ = ["ModelClient", "ModelResponse", "infer_provider"]
 
 
 @dataclass
@@ -252,43 +207,6 @@ class _InlineThinkGate:
         return False
 
 
-# Adaptive thinking ({"type": "adaptive"}) is the modern default and the shape
-# every current Opus/Sonnet-tier Anthropic model uses. The legacy
-# enabled+budget_tokens shape is needed only by a *closed, frozen set* of
-# pre-adaptive models -- no new model is ever added here. So we default to
-# adaptive and enumerate only the legacy models; a brand-new Anthropic model
-# works with no code change (see README "Running new tutor models"). Legacy
-# enabled+budget is rejected on Opus 4.7+/Sonnet 5/Fable 5. Haiku 4.5 is the
-# one current model still on the legacy shape (extended thinking only, no
-# adaptive support per the Anthropic models overview).
-_ANTHROPIC_LEGACY_THINKING_MODELS = (
-    "claude-3-7-sonnet",
-    "claude-haiku-4-5",
-    "claude-opus-4-0",
-    "claude-opus-4-20250514",
-    "claude-opus-4-1",
-    "claude-opus-4-5",
-    "claude-sonnet-4-0",
-    "claude-sonnet-4-20250514",
-    "claude-sonnet-4-5",
-)
-
-
-def _anthropic_thinking_param(model: str, thinking_budget: int) -> dict:
-    """Return the right `thinking` kwarg shape for the given model.
-
-    Defaults to adaptive ({"type": "adaptive"}), which every current Anthropic
-    model requires. Only the frozen pre-adaptive models in
-    _ANTHROPIC_LEGACY_THINKING_MODELS get the enabled+budget_tokens form.
-    """
-    if model and any(
-        model.startswith(prefix) for prefix in _ANTHROPIC_LEGACY_THINKING_MODELS
-    ):
-        budget = thinking_budget if thinking_budget > 0 else 16384
-        return {"type": "enabled", "budget_tokens": budget}
-    return {"type": "adaptive"}
-
-
 class ModelClient:
     """Provider-agnostic synchronous model client.
 
@@ -346,10 +264,7 @@ class ModelClient:
         json_mode: bool = True,
         max_tokens: int = 0,
         timeout: int = 120,
-        thinking: bool = False,
-        thinking_budget: int = 0,
-        reasoning_effort: str = "",
-        effort: str = "",
+        thinking=None,
         enable_cache: bool = False,
         *,
         output_schema: dict | None = None,
@@ -357,6 +272,14 @@ class ModelClient:
         stream: bool = False,
     ) -> "ModelResponse":
         """Generate a response from the model with retry logic.
+
+        thinking: provider-native thinking params (the same mapping the
+        benchmark_models arms and role blocks state in config). The resolver
+        translates this to the provider's wire shape and rejects malformed or
+        unsupported settings before the retry loop. None means "no stated
+        condition": nothing is sent and nothing is checked -- a path for
+        non-benchmark direct calls only (config-driven callers always pass an
+        explicit mapping).
 
         output_schema: optional JSON Schema for structured output. When set,
         the Anthropic path constrains the response via output_config.format
@@ -376,6 +299,9 @@ class ModelClient:
                 "output_schema is only supported on the anthropic provider"
             )
 
+        # Before the retry loop: a config error must fail once, not 5 times.
+        wire = resolve_thinking(self.model, thinking)
+
         if max_tokens <= 0:
             max_tokens = MAX_OUTPUT_TOKENS.get(self.provider, 8192)
 
@@ -393,8 +319,7 @@ class ModelClient:
                         json_mode,
                         max_tokens,
                         timeout,
-                        thinking,
-                        thinking_budget,
+                        wire,
                         images,
                         cacheable_prefix=cacheable_prefix,
                         stream=stream,
@@ -405,9 +330,7 @@ class ModelClient:
                         json_mode,
                         max_tokens,
                         timeout,
-                        thinking,
-                        thinking_budget,
-                        reasoning_effort=reasoning_effort,
+                        wire,
                         images=images,
                         cacheable_prefix=cacheable_prefix,
                         stream=stream,
@@ -418,10 +341,7 @@ class ModelClient:
                         json_mode,
                         max_tokens,
                         timeout,
-                        thinking,
-                        thinking_budget,
-                        reasoning_effort=reasoning_effort,
-                        effort=effort,
+                        wire,
                         images=images,
                         enable_cache=enable_cache,
                         output_schema=output_schema,
@@ -474,8 +394,7 @@ class ModelClient:
         json_mode,
         max_tokens,
         timeout,
-        thinking=False,
-        thinking_budget=0,
+        wire: WireThinking,
         images=None,
         cacheable_prefix: str | None = None,
         stream: bool = False,
@@ -487,17 +406,8 @@ class ModelClient:
         }
         if json_mode:
             config["response_mime_type"] = "application/json"
-        if thinking:
-            # thinking_budget = -1 means "dynamic" (model self-paces).
-            # 0 = no thinking. Positive = fixed budget. None/unset = default 16384.
-            if thinking_budget is None or thinking_budget == 0:
-                budget = 16384
-            else:
-                budget = thinking_budget  # may be -1 (dynamic) or positive
-            config["thinking_config"] = {
-                "include_thoughts": True,
-                "thinking_budget": budget,
-            }
+        if wire.gemini_thinking_config is not None:
+            config["thinking_config"] = dict(wire.gemini_thinking_config)
 
         # Gemini has no server-side prompt cache wired here; the cacheable
         # head is concatenated into the prompt, which is semantically
@@ -573,9 +483,7 @@ class ModelClient:
         json_mode,
         max_tokens,
         timeout,
-        thinking=False,
-        thinking_budget=0,
-        reasoning_effort: str = "",
+        wire: WireThinking,
         images=None,
         cacheable_prefix: str | None = None,
         stream: bool = False,
@@ -604,8 +512,8 @@ class ModelClient:
         }
         if json_mode:
             kwargs["response_format"] = {"type": "json_object"}
-        if reasoning_effort:
-            kwargs["reasoning_effort"] = reasoning_effort
+        if wire.openai_reasoning_effort:
+            kwargs["reasoning_effort"] = wire.openai_reasoning_effort
 
         if stream:
             return self._stream_openai_compatible(kwargs, inline_think=False)
@@ -721,10 +629,7 @@ class ModelClient:
         json_mode,
         max_tokens,
         timeout,
-        thinking=False,
-        thinking_budget=0,
-        reasoning_effort="",
-        effort="",
+        wire: WireThinking,
         images=None,
         enable_cache=False,
         output_schema: dict | None = None,
@@ -772,13 +677,12 @@ class ModelClient:
         else:
             content = prompt
 
-        # Clamp max_tokens to the model's per-model output cap (Haiku 4.5 and
-        # Sonnet 4.6 max out at 64K -- requests above the cap are rejected).
+        # Clamp max_tokens to the model's per-model output cap (requests above
+        # the cap are rejected by the API; caps live in the model registry).
         capped_max = max_tokens
-        for prefix, cap in _ANTHROPIC_MAX_OUTPUT_CAP.items():
-            if self.model and self.model.startswith(prefix):
-                capped_max = min(capped_max, cap)
-                break
+        cap = max_output_cap(self.model)
+        if cap is not None:
+            capped_max = min(capped_max, cap)
         kwargs = {
             "model": self.model,
             "max_tokens": capped_max,
@@ -787,8 +691,8 @@ class ModelClient:
         }
         if system_parts:
             kwargs["system"] = "\n".join(system_parts)
-        if thinking:
-            kwargs["thinking"] = _anthropic_thinking_param(self.model, thinking_budget)
+        if wire.anthropic_thinking is not None:
+            kwargs["thinking"] = dict(wire.anthropic_thinking)
             if kwargs["thinking"].get("type") == "enabled":
                 # Legacy enabled mode needs max_tokens >= budget + headroom.
                 budget = kwargs["thinking"]["budget_tokens"]
@@ -796,14 +700,14 @@ class ModelClient:
                     kwargs["max_tokens"] = budget + 64
 
         # effort and structured-output format both live under output_config.
-        # effort is only valid on adaptive-thinking models that support it
-        # (Haiku 4.5 400s if effort is sent -- skip there). output_schema
-        # constrains the response via output_config.format (json_schema).
+        # The registry only emits effort for families that support it, so no
+        # per-model exclusions are needed here. output_schema constrains the
+        # response via output_config.format (json_schema).
         # SDK <= 0.71 doesn't expose output_config as a top-level kwarg, so
         # we forward it via extra_body. The server accepts it either way.
         output_config: dict = {}
-        if effort and self.model and not self.model.startswith("claude-haiku-4-5"):
-            output_config["effort"] = effort
+        if wire.anthropic_effort:
+            output_config["effort"] = wire.anthropic_effort
         if output_schema is not None:
             output_config["format"] = {"type": "json_schema", "schema": output_schema}
         if output_config:
@@ -821,6 +725,7 @@ class ModelClient:
             text = _strip_json_fences(text)
 
         usage = _anthropic_usage(response.usage, model=self.model, endpoint="sync")
+        usage["thinking_blocks"] = _count_thinking_blocks(response.content)
         return ModelResponse(text=text, usage=usage)
 
     def _stream_anthropic(self, kwargs: dict, *, json_mode: bool):
@@ -857,6 +762,7 @@ class ModelClient:
             text = _strip_json_fences(text)
 
         usage = _anthropic_usage(message.usage, model=self.model, endpoint="stream")
+        usage["thinking_blocks"] = _count_thinking_blocks(message.content)
         return ModelResponse(
             text=text,
             usage=usage,
@@ -919,9 +825,9 @@ def resolve_max_tokens(client: "ModelClient", max_tokens: int) -> int:
     if max_tokens <= 0:
         max_tokens = MAX_OUTPUT_TOKENS.get(client.provider, 8192)
     model = getattr(client, "model", "") or ""
-    for prefix, cap in _ANTHROPIC_MAX_OUTPUT_CAP.items():
-        if model.startswith(prefix):
-            return min(max_tokens, cap)
+    cap = max_output_cap(model)
+    if cap is not None:
+        return min(max_tokens, cap)
     return max_tokens
 
 
@@ -931,17 +837,6 @@ MAX_OUTPUT_TOKENS = {
     "openai": 128000,
     "anthropic": 128000,
     "together": 16384,  # open-weight reasoners (DeepSeek/Kimi) need room to think
-}
-
-
-# Per-model max output token caps. Requests above the cap are rejected by the
-# API, so this clamps rather than lets the call fail. Keys match by startswith().
-# Verified against the Models API (`client.models.retrieve(id).max_tokens`) on
-# 2026-08-17; re-check there rather than trusting this table if a model 400s on
-# max_tokens. Sonnet 4.6 was previously listed at 64000 and is now 128000, i.e.
-# the provider table's default -- no entry needed.
-_ANTHROPIC_MAX_OUTPUT_CAP = {
-    "claude-haiku-4-5": 64000,
 }
 
 
@@ -1096,11 +991,24 @@ def _openai_style_usage(usage_obj, *, provider: str, model: str, endpoint: str) 
     written = (
         (getattr(details, "cache_write_tokens", 0) or 0) if details is not None else 0
     )
+    # Informational, additive: OpenAI reports its thinking spend as a SUBSET
+    # of completion_tokens under completion_tokens_details.reasoning_tokens.
+    # It is not a separate cost bucket (unlike Gemini's thoughts), so it must
+    # not move into the canonical `reasoning` bucket -- that would
+    # double-count against `output`. `tutormoments smoke` reads it as
+    # wire-level evidence that a reasoning_effort knob actually did something.
+    completion_details = getattr(usage_obj, "completion_tokens_details", None)
+    reasoning_tokens = (
+        (getattr(completion_details, "reasoning_tokens", 0) or 0)
+        if completion_details is not None
+        else 0
+    )
     return {
         "input_tokens": prompt,
         "output_tokens": completion,
         "total_tokens": total,
         "cached_tokens": cached,
+        "reasoning_tokens": reasoning_tokens,
         **normalize_usage(
             provider,
             model,
@@ -1123,10 +1031,14 @@ def _openai_batch_usage(usage: dict, *, model: str) -> dict:
     prompt = usage.get("prompt_tokens", 0) or 0
     completion = usage.get("completion_tokens", 0) or 0
     total = usage.get("total_tokens", 0) or 0
+    reasoning_tokens = (usage.get("completion_tokens_details") or {}).get(
+        "reasoning_tokens", 0
+    ) or 0
     return {
         "input_tokens": prompt,
         "output_tokens": completion,
         "total_tokens": total,
+        "reasoning_tokens": reasoning_tokens,
         **normalize_usage(
             "openai",
             model,
@@ -1190,6 +1102,17 @@ def _gemini_stream_parts(chunk):
     if content is None:
         return []
     return getattr(content, "parts", None) or []
+
+
+def _count_thinking_blocks(content) -> int:
+    """Count thinking blocks in an Anthropic response's content list.
+
+    Anthropic usage carries no separate reasoning-token count, so block
+    presence is the only wire-level evidence that thinking actually happened.
+    Recorded additively as usage["thinking_blocks"]; `tutormoments smoke`
+    reads it to catch silently-ignored thinking knobs.
+    """
+    return sum(1 for block in content if getattr(block, "type", "") == "thinking")
 
 
 def _extract_anthropic_text(content) -> str:
@@ -1428,11 +1351,18 @@ def run_sync_entries(
     entries: list[dict],
     json_mode: bool = True,
     max_tokens: int = 0,
+    thinking=None,
 ) -> dict:
     """Run entries synchronously one at a time.
 
-    Returns {key: {text, usage}} dict (same shape as run_batch).
+    Returns {key: {text, usage}} dict (same shape as run_batch). `thinking`
+    takes the same provider-native mapping run_batch does, so a caller
+    switching between the two paths keeps the same benchmark condition.
     """
+    # Fail-fast parity with run_batch: a malformed thinking mapping dies here,
+    # before the loop, instead of being demoted to N identical per-entry
+    # errors by the per-entry exception handler below.
+    resolve_thinking(client.model, thinking)
     raw_entries = {}
     total = len(entries)
     for i, entry in enumerate(entries):
@@ -1449,6 +1379,7 @@ def run_sync_entries(
                 images=images or None,
                 json_mode=entry_json_mode if json_mode else False,
                 max_tokens=entry_max_tokens,
+                thinking=thinking,
             )
             raw_entries[key] = {
                 "text": response.text,
@@ -1475,15 +1406,16 @@ def run_batch(
     json_mode: bool = True,
     display_name: str = "batch",
     poll_interval: int = 60,
-    thinking: bool = False,
-    thinking_budget: int = 0,
-    reasoning_effort: str = "",
-    effort: str = "",
+    thinking=None,
     enable_cache: bool = False,
     existing_batch_id: str | None = None,
     on_batch_created=None,
 ) -> dict:
     """Run entries as a batch job via the provider's batch API.
+
+    thinking: the same provider-native mapping generate() takes; the resolver
+    translates it per provider and rejects malformed or unsupported settings
+    before anything is uploaded.
 
     Resume support: if `existing_batch_id` is set, skip submission and resume
     polling on that batch (the entries list still drives result parsing, so
@@ -1493,6 +1425,8 @@ def run_batch(
     this to persist the id for ctrl-C recovery.
     """
     provider = client.provider
+    # Before anything is uploaded: a config error must fail once, up front.
+    wire = resolve_thinking(client.model, thinking)
     if existing_batch_id:
         logger.info(
             "Resuming in-flight %s batch %s (%d entries)",
@@ -1509,45 +1443,74 @@ def run_batch(
         )
 
     if provider == "gemini":
-        return _run_batch_gemini(
-            client,
-            entries,
-            json_mode,
-            display_name,
-            poll_interval,
-            thinking,
-            thinking_budget,
-            existing_batch_id=existing_batch_id,
-            on_batch_created=on_batch_created,
-        )
+        batch_id = existing_batch_id
+        if batch_id is None:
+            batch_id = _submit_batch_gemini(client, entries, display_name, wire)
+            if on_batch_created:
+                on_batch_created(batch_id)
+        return _await_batch_gemini(client, batch_id, poll_interval)
     elif provider == "openai":
-        return _run_batch_openai(
-            client,
-            entries,
-            json_mode,
-            display_name,
-            poll_interval,
-            thinking,
-            thinking_budget,
-            reasoning_effort,
-            existing_batch_id=existing_batch_id,
-            on_batch_created=on_batch_created,
-        )
+        batch_id = existing_batch_id
+        if batch_id is None:
+            batch_id = _submit_batch_openai(
+                client, entries, json_mode, display_name, wire
+            )
+            if on_batch_created:
+                on_batch_created(batch_id)
+        return _await_batch_openai(client, batch_id, poll_interval)
     elif provider == "anthropic":
-        return _run_batch_anthropic(
-            client,
-            entries,
-            json_mode,
-            display_name,
-            poll_interval,
-            thinking,
-            thinking_budget,
-            reasoning_effort,
-            effort=effort,
-            enable_cache=enable_cache,
-            existing_batch_id=existing_batch_id,
-            on_batch_created=on_batch_created,
+        batch_id = existing_batch_id
+        if batch_id is None:
+            batch_id = _submit_batch_anthropic(
+                client, entries, json_mode, wire, enable_cache=enable_cache
+            )
+            if on_batch_created:
+                on_batch_created(batch_id)
+        return _await_batch_anthropic(
+            client, batch_id, entries, json_mode, poll_interval
         )
+    else:
+        raise ValueError(f"Batch API not supported for provider: {provider}")
+
+
+def submit_batch(
+    client: "ModelClient",
+    entries: list[dict],
+    json_mode: bool = True,
+    display_name: str = "batch",
+    thinking=None,
+) -> str:
+    """Submit a batch job without polling for results; returns the batch id.
+
+    The submission half of run_batch, exposed for `tutormoments smoke`:
+    verifying that a provider ACCEPTS the batch wire format does not require
+    paying for (or waiting on) the batch's completion -- pair with
+    cancel_batch. The same thinking contract as run_batch applies.
+    """
+    wire = resolve_thinking(client.model, thinking)
+    provider = client.provider
+    if provider == "gemini":
+        return _submit_batch_gemini(client, entries, display_name, wire)
+    elif provider == "openai":
+        return _submit_batch_openai(client, entries, json_mode, display_name, wire)
+    elif provider == "anthropic":
+        return _submit_batch_anthropic(client, entries, json_mode, wire)
+    raise ValueError(f"Batch API not supported for provider: {provider}")
+
+
+def cancel_batch(client: "ModelClient", batch_id: str) -> None:
+    """Cancel an in-flight batch job on the client's provider.
+
+    Used by `tutormoments smoke` to verify batch submission formats without
+    paying for (or waiting on) a full batch run.
+    """
+    provider = client.provider
+    if provider == "gemini":
+        client._client.batches.cancel(name=batch_id)
+    elif provider == "openai":
+        client._client.batches.cancel(batch_id)
+    elif provider == "anthropic":
+        client._client.messages.batches.cancel(batch_id)
     else:
         raise ValueError(f"Batch API not supported for provider: {provider}")
 
@@ -1557,63 +1520,61 @@ def run_batch(
 # ===================================================================
 
 
-def _run_batch_gemini(
-    client,
-    entries,
-    json_mode,
-    display_name,
-    poll_interval,
-    thinking=False,
-    thinking_budget=0,
-    existing_batch_id=None,
-    on_batch_created=None,
-):
-    """Gemini batch: upload JSONL, submit, poll, download.
+def _gemini_text_from_parts(parts: list[dict]) -> str:
+    """Concatenate visible text from Gemini batch result parts.
 
-    If existing_batch_id is set, skip upload+submit and retrieve that job.
+    Thought summaries arrive as parts flagged `thought: true` when
+    include_thoughts is set; they are reasoning, not the answer, and on the
+    sync path `response.text` already excludes them. Skipping them here (and
+    joining the rest -- long answers can split across parts) keeps batch text
+    identical to sync text.
     """
+    return "".join(p.get("text", "") for p in parts if not p.get("thought", False))
+
+
+def _submit_batch_gemini(client, entries, display_name, wire: WireThinking) -> str:
+    """Upload the JSONL for a Gemini batch and create the job; returns its id."""
     import tempfile
 
-    from tutormoments.config import get_batch_timeout
-
     gemini_client = client._client
-    jsonl_path = None
+    thinking_config = wire.gemini_thinking_config
 
-    if existing_batch_id:
-        batch_job = gemini_client.batches.get(name=existing_batch_id)
-    else:
-        # Write Gemini-format JSONL to temp file
-        with tempfile.NamedTemporaryFile(
-            mode="w", suffix=".jsonl", delete=False, encoding="utf-8"
-        ) as f:
-            for entry in entries:
-                key, prompt_text, entry_json_mode, entry_max_tokens, images = (
-                    _extract_entry(entry)
+    with tempfile.NamedTemporaryFile(
+        mode="w", suffix=".jsonl", delete=False, encoding="utf-8"
+    ) as f:
+        for entry in entries:
+            key, prompt_text, entry_json_mode, entry_max_tokens, images = (
+                _extract_entry(entry)
+            )
+            # Gemini has no explicit batch cache API; concatenate prefix (auto-cache).
+            cacheable_prefix = entry.get("cacheable_prefix")
+            effective_prompt = (cacheable_prefix or "") + prompt_text
+            if images:
+                image_blocks = _build_image_blocks_gemini(images)
+                parts = _interleave_text_and_images(
+                    effective_prompt,
+                    image_blocks,
+                    lambda s: {"text": s},
                 )
-                # Gemini has no explicit batch cache API; concatenate prefix (auto-cache).
-                cacheable_prefix = entry.get("cacheable_prefix")
-                effective_prompt = (cacheable_prefix or "") + prompt_text
-                if images:
-                    image_blocks = _build_image_blocks_gemini(images)
-                    parts = _interleave_text_and_images(
-                        effective_prompt,
-                        image_blocks,
-                        lambda s: {"text": s},
-                    )
-                else:
-                    parts = [{"text": effective_prompt}]
-                gem_entry = {
-                    "key": key,
-                    "request": {
-                        "contents": [{"parts": parts, "role": "user"}],
-                        "generation_config": entry["request"].get(
-                            "generation_config", {}
-                        ),
-                    },
-                }
-                f.write(json.dumps(gem_entry, ensure_ascii=False) + "\n")
-            jsonl_path = f.name
+            else:
+                parts = [{"text": effective_prompt}]
+            # Copy the entry's generation_config before adding thinking_config:
+            # entries can be re-submitted (resume flows), so the shared dict
+            # must not be mutated.
+            gen_config = dict(entry["request"].get("generation_config", {}))
+            if thinking_config is not None:
+                gen_config["thinking_config"] = dict(thinking_config)
+            gem_entry = {
+                "key": key,
+                "request": {
+                    "contents": [{"parts": parts, "role": "user"}],
+                    "generation_config": gen_config,
+                },
+            }
+            f.write(json.dumps(gem_entry, ensure_ascii=False) + "\n")
+        jsonl_path = f.name
 
+    try:
         logger.info("Uploading batch request file...")
         uploaded_file = gemini_client.files.upload(
             file=jsonl_path,
@@ -1628,75 +1589,80 @@ def _run_batch_gemini(
             config={"display_name": display_name},
         )
         logger.info("Batch job created: %s", batch_job.name)
-        if on_batch_created:
-            on_batch_created(batch_job.name)
-
-    try:
-        poll_start = time.monotonic()
-        batch_timeout = get_batch_timeout()
-        completed_states = {
-            "JOB_STATE_SUCCEEDED",
-            "JOB_STATE_FAILED",
-            "JOB_STATE_CANCELLED",
-            "JOB_STATE_EXPIRED",
-        }
-        while batch_job.state.name not in completed_states:
-            if time.monotonic() - poll_start > batch_timeout:
-                raise RuntimeError(
-                    f"Gemini batch timed out after {batch_timeout}s "
-                    f"(state: {batch_job.state.name})"
-                )
-            logger.info(
-                "Batch in progress: %s (%dm elapsed, next poll in %ds)",
-                batch_job.state.name,
-                int(time.monotonic() - poll_start) // 60,
-                poll_interval,
-            )
-            time.sleep(poll_interval)
-            batch_job = gemini_client.batches.get(name=batch_job.name)
-
-        logger.info("Batch job finished: %s", batch_job.state.name)
-        if batch_job.state.name != "JOB_STATE_SUCCEEDED":
-            raise RuntimeError(f"Gemini batch failed: {batch_job.state.name}")
-
-        if not batch_job.dest or not batch_job.dest.file_name:
-            raise RuntimeError("No output file in batch job result")
-
-        logger.info("Downloading results from: %s", batch_job.dest.file_name)
-        result_bytes = gemini_client.files.download(file=batch_job.dest.file_name)
-        result_text = result_bytes.decode("utf-8")
-
-        raw_entries = {}
-        for line in result_text.strip().split("\n"):
-            if not line.strip():
-                continue
-            result = json.loads(line)
-            key = result.get("key")
-            response = result.get("response")
-
-            if response:
-                candidates = response.get("candidates", [])
-                text = ""
-                if candidates:
-                    parts = candidates[0].get("content", {}).get("parts", [])
-                    if parts:
-                        text = parts[0].get("text", "")
-                usage_meta = response.get("usageMetadata", {})
-                raw_entries[key] = {
-                    "text": text,
-                    "usage": _gemini_batch_usage(usage_meta, model=client.model),
-                }
-            else:
-                error = result.get("error")
-                raw_entries[key] = {
-                    "text": "",
-                    "error": str(error) if error else "No response",
-                    "usage": _zero_usage("gemini", client.model, "batch"),
-                }
-        return raw_entries
+        return batch_job.name
     finally:
-        if jsonl_path:
-            os.unlink(jsonl_path)
+        os.unlink(jsonl_path)
+
+
+def _await_batch_gemini(client, batch_id, poll_interval) -> dict:
+    """Poll a Gemini batch to completion and parse its result file."""
+    from tutormoments.config import get_batch_timeout
+
+    gemini_client = client._client
+    batch_job = gemini_client.batches.get(name=batch_id)
+
+    poll_start = time.monotonic()
+    batch_timeout = get_batch_timeout()
+    completed_states = {
+        "JOB_STATE_SUCCEEDED",
+        "JOB_STATE_FAILED",
+        "JOB_STATE_CANCELLED",
+        "JOB_STATE_EXPIRED",
+    }
+    while batch_job.state.name not in completed_states:
+        if time.monotonic() - poll_start > batch_timeout:
+            raise RuntimeError(
+                f"Gemini batch timed out after {batch_timeout}s "
+                f"(state: {batch_job.state.name})"
+            )
+        logger.info(
+            "Batch in progress: %s (%dm elapsed, next poll in %ds)",
+            batch_job.state.name,
+            int(time.monotonic() - poll_start) // 60,
+            poll_interval,
+        )
+        time.sleep(poll_interval)
+        batch_job = gemini_client.batches.get(name=batch_job.name)
+
+    logger.info("Batch job finished: %s", batch_job.state.name)
+    if batch_job.state.name != "JOB_STATE_SUCCEEDED":
+        raise RuntimeError(f"Gemini batch failed: {batch_job.state.name}")
+
+    if not batch_job.dest or not batch_job.dest.file_name:
+        raise RuntimeError("No output file in batch job result")
+
+    logger.info("Downloading results from: %s", batch_job.dest.file_name)
+    result_bytes = gemini_client.files.download(file=batch_job.dest.file_name)
+    result_text = result_bytes.decode("utf-8")
+
+    raw_entries = {}
+    for line in result_text.strip().split("\n"):
+        if not line.strip():
+            continue
+        result = json.loads(line)
+        key = result.get("key")
+        response = result.get("response")
+
+        if response:
+            candidates = response.get("candidates", [])
+            text = ""
+            if candidates:
+                parts = candidates[0].get("content", {}).get("parts", [])
+                if parts:
+                    text = _gemini_text_from_parts(parts)
+            usage_meta = response.get("usageMetadata", {})
+            raw_entries[key] = {
+                "text": text,
+                "usage": _gemini_batch_usage(usage_meta, model=client.model),
+            }
+        else:
+            error = result.get("error")
+            raw_entries[key] = {
+                "text": "",
+                "error": str(error) if error else "No response",
+                "usage": _zero_usage("gemini", client.model, "batch"),
+            }
+    return raw_entries
 
 
 # ===================================================================
@@ -1704,80 +1670,62 @@ def _run_batch_gemini(
 # ===================================================================
 
 
-def _run_batch_openai(
-    client,
-    entries,
-    json_mode,
-    display_name,
-    poll_interval,
-    thinking=False,
-    thinking_budget=0,
-    reasoning_effort="",
-    existing_batch_id=None,
-    on_batch_created=None,
-):
-    """OpenAI batch: upload JSONL, create batch, poll, download results.
-
-    If existing_batch_id is set, skip upload+create and retrieve that batch.
-    """
+def _submit_batch_openai(
+    client, entries, json_mode, display_name, wire: WireThinking
+) -> str:
+    """Upload the JSONL for an OpenAI batch and create the job; returns its id."""
     import tempfile
-
-    from tutormoments.config import get_batch_timeout
 
     openai_client = client._client
     max_tokens = MAX_OUTPUT_TOKENS["openai"]
-    jsonl_path = None
 
-    if existing_batch_id:
-        batch_job = openai_client.batches.retrieve(existing_batch_id)
-    else:
-        # Write OpenAI-format JSONL
-        with tempfile.NamedTemporaryFile(
-            mode="w", suffix=".jsonl", delete=False, encoding="utf-8"
-        ) as f:
-            for entry in entries:
-                key, prompt_text, entry_json_mode, entry_max_tokens, images = (
-                    _extract_entry(entry)
+    with tempfile.NamedTemporaryFile(
+        mode="w", suffix=".jsonl", delete=False, encoding="utf-8"
+    ) as f:
+        for entry in entries:
+            key, prompt_text, entry_json_mode, entry_max_tokens, images = (
+                _extract_entry(entry)
+            )
+            if not entry_max_tokens or entry_max_tokens > max_tokens:
+                entry_max_tokens = max_tokens
+
+            # OpenAI uses automatic prefix caching; concatenate the prefix so the
+            # same static head is always at the front of the message.
+            cacheable_prefix = entry.get("cacheable_prefix")
+            effective_prompt = (cacheable_prefix or "") + prompt_text
+
+            if images:
+                image_blocks = _build_image_blocks_openai(
+                    images,
+                    use_url=_should_use_presigned_url(),
                 )
-                if not entry_max_tokens or entry_max_tokens > max_tokens:
-                    entry_max_tokens = max_tokens
+                content = _interleave_text_and_images(
+                    effective_prompt,
+                    image_blocks,
+                    lambda s: {"type": "text", "text": s},
+                )
+            else:
+                content = effective_prompt
 
-                # OpenAI uses automatic prefix caching; concatenate the prefix so the
-                # same static head is always at the front of the message.
-                cacheable_prefix = entry.get("cacheable_prefix")
-                effective_prompt = (cacheable_prefix or "") + prompt_text
+            body = {
+                "model": client.model,
+                "messages": [{"role": "user", "content": content}],
+                "max_completion_tokens": entry_max_tokens,
+            }
+            if json_mode and entry_json_mode:
+                body["response_format"] = {"type": "json_object"}
+            if wire.openai_reasoning_effort:
+                body["reasoning_effort"] = wire.openai_reasoning_effort
+            line = {
+                "custom_id": key,
+                "method": "POST",
+                "url": "/v1/chat/completions",
+                "body": body,
+            }
+            f.write(json.dumps(line, ensure_ascii=False) + "\n")
+        jsonl_path = f.name
 
-                if images:
-                    image_blocks = _build_image_blocks_openai(
-                        images,
-                        use_url=_should_use_presigned_url(),
-                    )
-                    content = _interleave_text_and_images(
-                        effective_prompt,
-                        image_blocks,
-                        lambda s: {"type": "text", "text": s},
-                    )
-                else:
-                    content = effective_prompt
-
-                body = {
-                    "model": client.model,
-                    "messages": [{"role": "user", "content": content}],
-                    "max_completion_tokens": entry_max_tokens,
-                }
-                if json_mode and entry_json_mode:
-                    body["response_format"] = {"type": "json_object"}
-                if reasoning_effort:
-                    body["reasoning_effort"] = reasoning_effort
-                line = {
-                    "custom_id": key,
-                    "method": "POST",
-                    "url": "/v1/chat/completions",
-                    "body": body,
-                }
-                f.write(json.dumps(line, ensure_ascii=False) + "\n")
-            jsonl_path = f.name
-
+    try:
         logger.info("Uploading batch request file...")
         with open(jsonl_path, "rb") as f:
             uploaded_file = openai_client.files.create(file=f, purpose="batch")
@@ -1791,70 +1739,75 @@ def _run_batch_openai(
             metadata={"description": display_name},
         )
         logger.info("Batch job created: %s", batch_job.id)
-        if on_batch_created:
-            on_batch_created(batch_job.id)
-
-    try:
-        poll_start = time.monotonic()
-        batch_timeout = get_batch_timeout()
-        terminal_states = {"completed", "failed", "expired", "cancelled"}
-        while batch_job.status not in terminal_states:
-            if time.monotonic() - poll_start > batch_timeout:
-                raise RuntimeError(
-                    f"OpenAI batch timed out after {batch_timeout}s "
-                    f"(state: {batch_job.status})"
-                )
-            logger.info(
-                "Batch in progress: %s (%dm elapsed, next poll in %ds)",
-                batch_job.status,
-                int(time.monotonic() - poll_start) // 60,
-                poll_interval,
-            )
-            time.sleep(poll_interval)
-            batch_job = openai_client.batches.retrieve(batch_job.id)
-
-        logger.info("Batch job finished: %s", batch_job.status)
-        if batch_job.status != "completed":
-            raise RuntimeError(f"OpenAI batch failed: {batch_job.status}")
-
-        if not batch_job.output_file_id:
-            raise RuntimeError("No output file in batch job result")
-
-        logger.info("Downloading results from: %s", batch_job.output_file_id)
-        result_bytes = openai_client.files.content(batch_job.output_file_id).content
-        result_text = result_bytes.decode("utf-8")
-
-        raw_entries = {}
-        for line in result_text.strip().split("\n"):
-            if not line.strip():
-                continue
-            result = json.loads(line)
-            key = result.get("custom_id")
-            error = result.get("error")
-
-            if error:
-                raw_entries[key] = {
-                    "text": "",
-                    "error": str(error),
-                    "usage": _zero_usage("openai", client.model, "batch"),
-                }
-                continue
-
-            response_body = result.get("response", {}).get("body", {})
-            choices = response_body.get("choices", [])
-            text = ""
-            if choices:
-                text = choices[0].get("message", {}).get("content", "")
-
-            usage = response_body.get("usage", {})
-            raw_entries[key] = {
-                "text": text,
-                "usage": _openai_batch_usage(usage, model=client.model),
-            }
-        return raw_entries
+        return batch_job.id
     finally:
-        if jsonl_path:
-            os.unlink(jsonl_path)
+        os.unlink(jsonl_path)
+
+
+def _await_batch_openai(client, batch_id, poll_interval) -> dict:
+    """Poll an OpenAI batch to completion and parse its result file."""
+    from tutormoments.config import get_batch_timeout
+
+    openai_client = client._client
+    batch_job = openai_client.batches.retrieve(batch_id)
+
+    poll_start = time.monotonic()
+    batch_timeout = get_batch_timeout()
+    terminal_states = {"completed", "failed", "expired", "cancelled"}
+    while batch_job.status not in terminal_states:
+        if time.monotonic() - poll_start > batch_timeout:
+            raise RuntimeError(
+                f"OpenAI batch timed out after {batch_timeout}s "
+                f"(state: {batch_job.status})"
+            )
+        logger.info(
+            "Batch in progress: %s (%dm elapsed, next poll in %ds)",
+            batch_job.status,
+            int(time.monotonic() - poll_start) // 60,
+            poll_interval,
+        )
+        time.sleep(poll_interval)
+        batch_job = openai_client.batches.retrieve(batch_job.id)
+
+    logger.info("Batch job finished: %s", batch_job.status)
+    if batch_job.status != "completed":
+        raise RuntimeError(f"OpenAI batch failed: {batch_job.status}")
+
+    if not batch_job.output_file_id:
+        raise RuntimeError("No output file in batch job result")
+
+    logger.info("Downloading results from: %s", batch_job.output_file_id)
+    result_bytes = openai_client.files.content(batch_job.output_file_id).content
+    result_text = result_bytes.decode("utf-8")
+
+    raw_entries = {}
+    for line in result_text.strip().split("\n"):
+        if not line.strip():
+            continue
+        result = json.loads(line)
+        key = result.get("custom_id")
+        error = result.get("error")
+
+        if error:
+            raw_entries[key] = {
+                "text": "",
+                "error": str(error),
+                "usage": _zero_usage("openai", client.model, "batch"),
+            }
+            continue
+
+        response_body = result.get("response", {}).get("body", {})
+        choices = response_body.get("choices", [])
+        text = ""
+        if choices:
+            text = choices[0].get("message", {}).get("content", "")
+
+        usage = response_body.get("usage", {})
+        raw_entries[key] = {
+            "text": text,
+            "usage": _openai_batch_usage(usage, model=client.model),
+        }
+    return raw_entries
 
 
 # ===================================================================
@@ -1862,155 +1815,138 @@ def _run_batch_openai(
 # ===================================================================
 
 
-def _run_batch_anthropic(
-    client,
-    entries,
-    json_mode,
-    display_name,
-    poll_interval,
-    thinking=False,
-    thinking_budget=0,
-    reasoning_effort="",
-    effort="",
-    enable_cache=False,
-    existing_batch_id=None,
-    on_batch_created=None,
-):
-    """Anthropic batch: create message batch, poll, stream results.
+def _submit_batch_anthropic(
+    client, entries, json_mode, wire: WireThinking, enable_cache=False
+) -> str:
+    """Create an Anthropic message batch; returns its id.
 
-    If existing_batch_id is set, skip submission and retrieve that batch.
-    The id_to_key mapping is rebuilt deterministically from `entries` order
-    (so callers must pass the same entries that were originally submitted).
+    custom_ids are short indexed IDs (r0, r1, ...) deterministic in entries
+    order (Anthropic custom_id has a 64-char limit); _await_batch_anthropic
+    rebuilds the id->key mapping from the same entries.
     """
     from anthropic.types.message_create_params import MessageCreateParamsNonStreaming
     from anthropic.types.messages.batch_create_params import Request
 
-    from tutormoments.config import get_batch_timeout, get_retry_config
+    from tutormoments.config import get_retry_config
 
     anthropic_client = client._client
     max_tokens = MAX_OUTPUT_TOKENS["anthropic"]
-    # Apply per-model output cap (e.g. Haiku 4.5 / Sonnet 4.6 cap at 64K).
-    for prefix, cap in _ANTHROPIC_MAX_OUTPUT_CAP.items():
-        if client.model and client.model.startswith(prefix):
-            max_tokens = min(max_tokens, cap)
-            break
+    # Apply the per-model output cap from the model registry.
+    cap = max_output_cap(client.model)
+    if cap is not None:
+        max_tokens = min(max_tokens, cap)
 
-    # id_to_key mapping is deterministic in entries order, so it can be rebuilt
-    # on resume without re-submitting. Anthropic custom_id has a 64-char limit,
-    # so we use short indexed IDs.
-    id_to_key = {f"r{i}": _extract_entry(e)[0] for i, e in enumerate(entries)}
+    thinking_param = wire.anthropic_thinking
+    thinking_min = 0
+    if thinking_param is not None and thinking_param.get("type") == "enabled":
+        # Legacy enabled mode needs max_tokens >= budget + headroom.
+        thinking_min = thinking_param["budget_tokens"] + 64
 
-    if existing_batch_id:
-        message_batch = anthropic_client.messages.batches.retrieve(existing_batch_id)
-    else:
-        thinking_param = (
-            _anthropic_thinking_param(client.model, thinking_budget)
-            if thinking
-            else None
+    requests = []
+    for i, entry in enumerate(entries):
+        key, prompt_text, entry_json_mode, entry_max_tokens, images = _extract_entry(
+            entry
         )
-        thinking_min = 0
-        if thinking_param is not None and thinking_param.get("type") == "enabled":
-            # Legacy enabled mode needs max_tokens >= budget + headroom.
-            thinking_min = thinking_param["budget_tokens"] + 64
+        if not entry_max_tokens or entry_max_tokens > max_tokens:
+            entry_max_tokens = max_tokens
+        if thinking_min and entry_max_tokens < thinking_min:
+            entry_max_tokens = thinking_min
 
-        requests = []
-        for i, entry in enumerate(entries):
-            key, prompt_text, entry_json_mode, entry_max_tokens, images = (
-                _extract_entry(entry)
+        cacheable_prefix = entry.get("cacheable_prefix")
+
+        if images:
+            image_blocks = _build_image_blocks_anthropic(
+                images,
+                use_url=_should_use_presigned_url(),
+                enable_cache=enable_cache,
             )
-            if not entry_max_tokens or entry_max_tokens > max_tokens:
-                entry_max_tokens = max_tokens
-            if thinking_min and entry_max_tokens < thinking_min:
-                entry_max_tokens = thinking_min
-
-            cacheable_prefix = entry.get("cacheable_prefix")
-
-            if images:
-                image_blocks = _build_image_blocks_anthropic(
-                    images,
-                    use_url=_should_use_presigned_url(),
-                    enable_cache=enable_cache,
-                )
-                content = _interleave_text_and_images(
-                    prompt_text,
-                    image_blocks,
-                    lambda s: {"type": "text", "text": s},
-                )
-                if cacheable_prefix is not None:
-                    content = [
-                        {
-                            "type": "text",
-                            "text": cacheable_prefix,
-                            "cache_control": {"type": "ephemeral"},
-                        },
-                    ] + content
-            elif cacheable_prefix is not None:
+            content = _interleave_text_and_images(
+                prompt_text,
+                image_blocks,
+                lambda s: {"type": "text", "text": s},
+            )
+            if cacheable_prefix is not None:
                 content = [
                     {
                         "type": "text",
                         "text": cacheable_prefix,
                         "cache_control": {"type": "ephemeral"},
                     },
-                    {"type": "text", "text": prompt_text},
-                ]
-            else:
-                content = prompt_text
+                ] + content
+        elif cacheable_prefix is not None:
+            content = [
+                {
+                    "type": "text",
+                    "text": cacheable_prefix,
+                    "cache_control": {"type": "ephemeral"},
+                },
+                {"type": "text", "text": prompt_text},
+            ]
+        else:
+            content = prompt_text
 
-            params = {
-                "model": client.model,
-                "max_tokens": entry_max_tokens,
-                "messages": [{"role": "user", "content": content}],
-            }
-            if json_mode and entry_json_mode:
-                params["system"] = (
-                    "You must respond with valid JSON only. "
-                    "Do not include markdown code fences, explanations, or any text "
-                    "outside the JSON object."
-                )
-            if thinking_param is not None:
-                params["thinking"] = thinking_param
-            # effort goes inside output_config, mirroring the sync path
-            # (_generate_anthropic). Haiku 4.5 rejects effort -- skip there.
-            if (
-                effort
-                and client.model
-                and not client.model.startswith("claude-haiku-4-5")
-            ):
-                params["output_config"] = {"effort": effort}
-
-            requests.append(
-                Request(
-                    custom_id=f"r{i}",
-                    params=MessageCreateParamsNonStreaming(**params),
-                )
+        params = {
+            "model": client.model,
+            "max_tokens": entry_max_tokens,
+            "messages": [{"role": "user", "content": content}],
+        }
+        if json_mode and entry_json_mode:
+            params["system"] = (
+                "You must respond with valid JSON only. "
+                "Do not include markdown code fences, explanations, or any text "
+                "outside the JSON object."
             )
+        if thinking_param is not None:
+            params["thinking"] = dict(thinking_param)
+        # effort goes inside output_config, mirroring the sync path
+        # (_generate_anthropic). The registry only emits effort for families
+        # that support it.
+        if wire.anthropic_effort:
+            params["output_config"] = {"effort": wire.anthropic_effort}
 
-        logger.info("Submitting batch (%d requests)...", len(requests))
-        retry_cfg = get_retry_config()
-        max_retries = retry_cfg.get("max_retries", 5)
-        base_delay = retry_cfg.get("base_delay", 5)
-        for attempt in range(max_retries):
-            try:
-                message_batch = anthropic_client.messages.batches.create(
-                    requests=requests
+        requests.append(
+            Request(
+                custom_id=f"r{i}",
+                params=MessageCreateParamsNonStreaming(**params),
+            )
+        )
+
+    logger.info("Submitting batch (%d requests)...", len(requests))
+    retry_cfg = get_retry_config()
+    max_retries = retry_cfg.get("max_retries", 5)
+    base_delay = retry_cfg.get("base_delay", 5)
+    for attempt in range(max_retries):
+        try:
+            message_batch = anthropic_client.messages.batches.create(requests=requests)
+            break
+        except Exception as e:
+            if attempt < max_retries - 1:
+                delay = base_delay * (2**attempt)
+                logger.warning(
+                    "Batch submit error (attempt %d/%d): %s. Retrying in %ds...",
+                    attempt + 1,
+                    max_retries,
+                    e,
+                    delay,
                 )
-                break
-            except Exception as e:
-                if attempt < max_retries - 1:
-                    delay = base_delay * (2**attempt)
-                    logger.warning(
-                        "Batch submit error (attempt %d/%d): %s. Retrying in %ds...",
-                        attempt + 1,
-                        max_retries,
-                        e,
-                        delay,
-                    )
-                    time.sleep(delay)
-                else:
-                    raise
-        logger.info("Batch created: %s", message_batch.id)
-        if on_batch_created:
-            on_batch_created(message_batch.id)
+                time.sleep(delay)
+            else:
+                raise
+    logger.info("Batch created: %s", message_batch.id)
+    return message_batch.id
+
+
+def _await_batch_anthropic(client, batch_id, entries, json_mode, poll_interval) -> dict:
+    """Poll an Anthropic message batch to completion and parse its results.
+
+    The id_to_key mapping is rebuilt deterministically from `entries` order,
+    so callers must pass the same entries that were originally submitted.
+    """
+    from tutormoments.config import get_batch_timeout
+
+    anthropic_client = client._client
+    id_to_key = {f"r{i}": _extract_entry(e)[0] for i, e in enumerate(entries)}
+    message_batch = anthropic_client.messages.batches.retrieve(batch_id)
 
     poll_start = time.monotonic()
     batch_timeout = get_batch_timeout()
@@ -2047,6 +1983,7 @@ def _run_batch_anthropic(
             usage = _anthropic_usage(
                 message.usage, model=client.model, endpoint="batch"
             )
+            usage["thinking_blocks"] = _count_thinking_blocks(message.content)
             raw_entries[key] = {"text": text, "usage": usage}
         else:
             error_msg = f"{result.result.type}"

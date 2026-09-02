@@ -126,26 +126,42 @@ The report and viewer commands read `summary.json` files from run directories.
 
 ## Running new tutor models
 
-No code changes are needed for hosted models: add a roster entry in your config
-and export the provider API key. The provider is inferred from the model id
-(`claude-*` → anthropic, `gpt-*` → openai, `gemini-*` → gemini,
-`deepseek-ai/*` → together).
+The `benchmark_models:` roster maps **arms** — benchmark conditions — not
+bare models. Each entry names the provider model id, states the exact
+provider-native reasoning parameters the run will send, and includes a
+`condition:` label for grouping results. This keeps the benchmark config
+auditable in provider parlance. The same model can run under several arms:
 
 ```yaml
-models:
-  my-new-model-id: { thinking: true, effort: high }
+benchmark_models:
+  gemini-2.5-low: { model: gemini-2.5-pro, thinking_budget: 4096, condition: low }
+  gemini-2.5-dyn: { model: gemini-2.5-pro, thinking_budget: -1, condition: dynamic }
+  gpt-5.5-low:    { model: gpt-5.5-2026-04-23, reasoning: low, condition: low }
 ```
 
 ```bash
-tutormoments run --tutors my-new-model-id --data_path <release dir>
+tutormoments run --tutors gemini-2.5-low gpt-5.5-low --data_path <release dir>
 ```
+
+Running a model for the first time needs the provider API key exported and an
+entry in `src/tutormoments/models.yaml` — the per-model facts table (provider
+routing, pricing for cost tracking, output caps). It holds no reasoning
+configuration: what each arm sends is stated in the config YAML itself, in
+provider parlance, and validated at load (see `docs/thinking.md`). Verify a
+new arm live with `tutormoments smoke` before benchmarking it.
 
 Tutors are selectable per-run via the CLI. The Student model is set in the config; changing the student model would change the shape of the evaluation. Modify your 
 config to swap the student model with another API-callable model:
 
 ```yaml
-student: { model: claude-opus-4-6, mode: oracle, thinking: false } # default
+student: { model: claude-opus-4-6, mode: oracle, thinking: { type: disabled } } # default
 ```
+
+The student/scorer/taxonomy/groundtruth blocks state their thinking
+parameters the same provider-native way as arms (minus `condition` — they are
+the fixed evaluation apparatus, not the tutor conditions being reported).
+Keeping them inline means retuning a tutor arm can never silently change the
+student or scoring regime.
 
 ## Custom Tutor / Student Models
 
@@ -382,6 +398,26 @@ Run the runtime test suite without real API calls:
 pytest tests/tutormoments -q          # runtime only (needs [dev])
 pytest tests -q                   # full suite (needs [dev,build-dev,analysis]; missing extras skip)
 ```
+
+### Live smoke checks
+
+The test suite mocks every provider SDK, so it can never prove a provider
+actually accepts our wire formats. `tutormoments smoke` is the live half: one
+tiny real call per configured arm/role with its exact thinking condition
+(costs cents), plus one submit-then-cancel batch per provider, with a
+thinking-evidence column that catches silently-ignored knobs. Run it before
+merging changes to core API logic (`client.py`, `models.py`, `models.yaml`,
+`config.py`, `default_config.yaml`, `smoke.py`) — CI posts an advisory
+reminder on such PRs but stays offline by design.
+
+```bash
+tutormoments smoke                          # everything in the active config
+tutormoments smoke --arms gemini-2.5-pro    # one arm
+tutormoments smoke --providers anthropic --no-batch
+```
+
+Exit codes: 0 = all passed, 1 = a check failed, 2 = config/environment error
+(a missing API key for a selected provider is an error, not a silent skip).
 
 
 ### Dataset construction (maintainers)

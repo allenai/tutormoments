@@ -793,18 +793,16 @@ def pool_report(kept: list[Facet], excluded: list[tuple[Facet, str]]) -> str:
 # 5. LLM classifier (resume + checkpoint)
 # ============================================================================
 #
-# Classifies unique statements against the frozen A-M scheme using
-# claude-opus-4-8 with structured-output JSON (the category letter is a
-# schema enum, so the model can't hallucinate one). Statements are
-# deduplicated, batched, and assignments are appended to a sidecar JSONL
+# Classifies unique statements against the frozen A-M scheme using the
+# `taxonomy` config block's model with structured-output JSON (the category
+# letter is a schema enum, so the model can't hallucinate one). Statements
+# are deduplicated, batched, and assignments are appended to a sidecar JSONL
 # so a crash or ctrl-C loses at most the in-flight batch.
 #
 # Designed for two-step operation: a small first-run probe (default 25
 # batches, ~$1) for sanity-checking the distribution, then a resume call
 # (re-run without --max-batches) to finish.
 
-CLASSIFIER_MODEL = "claude-opus-4-8"
-CLASSIFIER_BATCH_SIZE = 50
 CLASSIFIER_MAX_RETRIES = 4
 CLASSIFIER_FIRST_RUN_PROBE = 25
 _CLASSIFIER_PROGRESS_EVERY = 30
@@ -818,7 +816,7 @@ def classify_pool(
     first_run_probe: int = CLASSIFIER_FIRST_RUN_PROBE,
     client: Any = None,
     model: Optional[str] = None,
-    thinking: Optional[bool] = None,
+    thinking=None,
     batch_size: Optional[int] = None,
 ) -> dict[str, str]:
     """Classify every unique statement in `kept` into A-M.
@@ -841,7 +839,10 @@ def classify_pool(
             None we build a ModelClient from the `taxonomy` config block
             (requires the provider API key).
         model / thinking / batch_size: override the `taxonomy` config block;
-            each falls back to config (then a module default) when None.
+            each falls back to config when None (a missing or broken config
+            raises -- there is no silent module default). `thinking` is a
+            provider-native thinking mapping, same contract as
+            ModelClient.generate.
 
     Returns:
         Mapping from statement -> category letter, covering every statement
@@ -856,21 +857,18 @@ def classify_pool(
     # Resolve model / thinking / batch_size from the taxonomy config block,
     # honoring explicit overrides. Config import is local so `import
     # tutormoments.taxonomy` stays lightweight (no client/provider-SDK import
-    # unless we actually classify).
-    spec: dict = {}
-    if client is None or model is None or thinking is None or batch_size is None:
-        try:
-            from tutormoments.config import taxonomy_spec
+    # unless we actually classify). A missing or broken config raises here:
+    # the classifier must never silently substitute its own LM settings.
+    if model is None or thinking is None or batch_size is None:
+        from tutormoments.config import taxonomy_spec
 
-            spec = taxonomy_spec()
-        except Exception:
-            spec = {}
-    if model is None:
-        model = spec.get("model", CLASSIFIER_MODEL)
-    if thinking is None:
-        thinking = bool(spec.get("thinking", False))
-    if batch_size is None:
-        batch_size = int(spec.get("batch_size", CLASSIFIER_BATCH_SIZE))
+        spec = taxonomy_spec()
+        if model is None:
+            model = spec.model
+        if thinking is None:
+            thinking = spec.thinking
+        if batch_size is None:
+            batch_size = spec.batch_size
 
     statements = sorted(
         {f.statement.strip() for f in kept if f.statement and f.statement.strip()},
@@ -913,7 +911,7 @@ def classify_pool(
 
         client = ModelClient(model)
 
-    ask = _make_classifier(client, thinking=bool(thinking))
+    ask = _make_classifier(client, thinking=thinking)
 
     for bi in range(stop_after):
         start = bi * batch_size
@@ -948,7 +946,7 @@ def classify_pool(
     return assigned
 
 
-def _make_classifier(client: Any, *, thinking: bool = False):
+def _make_classifier(client: Any, *, thinking=None):
     """Build a `(statements, label) -> ({stmt: letter}, usage_dict)` callable.
 
     `client` exposes `.generate(...)` (a `tutormoments.client.ModelClient` or a

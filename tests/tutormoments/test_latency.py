@@ -12,6 +12,7 @@ from types import SimpleNamespace
 
 import pytest
 
+from tutormoments.config import ArmSpec, StudentSpec
 from tutormoments.latency import (
     MIN_CACHE_HIT_SAMPLES,
     MIN_SESSION_CACHE_READ_TOKENS,
@@ -337,7 +338,15 @@ class _Cfg:
     dataset_revision = None
     dataset_config = "moments"
     max_turns = 4
-    student = {"model": "claude-haiku-4-5", "mode": "oracle"}
+    student = StudentSpec(model="claude-haiku-4-5", mode="oracle", thinking="none")
+    resolved_tutors = {
+        "claude-opus-4-8": ArmSpec(
+            name="claude-opus-4-8",
+            model="claude-opus-4-8",
+            provider="anthropic",
+            thinking="xhigh",
+        )
+    }
 
     def __init__(self, data_path):
         self.data_path = data_path
@@ -377,6 +386,9 @@ def test_run_probe_writes_latency_json(tmp_path, monkeypatch):
         (tmp_path / "results" / run_id / "latency.json").read_text(encoding="utf-8")
     )
     assert written["source"] == "probe"
+    # tutor_model is the ARM name; model the resolved provider model id
+    assert written["tutor_model"] == "claude-opus-4-8"
+    assert written["model"] == "claude-opus-4-8"
     assert written["tutor"]["n_samples"] == 2
     assert block["subsample"]["subsample_source"] == "frozen_release"
 

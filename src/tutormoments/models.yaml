@@ -1,0 +1,100 @@
+# Model registry: stable per-model facts.
+#
+# One entry per model. The key is matched against configured model ids
+# case-insensitively, exact id first, then longest matching prefix (so
+# `claude-haiku-4-5-20251001` resolves to the `claude-haiku-4-5` entry).
+# Each entry states:
+#
+#   provider: which API client and key the model routes to (unlisted models
+#     fall back to the prefix table in models.py).
+#   max_output_cap: per-model output token ceiling (requests above it are
+#     rejected by the API); omit when the provider default rules.
+#   pricing: per-MTok token costs -- populated by the cost-tracking
+#     workstream; empty means "not priced yet", never "free".
+#
+# Reasoning conditions do NOT live here: every configured arm and role states
+# its provider-native thinking parameters in the config YAML itself, so a
+# reviewer can read what was sent without consulting a mapping. See
+# docs/thinking.md.
+
+models:
+  # --- Anthropic ---
+  claude-opus-4-6:
+    provider: anthropic
+    pricing: {}
+  claude-sonnet-4-6:
+    provider: anthropic
+    pricing: {}
+  claude-opus-4-7:
+    provider: anthropic
+    pricing: {}
+  claude-opus-4-8:
+    provider: anthropic
+    pricing: {}
+  claude-sonnet-5:
+    provider: anthropic
+    pricing: {}
+  claude-3-7-sonnet:
+    provider: anthropic
+    pricing: {}
+  claude-haiku-4-5:
+    provider: anthropic
+    # Verified against the Models API (client.models.retrieve(id).max_tokens)
+    # on 2026-08-17; re-check there rather than trusting this value if the
+    # model 400s on max_tokens.
+    max_output_cap: 64000
+    pricing: {}
+  claude-opus-4-0:
+    provider: anthropic
+    pricing: {}
+  claude-opus-4-20250514:
+    provider: anthropic
+    pricing: {}
+  claude-opus-4-1:
+    provider: anthropic
+    pricing: {}
+  claude-opus-4-5:
+    provider: anthropic
+    pricing: {}
+  claude-sonnet-4-0:
+    provider: anthropic
+    pricing: {}
+  claude-sonnet-4-20250514:
+    provider: anthropic
+    pricing: {}
+  claude-sonnet-4-5:
+    provider: anthropic
+    pricing: {}
+
+  # --- Gemini ---
+  gemini-2.5-pro:
+    provider: gemini
+    pricing: {}
+  gemini-2.5-flash:
+    provider: gemini
+    pricing: {}
+  gemini-3.5-flash:
+    provider: gemini
+    pricing: {}
+
+  # --- OpenAI ---
+  gpt-5.4-mini:
+    provider: openai
+    pricing: {}
+  gpt-5.5:
+    provider: openai
+    pricing: {}
+  o1:
+    provider: openai
+    pricing: {}
+  o3:
+    provider: openai
+    pricing: {}
+  o4:
+    provider: openai
+    pricing: {}
+
+  # --- Together (open-weight) ---
+  deepseek-ai/DeepSeek-V4-Pro:
+    provider: together
+    pricing: {}

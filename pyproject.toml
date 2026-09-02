@@ -50,6 +50,7 @@ include = ["tutormoments*", "tutormoments_build*", "analysis*"]
 [tool.setuptools.package-data]
 tutormoments = [
     "default_config.yaml",
+    "models.yaml",
     "latency_probe_ids.json",
     "prompts/tutor/*.txt",
     "prompts/student/*.txt",
@@ -57,6 +58,7 @@ tutormoments = [
     "prompts/scorer/decompose/*.md",
     "prompts/scorer/structure/*.md",
     "prompts/taxonomy/*.md",
+    "prompts/smoke/*.md",
 ]
 tutormoments_build = [
     "moments.schema.json",

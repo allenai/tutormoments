@@ -678,7 +678,7 @@ def test_leaderboard_dashes_ttft_for_a_cell_with_no_probe():
     md, _ = leaderboard([SUMMARY_A, SUMMARY_B], {})
     for line in md.splitlines():
         if line.startswith("| model-"):
-            assert "-" in line.split("|")[7]
+            assert "-" in line.split("|")[8]
 
 
 def test_leaderboard_ttft_join_is_per_mode():
@@ -694,7 +694,7 @@ def test_leaderboard_ttft_join_is_per_mode():
     probes = {("model-alpha", "scaffolding_rigor"): _probe_block(p50_all=9.446)}
     md, _ = leaderboard([SUMMARY_A, plain], probes)
     rows = {
-        line.split("|")[2].strip(): line
+        line.split("|")[3].strip(): line
         for line in md.splitlines()
         if line.startswith("| model-alpha")
     }
@@ -714,9 +714,9 @@ def test_leaderboard_splits_by_turn_for_a_provider_with_no_cache_reporting():
     md, _ = leaderboard([SUMMARY_A], probes)
     row = next(line for line in md.splitlines() if line.startswith("| model-alpha"))
     cells = [c.strip() for c in row.split("|")]
-    assert cells[7] == "14.080"  # ttft_p50
-    assert cells[8] == "14.700"  # ttft_first_p50
-    assert cells[9] == "13.700"  # ttft_later_p50
+    assert cells[8] == "14.080"  # ttft_p50
+    assert cells[9] == "14.700"  # ttft_first_p50
+    assert cells[10] == "13.700"  # ttft_later_p50
 
 
 def test_leaderboard_dashes_the_split_when_a_probe_carries_no_samples():
@@ -726,6 +726,6 @@ def test_leaderboard_dashes_the_split_when_a_probe_carries_no_samples():
     md, _ = leaderboard([SUMMARY_A], probes)
     row = next(line for line in md.splitlines() if line.startswith("| model-alpha"))
     cells = [c.strip() for c in row.split("|")]
-    assert cells[7] == "7.940"
-    assert cells[8] == "-"
+    assert cells[8] == "7.940"
     assert cells[9] == "-"
+    assert cells[10] == "-"

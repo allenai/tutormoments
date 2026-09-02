@@ -126,8 +126,9 @@ class _ModelWrapperAdapter:
     This adapter translates that into client.generate(user_text, ..., cacheable_prefix=...).
     """
 
-    def __init__(self, client) -> None:
+    def __init__(self, client, thinking=None) -> None:
         self._client = client
+        self._thinking = thinking
 
     def call(
         self,
@@ -150,6 +151,7 @@ class _ModelWrapperAdapter:
             user_text,
             json_mode=False,
             max_tokens=max_tokens or 1024,
+            thinking=self._thinking,
             cacheable_prefix=system_prompt or None,
         )
         return resp.text or ""
@@ -330,11 +332,17 @@ def generate_trait(
     mode: str = DEFAULT_TRAIT_MODE,
     *,
     model_client,
+    thinking=None,
     temperature: float = 0.7,
     max_tokens: Optional[int] = None,
 ) -> str:
-    """Generate a student trait description from a transcript prefix."""
-    adapter = _ModelWrapperAdapter(model_client)
+    """Generate a student trait description from a transcript prefix.
+
+    thinking: canonical ladder level for the generator model (from the
+    student spec), forwarded to every generate call so trait generation runs
+    under the same stated condition as the student it feeds.
+    """
+    adapter = _ModelWrapperAdapter(model_client, thinking=thinking)
     generator = TraitGenerator(adapter)
     return generator.generate_trait(
         conversation_text=transcript_prefix,
@@ -360,6 +368,7 @@ def generate_traits_for_moments(
     *,
     model_client,
     model_name: str,
+    thinking=None,
     trait_mode: str = DEFAULT_TRAIT_MODE,
 ) -> int:
     """Attach a student.trait to every moment that lacks one.
@@ -375,7 +384,9 @@ def generate_traits_for_moments(
         if (moment.student.get("trait") or {}).get("persona"):
             continue
         prefix = _format_transcript_prefix(moment.context)
-        persona = generate_trait(prefix, trait_mode, model_client=model_client)
+        persona = generate_trait(
+            prefix, trait_mode, model_client=model_client, thinking=thinking
+        )
         moment.student["trait"] = {
             "persona": persona.strip(),
             "trait_mode": trait_mode,

@@ -64,8 +64,7 @@ def expand_cells(tutors: list[str], modes: list[str]) -> list[dict]:
         List of cell dicts in sweep order (tutor-major, mode-minor).
     """
     # Lazy import to avoid module-level SDK import
-    from tutormoments.client import infer_provider
-    from tutormoments.config import get_registered_tutor
+    from tutormoments.config import get_registered_tutor, resolve_arm
 
     cells = []
     for tutor in tutors:
@@ -74,7 +73,7 @@ def expand_cells(tutors: list[str], modes: list[str]) -> list[dict]:
             lane = "default"
         else:
             try:
-                lane = infer_provider(tutor)
+                lane = resolve_arm(tutor).provider
             except ValueError:
                 lane = "default"
         for mode in modes:
@@ -195,6 +194,19 @@ def _dataset_label(cfg) -> str:
 def _json_sha256(data) -> str:
     payload = json.dumps(data, sort_keys=True, default=str).encode("utf-8")
     return hashlib.sha256(payload).hexdigest()
+
+
+def _spec_json(spec) -> dict | None:
+    """JSON-safe dict for a frozen config spec (ArmSpec/StudentSpec/...).
+
+    Thinking configs are plain provider-native dicts (or None), so asdict is
+    already JSON-safe. None passes through (registered tutors have no spec).
+    """
+    if spec is None:
+        return None
+    from dataclasses import asdict
+
+    return asdict(spec)
 
 
 def _package_version() -> str | None:
@@ -428,8 +440,20 @@ def run_cell(
     # under run_sweep the lane already set the same tag.
     run_log_path = os.path.join(results_root, run_id, "run.log")
     with per_run_log_file(run_log_path) as run_log, log_context(f"{tutor}/{mode}"):
+        # JSON-safe views of the frozen specs. `tutor` is the ARM name (the
+        # roster key -- what results are keyed by); `model` is the resolved
+        # provider model id (None for registered tutors, which have no model).
+        arm_spec = cfg.resolved_tutors.get(tutor)
+        student_json = _spec_json(cfg.student)
+        scorer_json = _spec_json(cfg.scorer)
+        resolved_tutors_json = {
+            name: _spec_json(spec) for name, spec in cfg.resolved_tutors.items()
+        }
         config_dict = {
             "tutor": tutor,
+            "arm": tutor,
+            "model": arm_spec.model if arm_spec is not None else None,
+            "condition": arm_spec.condition if arm_spec is not None else None,
             "mode": mode,
             "dataset": {
                 "id": cfg.dataset,
@@ -445,18 +469,18 @@ def run_cell(
             # Informational only: replay concurrency does not affect results, so
             # it is deliberately kept out of reproducibility.config_hash below.
             "replay_concurrency": getattr(cfg, "replay_concurrency", None),
-            "student": cfg.student,
-            "scorer": cfg.scorer,
-            "resolved_tutors": cfg.resolved_tutors,
+            "student": student_json,
+            "scorer": scorer_json,
+            "resolved_tutors": resolved_tutors_json,
             "config_source": getattr(cfg, "config_source", None),
             "reproducibility": {
                 "tutormoments_version": _package_version(),
                 "git_commit": _git_commit(),
                 "config_hash": _json_sha256(
                     {
-                        "student": cfg.student,
-                        "scorer": cfg.scorer,
-                        "resolved_tutors": cfg.resolved_tutors,
+                        "student": student_json,
+                        "scorer": scorer_json,
+                        "resolved_tutors": resolved_tutors_json,
                         "defaults": {
                             "sample": cfg.sample,
                             "max_turns": cfg.max_turns,
@@ -543,8 +567,8 @@ def run_cell(
                 trial_idx,
                 n_trials,
                 n_total,
-                (cfg.student or {}).get("model"),
-                (cfg.student or {}).get("mode", "oracle"),
+                cfg.student.model,
+                cfg.student.mode or "oracle",
                 cfg.max_turns,
                 replay_concurrency,
             )
@@ -631,8 +655,8 @@ def run_cell(
                     scenario,
                     tutor_id=tutor,
                     tutor_mode=mode if mode else None,
-                    student_id=(cfg.student or {}).get("model"),
-                    student_mode=(cfg.student or {}).get("mode", "oracle"),
+                    student_id=cfg.student.model,
+                    student_mode=cfg.student.mode or "oracle",
                     max_turns=cfg.max_turns,
                 )
 
@@ -859,6 +883,13 @@ def run_cell(
 
         # Merge latency + token blocks into summary (spec S7)
         metrics = dict(metrics)
+        # Identity block: `tutor_model` stays the ARM name (the historical
+        # join key for report/latency/website); `model` is the resolved
+        # provider model id so the arm's provenance is explicit.
+        metrics["tutor_model"] = tutor
+        metrics["model"] = arm_spec.model if arm_spec is not None else None
+        metrics["condition"] = arm_spec.condition if arm_spec is not None else None
+        metrics["mode"] = mode
         metrics["latency"] = latency_block
         metrics["tokens"] = token_block
 
@@ -1092,7 +1123,108 @@ def _build_parser() -> argparse.ArgumentParser:
     )
     tax_p.add_argument("args", nargs=argparse.REMAINDER)
 
+    # smoke: live verification of the active config's wire formats. The
+    # offline suite can only prove the code agrees with itself; this makes one
+    # tiny REAL call per arm/role (cents) plus a submit-then-cancel batch per
+    # provider. Run before merging changes to core API logic (see AGENTS.md).
+    smoke_p = subs.add_parser(
+        "smoke",
+        help="Live-verify the active config's provider wire formats (real API calls)",
+        parents=[log_parent],
+    )
+    smoke_p.add_argument(
+        "--config", default=None, metavar="FILE", help="Explicit config file"
+    )
+    smoke_p.add_argument(
+        "--arms",
+        nargs="+",
+        default=None,
+        metavar="ARM",
+        help="Only these roster arms (default: all)",
+    )
+    smoke_p.add_argument(
+        "--roles",
+        nargs="+",
+        default=None,
+        metavar="ROLE",
+        choices=["tutor", "student", "scorer", "taxonomy", "groundtruth"],
+        help="Only these roles (default: all)",
+    )
+    smoke_p.add_argument(
+        "--providers",
+        nargs="+",
+        default=None,
+        metavar="P",
+        help="Only these providers (others reported as SKIP)",
+    )
+    smoke_p.add_argument(
+        "--no-sync",
+        dest="sync",
+        action="store_false",
+        help="Skip the per-arm sync generate checks",
+    )
+    smoke_p.add_argument(
+        "--no-batch",
+        dest="batch",
+        action="store_false",
+        help="Skip the per-provider batch submit+cancel checks",
+    )
+    smoke_p.add_argument(
+        "--max-tokens",
+        type=int,
+        default=0,
+        metavar="N",
+        help="Output cap for the sync pings (default 0 = model max, "
+        "same resolution the benchmark uses)",
+    )
+    smoke_p.add_argument(
+        "--strict-thinking",
+        action="store_true",
+        help="Escalate model-paced-thinking WARNs (no thinking observed) to FAIL",
+    )
+    smoke_p.add_argument(
+        "--json",
+        default=None,
+        metavar="FILE",
+        help="Also write a machine-readable report (e.g. results/smoke/<ts>.json)",
+    )
+
     return parser
+
+
+def _cmd_smoke(args) -> int:
+    """Implement the 'smoke' subcommand; returns the exit code."""
+    from tutormoments.config import describe_config_source
+    from tutormoments.smoke import build_smoke_plan, format_smoke_report, run_smoke
+
+    if args.config:
+        os.environ["TUTORMOMENTS_CONFIG"] = args.config
+    try:
+        plan = build_smoke_plan(
+            config_path=args.config,
+            arms=args.arms,
+            roles=args.roles,
+            providers=args.providers,
+            include_sync=args.sync,
+            include_batch=args.batch,
+        )
+    except (ValueError, FileNotFoundError) as e:
+        print("Error: " + str(e), file=sys.stderr)
+        return 2
+
+    report_obj = run_smoke(
+        plan,
+        strict_thinking=args.strict_thinking,
+        max_tokens=args.max_tokens,
+        config_source=describe_config_source(args.config),
+    )
+    print(format_smoke_report(report_obj))
+    if args.json:
+        os.makedirs(os.path.dirname(args.json) or ".", exist_ok=True)
+        with open(args.json, "w", encoding="utf-8") as f:
+            f.write(report_obj.to_json())
+        print(f"json report: {args.json}")
+    return 1 if report_obj.failed else 0
 
 
 def _cmd_report(args) -> None:
@@ -1283,6 +1415,9 @@ def main(argv=None) -> None:
 
     elif args.command == "view":
         _cmd_view(args)
+
+    elif args.command == "smoke":
+        sys.exit(_cmd_smoke(args))
 
     else:
         parser.print_help()
