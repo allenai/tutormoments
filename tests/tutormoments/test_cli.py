@@ -72,11 +72,6 @@ def _make_transcript(
     t.scenario_id = sid
     t.tutor_model = "claude-opus-4-8"
     t.generated_turns = [{"turn_number": 2, "role": "TUTOR", "text": "Hi"}]
-    t.to_dict.return_value = {
-        "scenario_id": sid,
-        "completed": True,
-        "generated_turns": [],
-    }
     t.tutor_latencies = tutor_latencies if tutor_latencies is not None else []
     t.student_latencies = student_latencies if student_latencies is not None else []
     t.tutor_usage = (
@@ -89,6 +84,18 @@ def _make_transcript(
         if student_usage is not None
         else {"input_tokens": 0, "output_tokens": 0, "total_tokens": 0}
     )
+    # Mirror the real Transcript.to_dict shape so tests exercising the resume
+    # path get usage/latency data back from disk, like a real resumed run.
+    t.to_dict.return_value = {
+        "scenario_id": sid,
+        "tutor_model": t.tutor_model,
+        "completed": True,
+        "generated_turns": [],
+        "tutor_usage": t.tutor_usage,
+        "student_usage": t.student_usage,
+        "tutor_latencies": t.tutor_latencies,
+        "student_latencies": t.student_latencies,
+    }
     return t
 
 
@@ -457,11 +464,25 @@ def test_run_cell_writes_latency_and_tokens(tmp_path):
 
 def test_run_cell_resumes(tmp_path):
     """Second run_cell call finds both scenarios already done; 0 new conversation
-    calls are made (is_done returns True for both)."""
+    calls are made (is_done returns True for both), and the rewritten
+    summary.json still carries the full run's token usage (tutor/student
+    reloaded from the on-disk transcripts, scorer from the on-disk scores) --
+    not just the zero API spend of the resumed invocation."""
     from tutormoments.cli import run_cell
 
     scenarios = list(FIXTURE_SCENARIOS)
-    transcripts = [_make_transcript(s.id) for s in scenarios]
+    transcripts = [
+        _make_transcript(
+            s.id,
+            tutor_usage={"input_tokens": 100, "output_tokens": 50, "total_tokens": 150},
+            student_usage={
+                "input_tokens": 60,
+                "output_tokens": 40,
+                "total_tokens": 100,
+            },
+        )
+        for s in scenarios
+    ]
     annotations = [_make_annotation(s.id) for s in scenarios]
 
     cfg_mock = _make_run_config(sample=2)
@@ -505,6 +526,17 @@ def test_run_cell_resumes(tmp_path):
     # summary.json still written on resume
     run_dir = tmp_path / run_id
     assert (run_dir / "summary.json").exists()
+
+    # ... and its token block still covers the resumed moments: tutor/student
+    # usage reloaded from the transcripts on disk, scorer usage from the
+    # reloaded annotations (2 moments x 15 total_tokens each).
+    summary = json.loads((run_dir / "summary.json").read_text(encoding="utf-8"))
+    tokens = summary["tokens"]
+    assert tokens["tutor"]["total_tokens"] == 300
+    assert tokens["student"]["total_tokens"] == 200
+    assert tokens["scorer"]["total_tokens"] == 30
+    assert tokens["total"]["total_tokens"] == 530
+    assert summary["run_counts"]["resumed"] == 2
 
 
 # ---------------------------------------------------------------------------

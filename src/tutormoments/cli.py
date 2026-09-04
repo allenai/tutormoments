@@ -602,18 +602,31 @@ def run_cell(
 
                         try:
                             ann = Annotation(**score_dict)
+                            # Reload the transcript alongside the score:
+                            # summary.json describes the whole run (run_counts
+                            # and the aggregate metrics already count resumed
+                            # moments), so the token/latency blocks must carry
+                            # their tutor/student usage too -- not just this
+                            # invocation's API spend. is_done guaranteed the
+                            # transcript file exists.
+                            transcript_dict = results.read_transcript(
+                                run_id, resume_sid, results_root=results_root
+                            )
                             completed_scenarios.append(scenario)
                             completed_annotations.append(ann)
+                            if transcript_dict is not None:
+                                completed_transcripts.append(
+                                    conversation.Transcript.from_dict(transcript_dict)
+                                )
                             counts["succeeded"] += 1
                             counts["resumed"] += 1
-                            # No transcript object on resume -- latencies not available
                         except Exception as e:
                             counts["failed"] += 1
                             failed_scenarios.append(
                                 {"id": sid, "error": str(e), "phase": "resume"}
                             )
                             logger.warning(
-                                "[trial %d][%d/%d] Could not reload score for %s: %s",
+                                "[trial %d][%d/%d] Could not reload score/transcript for %s: %s",
                                 trial_idx,
                                 i,
                                 n_total,
