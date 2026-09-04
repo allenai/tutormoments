@@ -10,6 +10,7 @@ from types import SimpleNamespace
 from tutormoments.moments import Moment
 from tutormoments.student import build_student_system_prompt, resolve_student
 from tutormoments.tutor import build_tutor_system_prompt, resolve_tutor
+from tutormoments.usage import EMPTY_USAGE, add_usage
 
 logger = logging.getLogger(__name__)
 
@@ -34,20 +35,8 @@ class Transcript:
     scenario_id: str
     tutor_model: str
     generated_turns: list[dict] = field(default_factory=list)
-    tutor_usage: dict = field(
-        default_factory=lambda: {
-            "input_tokens": 0,
-            "output_tokens": 0,
-            "total_tokens": 0,
-        }
-    )
-    student_usage: dict = field(
-        default_factory=lambda: {
-            "input_tokens": 0,
-            "output_tokens": 0,
-            "total_tokens": 0,
-        }
-    )
+    tutor_usage: dict = field(default_factory=lambda: dict(EMPTY_USAGE))
+    student_usage: dict = field(default_factory=lambda: dict(EMPTY_USAGE))
     # Per-call end-to-end wall-clock seconds. Meaning is unchanged by the
     # streaming work, so the paper's Figure 7 pipeline and the website
     # refresh script -- which read these directly -- stay comparable.
@@ -110,12 +99,6 @@ def _split_messages(text: str) -> list[str]:
     parts = normalized.split(NEXT_DELIMITER)
     messages = [p.strip() for p in parts]
     return [m for m in messages if m]
-
-
-def _add_usage(total: dict, new: dict) -> None:
-    """Accumulate token usage."""
-    for key in ("input_tokens", "output_tokens", "total_tokens"):
-        total[key] = total.get(key, 0) + new.get(key, 0)
 
 
 def _record_timing(timings: list[dict], response, turn_index: int) -> None:
@@ -368,7 +351,7 @@ def run_conversation(
                 text=raw_text, usage={}, latency_seconds=None, timing=None
             )
 
-        _add_usage(transcript.tutor_usage, response.usage)
+        add_usage(transcript.tutor_usage, response.usage)
         if response.latency_seconds is not None:
             transcript.tutor_latencies.append(response.latency_seconds)
         _record_timing(
@@ -425,7 +408,7 @@ def run_conversation(
                 text=raw_text, usage={}, latency_seconds=None, timing=None
             )
 
-        _add_usage(transcript.student_usage, response.usage)
+        add_usage(transcript.student_usage, response.usage)
         if response.latency_seconds is not None:
             transcript.student_latencies.append(response.latency_seconds)
         _record_timing(

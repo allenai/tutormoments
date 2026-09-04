@@ -48,6 +48,7 @@ from string import Template
 from typing import Any, Iterable, Iterator, Optional
 
 from tutormoments.resources import resource_text
+from tutormoments.usage import EMPTY_USAGE, add_usage
 
 logger = logging.getLogger(__name__)
 
@@ -1010,14 +1011,10 @@ def _make_classifier(client: Any, *, thinking=None):
             idx = a["id"] - 1
             if 0 <= idx < len(items):
                 out[items[idx]] = a["category"]
-        in_t = resp.usage.get("input_tokens", 0)
-        out_t = resp.usage.get("output_tokens", 0)
-        usage = {
-            "label": label,
-            "input_tokens": in_t,
-            "output_tokens": out_t,
-            "total_tokens": in_t + out_t,
-        }
+        # Log the full usage dict (legacy counters + canonical cost vector +
+        # provenance) so the sidecar carries everything costing needs; the
+        # per-batch label rides along as call-level detail.
+        usage = {"label": label, **resp.usage}
         return out, usage
 
     return ask
@@ -1564,7 +1561,9 @@ def classify_run(
         orientation[ORIENTATION_BY_LETTER.get(letter, "neutral")] += n
 
     # Sum per-batch usage from the sidecar for the run's token bookkeeping.
-    usage = {"input_tokens": 0, "output_tokens": 0, "total_tokens": 0}
+    # add_usage sums every integer key (canonical vector included) and keeps
+    # provenance; the per-batch "label" string is dropped by design.
+    usage = dict(EMPTY_USAGE)
     usage_path = out_dir / "usage_log.jsonl"
     if usage_path.exists():
         for line in usage_path.read_text(encoding="utf-8").splitlines():
@@ -1572,8 +1571,7 @@ def classify_run(
                 rec = json.loads(line)
             except json.JSONDecodeError:
                 continue
-            for k in usage:
-                usage[k] += int(rec.get(k, 0) or 0)
+            add_usage(usage, rec)
 
     return {
         "scheme_version": SCHEME_VERSION,
