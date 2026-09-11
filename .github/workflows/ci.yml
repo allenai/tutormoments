@@ -35,3 +35,50 @@ jobs:
       # without real API calls, so this is safe for pull requests from forks.
       - run: pip install -e ".[dev,build-dev,analysis]"
       - run: pytest tests -q
+
+  # Advisory only, always green: CI is offline by design (no secrets, safe for
+  # fork PRs), so it CANNOT verify that providers accept our wire formats.
+  # When a PR touches the files that build provider payloads, this job reminds
+  # the author to run `tutormoments smoke` locally (real API calls, costs
+  # cents) and tick the checklist item in the PR description.
+  smoke-reminder:
+    if: github.event_name == 'pull_request'
+    runs-on: ubuntu-latest
+    permissions:
+      pull-requests: write  # sticky comment; read-only on fork PRs (step is best-effort)
+    steps:
+      - uses: actions/checkout@v7
+        with:
+          fetch-depth: 0
+      - id: core
+        name: Detect core-API changes
+        run: |
+          CORE='src/tutormoments/client.py src/tutormoments/models.py src/tutormoments/models.yaml src/tutormoments/config.py src/tutormoments/default_config.yaml src/tutormoments/smoke.py'
+          if git diff --name-only "origin/${{ github.base_ref }}...HEAD" -- $CORE | grep -q .; then
+            echo "touched=true" >> "$GITHUB_OUTPUT"
+          fi
+      - if: steps.core.outputs.touched == 'true'
+        name: Post step summary
+        run: |
+          {
+            echo '## Live smoke test reminder (advisory)'
+            echo 'This PR touches provider wire-format code (client.py / models.py /'
+            echo 'models.yaml / config.py / default_config.yaml / smoke.py).'
+            echo 'CI cannot verify real API acceptance -- it runs offline by design.'
+            echo 'Run `tutormoments smoke` locally and check the box in the PR description.'
+          } >> "$GITHUB_STEP_SUMMARY"
+      - if: steps.core.outputs.touched == 'true' && github.event.pull_request.head.repo.full_name == github.repository
+        name: Upsert sticky PR comment (same-repo PRs only)
+        continue-on-error: true
+        uses: actions/github-script@v8
+        with:
+          script: |
+            const marker = '<!-- smoke-reminder -->';
+            const body = marker + '\n**Advisory:** this PR touches core API wire-format paths. ' +
+              'Please run `tutormoments smoke` locally and tick the smoke checklist item in the ' +
+              'PR description. CI is offline by design and cannot verify provider acceptance.';
+            const {data: comments} = await github.rest.issues.listComments(
+              {...context.repo, issue_number: context.issue.number});
+            const prev = comments.find(c => c.body.includes(marker));
+            if (prev) await github.rest.issues.updateComment({...context.repo, comment_id: prev.id, body});
+            else await github.rest.issues.createComment({...context.repo, issue_number: context.issue.number, body});

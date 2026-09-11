@@ -1,7 +1,7 @@
 """Assign v2-annotated transcripts to the `iterate` / `heldout` splits.
 
 Splits are **append-only**. Re-running this script only assigns transcript ids it
-has not seen before, and preserves previous assignments. 
+has not seen before, and preserves previous assignments.
 
 Assignment is deterministic given (seed, manifest, new transcript ids):
 
@@ -17,7 +17,7 @@ Assignment is deterministic given (seed, manifest, new transcript ids):
    noise pile up.
 
 Usage:
-    # preview without touching the manifest 
+    # preview without touching the manifest
     python -m tutormoments_build.v2.splits --dry-run
 
     # write/extend the manifest

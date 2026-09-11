@@ -15,9 +15,23 @@ from tutormoments.moments import Moment as Scenario
 # ---------------------------------------------------------------------------
 
 
-def _resp(text, usage=None, latency=None):
+def _resp(text, usage=None, latency=None, timing=None):
     """Build a fake LLM response."""
-    return SimpleNamespace(text=text, usage=usage or {}, latency_seconds=latency)
+    return SimpleNamespace(
+        text=text, usage=usage or {}, latency_seconds=latency, timing=timing
+    )
+
+
+def _timing(ttft=0.5, ttlt=2.0, cache_read=0):
+    """Build a fake ModelResponse.timing block."""
+    return {
+        "ttfc_seconds": ttft,
+        "ttft_seconds": ttft,
+        "ttlt_seconds": ttlt,
+        "output_tokens": 40,
+        "cache_read_input_tokens": cache_read,
+        "output_tps": 20.0,
+    }
 
 
 _FROZEN_TRAIT = {
@@ -113,13 +127,16 @@ def test_imports():
 def test_transcript_defaults():
     """Transcript has sensible defaults."""
     from tutormoments.conversation import Transcript
+    from tutormoments.usage import EMPTY_USAGE
 
     t = Transcript(scenario_id="abc", tutor_model="m")
     assert t.scenario_id == "abc"
     assert t.tutor_model == "m"
     assert t.generated_turns == []
-    assert t.tutor_usage == {"input_tokens": 0, "output_tokens": 0, "total_tokens": 0}
-    assert t.student_usage == {"input_tokens": 0, "output_tokens": 0, "total_tokens": 0}
+    # Zero legacy counters plus the canonical cost vector, all zero.
+    assert t.tutor_usage == EMPTY_USAGE
+    assert t.student_usage == EMPTY_USAGE
+    assert t.tutor_usage is not t.student_usage
     assert t.tutor_latencies == []
     assert t.student_latencies == []
     assert t.completed is False
@@ -221,19 +238,19 @@ def test_split_messages_whitespace_only():
 
 
 def test_add_usage():
-    from tutormoments.conversation import _add_usage
+    from tutormoments.usage import add_usage
 
     total = {"input_tokens": 10, "output_tokens": 5, "total_tokens": 15}
-    _add_usage(total, {"input_tokens": 3, "output_tokens": 2, "total_tokens": 5})
+    add_usage(total, {"input_tokens": 3, "output_tokens": 2, "total_tokens": 5})
     assert total == {"input_tokens": 13, "output_tokens": 7, "total_tokens": 20}
 
 
 def test_add_usage_missing_keys():
     """Missing keys in new dict are treated as 0."""
-    from tutormoments.conversation import _add_usage
+    from tutormoments.usage import add_usage
 
     total = {"input_tokens": 10, "output_tokens": 0, "total_tokens": 10}
-    _add_usage(total, {})
+    add_usage(total, {})
     assert total["input_tokens"] == 10
 
 
@@ -469,6 +486,108 @@ def test_run_conversation_none_latency_not_appended(monkeypatch):
     result = run_conversation(scenario, "fake-tutor", max_turns=4)
 
     assert result.tutor_latencies == []
+
+
+# ---------------------------------------------------------------------------
+# Tests: per-call streaming timing (tutor_timings / student_timings)
+# ---------------------------------------------------------------------------
+
+
+def test_run_conversation_timings_collected_in_order(monkeypatch):
+    """One timing entry per LLM call, tagged with its 0-based turn_index."""
+    from tutormoments.conversation import run_conversation
+
+    scenario = _make_scenario(cut_turn=5)
+    tutor_resp = [
+        _resp("T1", timing=_timing(ttft=0.9, cache_read=0)),
+        _resp("[END]", timing=_timing(ttft=0.3, cache_read=1500)),
+    ]
+    student_resp = [_resp("S1", timing=_timing(ttft=0.4, cache_read=1200))]
+    _patch_all(monkeypatch, tutor_resp, student_resp)
+
+    result = run_conversation(scenario, "fake-tutor", max_turns=6)
+
+    assert [t["turn_index"] for t in result.tutor_timings] == [0, 1]
+    assert [t["ttft_seconds"] for t in result.tutor_timings] == [0.9, 0.3]
+    assert [t["turn_index"] for t in result.student_timings] == [0]
+
+
+def test_run_conversation_cache_state_from_tokens_not_turn_index(monkeypatch):
+    """cache_state is read off cache_read_input_tokens, never inferred.
+
+    The first turn here reports a cache read and the second does not -- the
+    inverse of the turn-index heuristic. This is the real case where a short
+    pre-cut transcript falls below a model's minimum cacheable prefix and
+    caching silently fails on a later turn.
+    """
+    from tutormoments.conversation import run_conversation
+
+    scenario = _make_scenario(cut_turn=5)
+    tutor_resp = [
+        _resp("T1", timing=_timing(cache_read=900)),
+        _resp("[END]", timing=_timing(cache_read=0)),
+    ]
+    _patch_all(monkeypatch, tutor_resp, [_resp("S1", timing=_timing())])
+
+    result = run_conversation(scenario, "fake-tutor", max_turns=6)
+
+    assert [t["cache_state"] for t in result.tutor_timings] == ["hit", "miss"]
+
+
+def test_run_conversation_cache_state_unknown_when_provider_silent(monkeypatch):
+    """Gemini/Together report no cache tokens -- record unknown, never guess."""
+    from tutormoments.conversation import run_conversation
+
+    scenario = _make_scenario(cut_turn=5)
+    timing = {**_timing(), "cache_read_input_tokens": None}
+    _patch_all(monkeypatch, [_resp("[END]", timing=timing)], [])
+
+    result = run_conversation(scenario, "fake-tutor", max_turns=4)
+
+    assert result.tutor_timings[0]["cache_state"] == "unknown"
+
+
+def test_run_conversation_no_timing_leaves_list_empty(monkeypatch):
+    """Registered (callable) tutors produce no timing; the list stays empty."""
+    from tutormoments.conversation import run_conversation
+
+    scenario = _make_scenario(cut_turn=5)
+    _patch_all(monkeypatch, [_resp("[END]", latency=1.0, timing=None)], [])
+
+    result = run_conversation(scenario, "fake-tutor", max_turns=4)
+
+    assert result.tutor_timings == []
+    assert result.tutor_latencies == [1.0], "latency still recorded"
+
+
+def test_run_conversation_requests_streaming(monkeypatch):
+    """The conversation path must stream, or there is no TTFT to record."""
+    from tutormoments import conversation as conv_mod
+
+    scenario = _make_scenario(cut_turn=5)
+    calls = []
+
+    class _Client:
+        model = "fake-model"
+
+        def generate(self, prompt, **kwargs):
+            calls.append(kwargs)
+            return _resp("[END]", timing=_timing())
+
+    monkeypatch.setattr(
+        conv_mod,
+        "resolve_tutor",
+        lambda _id: {"kind": "hosted", "client": _Client(), "kwargs": {}},
+    )
+    monkeypatch.setattr(
+        conv_mod,
+        "resolve_student",
+        lambda _id: {"kind": "hosted", "client": _Client(), "kwargs": {}},
+    )
+
+    conv_mod.run_conversation(scenario, "fake-tutor", max_turns=4)
+
+    assert calls and all(c["stream"] is True for c in calls)
 
 
 # ---------------------------------------------------------------------------
@@ -722,292 +841,6 @@ def test_registered_student_needs_no_trait(monkeypatch):
 
 
 # ---------------------------------------------------------------------------
-# Helpers for batch tests
-# ---------------------------------------------------------------------------
-
-
-def _make_scenario_id(sid: str, cut_turn: int = 5) -> "Scenario":
-    """Like _make_scenario but with a custom scenario id."""
-    from tutormoments.moments import Moment as Scenario
-
-    context = [
-        {
-            "turn_number": i + 1,
-            "role": "tutor" if i % 2 == 0 else "student",
-            "text": f"text {i + 1}",
-        }
-        for i in range(cut_turn)
-    ]
-    return Scenario(
-        id=sid,
-        context=context,
-        dimension="scaffolding",
-        student={
-            "mode": "oracle",
-            "reference": "Turn 6. TUTOR: Hi",
-            "context": "Grade 5",
-            "trait": dict(_FROZEN_TRAIT),
-        },
-        rubric={"gold": "scaffolding", "hint": "hint"},
-        provenance={
-            "conv_id": f"conv-{sid}",
-            "cut_turn": cut_turn,
-            "turn_start": 3,
-            "turn_end": 5,
-            "moment_id": None,
-            "annotator_id": None,
-            "chosen_cut_turn": cut_turn,
-            "cut_votes": {},
-            "cluster_size": 1,
-            "representative": None,
-        },
-    )
-
-
-def _patch_batch(
-    monkeypatch,
-    tutor_batch_results: list[dict],
-    student_batch_results: list[dict],
-    tutor_kwargs: dict | None = None,
-    student_kwargs: dict | None = None,
-):
-    """Patch resolve_tutor, resolve_student, system prompts, trait, and tutormoments.client.run_batch.
-
-    tutor_batch_results: list of {sid: {"text": ...}} dicts, one per round.
-    student_batch_results: list of {sid: {"text": ...}} dicts, one per round.
-    tutor_kwargs/student_kwargs: roster generation kwargs returned by the
-    patched resolve_* (defaults to {}).
-
-    run_batch is called alternately: tutor round 1, student round 1, tutor round 2, ...
-    We interleave them in the call sequence.
-    """
-    tutor_client = MagicMock()
-    tutor_client.model = "fake-tutor-batch"
-    student_client = MagicMock()
-    student_client.model = "fake-student-batch"
-
-    monkeypatch.setattr(
-        "tutormoments.conversation.resolve_tutor",
-        lambda id: {
-            "kind": "hosted",
-            "client": tutor_client,
-            "kwargs": tutor_kwargs or {},
-        },
-    )
-    monkeypatch.setattr(
-        "tutormoments.conversation.resolve_student",
-        lambda id=None: {
-            "kind": "hosted",
-            "client": student_client,
-            "kwargs": student_kwargs or {},
-        },
-    )
-    monkeypatch.setattr(
-        "tutormoments.conversation.build_tutor_system_prompt",
-        lambda mode, **kw: "TUTOR_SYS",
-    )
-    monkeypatch.setattr(
-        "tutormoments.conversation.build_student_system_prompt",
-        lambda **kw: "STUDENT_SYS",
-    )
-
-    # Interleave: tutor round 1, student round 1, tutor round 2, ...
-    interleaved = []
-    for t_res, s_res in zip(tutor_batch_results, student_batch_results):
-        interleaved.append(t_res)
-        interleaved.append(s_res)
-    # If tutor_batch_results has one more (e.g. last round student skipped),
-    # append the trailing tutor result.
-    if len(tutor_batch_results) > len(student_batch_results):
-        interleaved.append(tutor_batch_results[-1])
-
-    run_batch_mock = MagicMock(side_effect=interleaved)
-    # Patch at tutormoments.client since run_conversations_batch imports lazily from there.
-    monkeypatch.setattr("tutormoments.client.run_batch", run_batch_mock)
-    monkeypatch.setattr(
-        "tutormoments.client.build_batch_entry",
-        lambda key, tail, **kw: {"key": key, "_tail": tail},
-    )
-    return run_batch_mock
-
-
-# ---------------------------------------------------------------------------
-# Tests: run_conversations_batch
-# ---------------------------------------------------------------------------
-
-
-def test_batch_import():
-    """run_conversations_batch is importable."""
-    from tutormoments.conversation import run_conversations_batch
-
-    assert run_conversations_batch is not None
-
-
-def test_batch_two_scenarios_returns_two_transcripts(monkeypatch):
-    """A 2-scenario batch returns exactly 2 Transcripts."""
-    from tutormoments.conversation import run_conversations_batch
-
-    s1 = _make_scenario_id("sid-1", cut_turn=3)
-    s2 = _make_scenario_id("sid-2", cut_turn=3)
-
-    # Round 1: both tutors reply normally, both students reply normally.
-    # max_turns=2 => 1 round (1 tutor + 1 student = 2 speaking turns).
-    tutor_round1 = {
-        "sid-1": {"text": "Hello from tutor"},
-        "sid-2": {"text": "Hi from tutor"},
-    }
-    student_round1 = {
-        "sid-1": {"text": "Student reply 1"},
-        "sid-2": {"text": "Student reply 2"},
-    }
-
-    _patch_batch(monkeypatch, [tutor_round1], [student_round1])
-
-    results = run_conversations_batch(
-        [s1, s2], tutor_id="fake-tutor", max_turns=2, poll_interval=0
-    )
-
-    assert len(results) == 2
-    assert results[0].scenario_id == "sid-1"
-    assert results[1].scenario_id == "sid-2"
-    assert all(r.completed for r in results)
-
-
-def test_batch_forwards_roster_thinking_and_effort_to_run_batch(monkeypatch):
-    """Benchmark fidelity: batch mode must forward the roster's generation
-    kwargs (thinking/effort/...) to run_batch, exactly as run_conversation
-    merges them into client.generate(). Regression test for the bug where
-    batch tutors silently ran without thinking/effort."""
-    from tutormoments.conversation import run_conversations_batch
-
-    s1 = _make_scenario_id("sid-1", cut_turn=3)
-    tutor_round1 = {"sid-1": {"text": "Hello from tutor"}}
-    student_round1 = {"sid-1": {"text": "Student reply"}}
-
-    run_batch_mock = _patch_batch(
-        monkeypatch,
-        [tutor_round1],
-        [student_round1],
-        tutor_kwargs={"thinking": True, "effort": "xhigh"},
-        student_kwargs={"thinking": False},
-    )
-
-    run_conversations_batch([s1], tutor_id="fake-tutor", max_turns=2, poll_interval=0)
-
-    tutor_call, student_call = run_batch_mock.call_args_list
-    assert tutor_call.kwargs["thinking"] is True
-    assert tutor_call.kwargs["effort"] == "xhigh"
-    assert student_call.kwargs["thinking"] is False
-    assert student_call.kwargs["effort"] == ""
-
-
-def test_batch_ended_via_tracked_per_scenario(monkeypatch):
-    """ended_via is tracked per-scenario correctly."""
-    from tutormoments.conversation import run_conversations_batch
-
-    s1 = _make_scenario_id("sid-1", cut_turn=3)
-    s2 = _make_scenario_id("sid-2", cut_turn=3)
-
-    # s1 tutor emits [END], s2 tutor replies normally, then student replies.
-    tutor_round1 = {
-        "sid-1": {"text": "All done! [END]"},
-        "sid-2": {"text": "Keep going."},
-    }
-    student_round1 = {"sid-2": {"text": "OK, continuing."}}
-
-    # With max_turns=4, s1 ends in round 1 via END; s2 ends via MAX_TURNS.
-    _patch_batch(monkeypatch, [tutor_round1], [student_round1])
-
-    results = run_conversations_batch(
-        [s1, s2], tutor_id="fake-tutor", max_turns=2, poll_interval=0
-    )
-
-    by_id = {r.scenario_id: r for r in results}
-    assert by_id["sid-1"].ended_via == "END"
-    assert by_id["sid-2"].ended_via == "MAX_TURNS"
-
-
-def test_batch_ended_scenario_pruned_from_later_rounds(monkeypatch):
-    """A scenario that emits [END] is not included in subsequent rounds."""
-    from tutormoments.conversation import run_conversations_batch
-
-    s1 = _make_scenario_id("sid-1", cut_turn=3)
-    s2 = _make_scenario_id("sid-2", cut_turn=3)
-
-    # Round 1 tutor: s1 ends, s2 continues.
-    tutor_round1 = {
-        "sid-1": {"text": "Bye! [END]"},
-        "sid-2": {"text": "More to go."},
-    }
-    # Round 1 student: only s2 (s1 pruned).
-    student_round1 = {"sid-2": {"text": "Got it."}}
-    # Round 2 tutor: only s2 active.
-    tutor_round2 = {"sid-2": {"text": "Final turn. [END]"}}
-
-    run_batch_mock = _patch_batch(
-        monkeypatch, [tutor_round1, tutor_round2], [student_round1]
-    )
-
-    results = run_conversations_batch(
-        [s1, s2], tutor_id="fake-tutor", max_turns=6, poll_interval=0
-    )
-
-    # run_batch calls: tutor_r1, student_r1, tutor_r2 (student_r2 skipped since all ended).
-    # Total calls: 3
-    assert run_batch_mock.call_count == 3
-
-    by_id = {r.scenario_id: r for r in results}
-    assert by_id["sid-1"].ended_via == "END"
-    assert by_id["sid-2"].ended_via == "END"
-
-
-def test_batch_latencies_omitted(monkeypatch):
-    """Batch mode does not populate tutor_latencies or student_latencies."""
-    from tutormoments.conversation import run_conversations_batch
-
-    s1 = _make_scenario_id("sid-1", cut_turn=3)
-
-    tutor_round1 = {
-        "sid-1": {
-            "text": "Hello",
-            "usage": {"input_tokens": 5, "output_tokens": 3, "total_tokens": 8},
-        }
-    }
-    student_round1 = {"sid-1": {"text": "Hi back"}}
-
-    _patch_batch(monkeypatch, [tutor_round1], [student_round1])
-
-    results = run_conversations_batch(
-        [s1], tutor_id="fake-tutor", max_turns=2, poll_interval=0
-    )
-
-    r = results[0]
-    assert r.tutor_latencies == []
-    assert r.student_latencies == []
-
-
-def test_batch_round_based_ordering(monkeypatch):
-    """Generated turns follow T-S-T-S order across rounds."""
-    from tutormoments.conversation import run_conversations_batch
-
-    s1 = _make_scenario_id("sid-1", cut_turn=2)
-
-    tutor_round1 = {"sid-1": {"text": "Tutor1"}}
-    student_round1 = {"sid-1": {"text": "Student1"}}
-    tutor_round2 = {"sid-1": {"text": "Tutor2 [END]"}}
-
-    _patch_batch(monkeypatch, [tutor_round1, tutor_round2], [student_round1])
-
-    results = run_conversations_batch(
-        [s1], tutor_id="fake-tutor", max_turns=6, poll_interval=0
-    )
-
-    turns = results[0].generated_turns
-    roles = [t["role"] for t in turns]
-    assert roles == ["TUTOR", "STUDENT", "TUTOR"]
-
-
-# ---------------------------------------------------------------------------
 # End-to-end integration test: tutor.py + student.py + conversation.py
 # ---------------------------------------------------------------------------
 
@@ -1103,3 +936,46 @@ def test_transcript_from_dict_roundtrip():
     assert t2.generated_turns == t.generated_turns
     assert t2.completed is True
     assert t2.ended_via == "MAX_TURNS"
+
+
+# ---------------------------------------------------------------------------
+# Output token limits: the benchmark imposes none
+# ---------------------------------------------------------------------------
+
+
+def test_run_conversation_imposes_no_output_token_limit(monkeypatch):
+    """max_tokens=0 reaches the client, which resolves it to the model max.
+
+    A cap a thinking model can exhaust before emitting visible text produces
+    an empty response, which is recorded as "..." and scored as if the tutor
+    said that. Measured on claude-opus-4-8 at effort=xhigh, a 1500-token cap
+    did this to 17.5% of tutor turns while the published paper run had none.
+    """
+    from tutormoments import conversation as conv_mod
+
+    scenario = _make_scenario(cut_turn=5)
+    seen = []
+
+    class _Client:
+        model = "fake-model"
+
+        def generate(self, prompt, **kwargs):
+            seen.append(kwargs["max_tokens"])
+            return _resp("[END]", timing=_timing())
+
+    monkeypatch.setattr(
+        conv_mod,
+        "resolve_tutor",
+        lambda _id: {"kind": "hosted", "client": _Client(), "kwargs": {}},
+    )
+    monkeypatch.setattr(
+        conv_mod,
+        "resolve_student",
+        lambda _id: {"kind": "hosted", "client": _Client(), "kwargs": {}},
+    )
+
+    conv_mod.run_conversation(scenario, "fake-tutor", max_turns=4)
+
+    assert seen and all(v == 0 for v in seen), (
+        "conversation must not impose an output cap; 0 means model maximum"
+    )

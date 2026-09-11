@@ -79,7 +79,9 @@ def width_key(width: int | None) -> str:
 
 def sort_widths(keys) -> list[str]:
     """Width keys widest-first: ``full``, then descending turn counts."""
-    return sorted(set(keys), key=lambda key: (0, 0) if key == FULL_KEY else (1, -int(key)))
+    return sorted(
+        set(keys), key=lambda key: (0, 0) if key == FULL_KEY else (1, -int(key))
+    )
 
 
 # ===========================================================================

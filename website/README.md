@@ -49,8 +49,13 @@ Results live in the benchmark's `results/` (gitignored) alongside the `analysis/
 After running new models:
 
 ```sh
-python3 scripts/refresh-data.py /path/to/tutormoments/checkout
+/path/to/tutormoments/.venv/bin/python scripts/refresh-data.py /path/to/tutormoments
 ```
+
+Run it with an interpreter that can `import tutormoments` — the checkout's own venv is the
+easy one. The TTFT figures come with publishability rules that live in
+`tutormoments.latency`, and the script reads them out rather than restating them. Under a
+bare `python3` it refreshes everything else and says that it skipped `ttft_s`.
 
 This regenerates `static/data/{leaderboard,latency,action_distribution}.json`. The
 action-distribution figure reads the repo's
@@ -59,8 +64,32 @@ action-distribution figure reads the repo's
 new models to the `MODELS` list in the script (plus `ACTION_CSV_MODELS`, and `MODEL_STYLE` in
 `static/js/main.js`). Partial refreshes are fine — missing inputs just skip that JSON.
 
-## TODOs when things go live
+### The two latency figures
 
-- Dataset pill in `index.html` — link when TutorMoments-Transcripts-Preview is published
-- Blog pill in `index.html` — link when the Ai2 blog post is live
-- `static/data/latency.json` — latencies are currently read off the paper's Figure 7 (±0.2s); the refresh script replaces them with exact values from a checkout with results
+`static/data/latency.json` carries both, from different sources, and they are not
+interchangeable:
+
+- **`ttft_s`** — median time to first *visible* token, from `tutormoments latency`. That probe
+  runs strictly serially, so this is the figure that is comparable across models, and it is
+  what the chart's x-axis plots. `ttft_first_s` / `ttft_later_s` split it by turn position —
+  the first message of a session against turns 3 and 5 — which the probe recorded itself, so
+  every probed model gets the split regardless of what its provider reports about caching.
+  A model with no probe run has no `ttft_s` key and is left off the chart rather than
+  plotted at zero.
+- **`ttlt_s`** — median time to last token from the same probe: when the student can actually
+  reply. Shown in the tooltip as "Full turn, end to end".
+- **`latency_s`** — end-to-end seconds per tutor turn from a benchmark run, which replays
+  moments under `--concurrency`. Rate-limit tiers differ per model, so this compares a model
+  against its own history but not against another model. It is kept in the JSON for
+  correspondence with the paper's Figure 7 but is **not displayed** — the tooltip's
+  end-to-end row is the probe's `ttlt_s`.
+
+`ttft_s` values are read from probe runs under `<checkout>/results` (override with
+`--probe-root`), taking the newest run per model that measured the frozen subsample in full.
+The `ttft.subsample_id` recorded in the JSON is what makes the series auditable: a different
+hash means different prompts were measured, and the script warns rather than charting two
+samples together. See `docs/latency.md` in the main repo.
+
+`latency_s` is still read off the paper's Figure 7 (±0.2s) for every model; a checkout with
+`results/benchmark/` present replaces those with exact values. Since nothing on the page
+renders it, that estimate no longer needs a footnote.

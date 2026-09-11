@@ -1,9 +1,9 @@
-# Released benchmark dataset. `id` is the Hugging Face dataset id (null until
-# the release is published — pass --dataset or --data_path meanwhile);
-# `revision` pins a dataset commit/tag for reproducibility; `config` names the
-# dataset config that holds the runnable moments set.
+# Released benchmark dataset. `id` is the Hugging Face dataset id (override with
+# --dataset, or --data_path for a local release dir); `revision` pins a dataset
+# commit/tag for reproducibility; `config` names the dataset config that holds
+# the runnable moments set.
 dataset:
-  id: null
+  id: allenai/tutormoments-preview
   revision: null
   config: moments
 
@@ -13,25 +13,38 @@ providers:
   gemini:    { env: GEMINI_API_KEY }
   together:  { env: TOGETHER_API_KEY }
 
-models:          # tutor roster; provider inferred from id
-  claude-opus-4-8:             { thinking: true, effort: xhigh }
-  claude-sonnet-4-6:           { thinking: true, effort: high }
-  # Introduce Sonnet 5: first Sonnet model with an xhigh effort option
-  claude-sonnet-5:             { thinking: adaptive, effort: xhigh }
-  gemini-2.5-pro:              { thinking: true, thinking_budget: -1 }
-  gemini-3.5-flash:            { thinking: true, thinking_budget: -1 }
-  gpt-5.4-mini-2026-03-17:     { thinking: true, reasoning_effort: high }
-  gpt-5.5-2026-04-23:          { thinking: true, reasoning_effort: high }
-  deepseek-ai/DeepSeek-V4-Pro: {}
+# Tutor roster: each key is an ARM -- a benchmark condition. `model` names the
+# provider model id, provider-native keys state the exact request parameters,
+# and `condition` is the grouping label written into run outputs. The same
+# model may appear under several arms with different parameters, e.g.:
+#   gemini-2.5-low: { model: gemini-2.5-pro, thinking_budget: 4096, condition: low }
+#   gpt-5.5-low:   { model: gpt-5.5-2026-04-23, reasoning: low, condition: low }
+benchmark_models:
+  claude-opus-4-8:         { model: claude-opus-4-8, thinking: { type: adaptive }, effort: xhigh, condition: xhigh }
+  claude-sonnet-4-6:       { model: claude-sonnet-4-6, thinking: { type: adaptive }, effort: high, condition: high }
+  # Sonnet 5: first Sonnet model with an xhigh effort option.
+  claude-sonnet-5:         { model: claude-sonnet-5, thinking: { type: adaptive }, effort: xhigh, condition: xhigh }
+  # Gemini and DeepSeek arms run model-paced thinking: Gemini sends
+  # thinking_budget -1; DeepSeek-V4-Pro reasons internally with no wire knob.
+  gemini-2.5-pro:          { model: gemini-2.5-pro, include_thoughts: true, thinking_budget: -1, condition: dynamic }
+  gemini-3.5-flash:        { model: gemini-3.5-flash, include_thoughts: true, thinking_budget: -1, condition: dynamic }
+  gpt-5.4-mini-2026-03-17: { model: gpt-5.4-mini-2026-03-17, reasoning: high, condition: high }
+  gpt-5.5-2026-04-23:      { model: gpt-5.5-2026-04-23, reasoning: high, condition: high }
+  deepseek-v4-pro:         { model: deepseek-ai/DeepSeek-V4-Pro, condition: dynamic }
 
-student: { model: claude-opus-4-6, mode: oracle, thinking: false }
-scorer:  { model: claude-opus-4-6, thinking: adaptive }
+# Role blocks state provider-native thinking parameters the same way arms do.
+# "Off" is stated explicitly ({type: disabled}) rather than by omitting the
+# param: what omission means depends on the model generation (no thinking on
+# Anthropic 4.x, adaptive on Sonnet 5+), so an explicit block keeps the
+# condition stable under model swaps and lets smoke assert it.
+student: { model: claude-opus-4-6, mode: oracle, thinking: { type: disabled } }
+scorer:  { model: claude-opus-4-6, thinking: { type: adaptive } }
 
 # Action-taxonomy classification. Runs on every `tutormoments run` (writes
 # results/<run_id>/taxonomy/classified.csv + a taxonomy block in summary.json)
 # and backs the dev `tutormoments taxonomy` command. Pinned to opus-4-8 with
-# thinking disabled for reproducibility of the published action distribution.
-taxonomy: { model: claude-opus-4-8, thinking: false, batch_size: 50 }
+# thinking off for reproducibility of the published action distribution.
+taxonomy: { model: claude-opus-4-8, thinking: { type: disabled }, batch_size: 50 }
 
 defaults: { trials: 1, max_turns: 5 }
 retry:    { max_retries: 5, base_delay: 5 }
@@ -46,35 +59,37 @@ execution: { replay_concurrency: 4 }
 # v2 annotation-round classification (dev-only
 # `python -m tutormoments_build.v2.classify_excerpts`). Runs the
 # tutormoments_build/prompts/v2 prompts over rendered human-human moment
-# excerpts. Pinned to opus-5 with adaptive thinking at xhigh effort -- effort is
-# pinned rather than left at the API default so the baseline is effort-matched
-# to the xhigh comparison models below. Note this is a newer model
+# excerpts. Pinned to opus-5 with adaptive thinking at xhigh effort -- effort
+# is pinned rather than left at the API default so the baseline is
+# effort-matched to the xhigh comparison models. Note this is a newer model
 # than the opus-4-8 the v1 ground truth was built on, so v2 labels are not
-# directly comparable to v1 ones. `--model <id>` classifies with another scoring
-# model for comparison; its thinking/effort settings are read from `v2.models`
-# below, falling back to the `models` tutor roster above for an id already
-# configured there.
+# directly comparable to v1 ones.
+#
+# Like the arms and role blocks above, every model here states its
+# provider-native request parameters, so what was sent is readable without
+# consulting a mapping. `--model <id>` classifies with another scoring model
+# for comparison: its parameters come from `v2.models` below, falling back to
+# the `benchmark_models` arm of the same name, so a model already on the tutor
+# roster classifies under exactly the parameters the benchmark runs it with.
 v2:
   model: claude-opus-5
   poll_interval: 60
-  thinking: adaptive
+  thinking: { type: adaptive }
   effort: xhigh
-  # Comparison scoring models for this round. Kept here rather than on the tutor
-  # roster: these classify moments, they are never replayed as tutors, and
-  # `tutormoments run` draws its candidates from that roster.
+  # Comparison scoring models for this round, keyed by model id. Kept here
+  # rather than on the tutor roster: these classify moments, they are never
+  # replayed as tutors, and `tutormoments run` draws its candidates from that
+  # roster. A model that IS on the roster (gemini-3.5-flash) needs no entry.
   models:
-    gpt-5.6-sol: { thinking: true, reasoning_effort: xhigh }
+    gpt-5.6-sol: { reasoning: xhigh }
 
 # Ground-truth build phase (dev-only `tutormoments dataset build-ground-truth`).
-# opus-4-8 uses adaptive thinking only: the Anthropic client sends {type: adaptive}
-# and ignores thinking_budget/reasoning_effort. The paper's ground truth was built
-# on opus-4-8 with adaptive thinking -- keep this pinned for reproducibility.
+# The paper's ground truth was built on opus-4-8 with adaptive (model-paced)
+# thinking; keep this pinned for reproducibility.
 groundtruth:
   model: claude-opus-4-8
   poll_interval: 60
-  thinking: adaptive
-  thinking_budget: 0
-  reasoning_effort: ""
+  thinking: { type: adaptive }
   labeller:                 # per-annotation_type effectiveness templates (hybrid routing)
     scaffolding: classify_scaffolding
     rapport: classify_rapport

@@ -1,6 +1,6 @@
 """Run the v2 classification prompts over human-human moment excerpts.
 
-``excerpts.py`` creates excerpts. 
+``excerpts.py`` creates excerpts.
 
 Using prompts in ``tutormoments_build/prompts/v2/<version>/``:
 
@@ -13,17 +13,17 @@ question, so its predictions are filed apart from the ones the previous revision
 made rather than replacing them.
 
 Together they predict ``scaffolding_present``, ``rigor_present``, ``over_scaffolding_present``,
-in a manner that lines up for direct comparison with gold labels. 
+in a manner that lines up for direct comparison with gold labels.
 
-**The over-scaffolding pass is gated on the gold labels**. 
+**The over-scaffolding pass is gated on the gold labels**.
 It is sent only where the annotators marked
-``scaffolding_appropriate`` *and* ``scaffolding_present``. 
+``scaffolding_appropriate`` *and* ``scaffolding_present``.
 
 What is left is the question the prompt was written for: scaffolding was called
-for, the tutor scaffolded, did they scaffold too much? 
+for, the tutor scaffolded, did they scaffold too much?
 
 Moments outside the gate get no over-scaffolding call at all: the field is
-``null``. 
+``null``.
 
 Both passes ride in one batch, and both read the same excerpt: the whole
 transcript from its first row through the moment's last, with no lead-up window
@@ -32,11 +32,15 @@ elided, so a prompt weighing what the student has already shown, or what the
 tutor has already tried, is reading the whole session rather than a window
 guessed in advance.
 
-Model and thinking default to the ``v2`` block in the runtime config. 
-``--model`` sets the model, with hyperparameters 
-(thinking, effort, reasoning_effort, thinking_budget) from
-that model's entry under ``v2.models`` in the config. Falling back to the
-top-level ``models`` tutor roster for an id already configured there.
+Model and reasoning parameters default to the ``v2`` block in the runtime
+config. ``--model`` sets the model; its parameters are read from that model's
+entry under ``v2.models``, falling back to the ``benchmark_models`` arm of the
+same name, so a model already on the tutor roster classifies at exactly the
+parameters the benchmark runs it with. Either way the parameters are stated in
+the provider's own parlance (Anthropic ``thinking``/``effort``, Gemini
+``thinking_budget``/``include_thoughts``, OpenAI ``reasoning``) and are
+validated at config-read time, so a round that cannot be submitted as
+configured fails before a batch is built rather than after it is paid for.
 
 Predictions are written per model and prompt version:
 ``<out-dir>/<model>/<prompt version>/<split>.jsonl``. An existing file is never
@@ -77,6 +81,12 @@ from collections import Counter
 from dataclasses import dataclass
 
 from tutormoments.logging_setup import logging_args_parent, setup_logging
+from tutormoments.models import (
+    NATIVE_THINKING_KEYS,
+    ThinkingConfigError,
+    infer_provider,
+    resolve_thinking,
+)
 from tutormoments_build.resources import resource_path, resource_text
 from tutormoments_build.v2 import excerpts
 
@@ -129,7 +139,7 @@ OVER_SCAFFOLDING_PREFIX = "overscaffold"
 # stripped-down custom config. The config file is the source of truth.
 FALLBACK_SPEC = {
     "model": "claude-opus-5",
-    "thinking": "adaptive",
+    "thinking": {"type": "adaptive"},
     "effort": "xhigh",
     "poll_interval": 60,
 }
@@ -227,53 +237,118 @@ def load_prompt_set(version: str) -> PromptSet:
 # ===========================================================================
 
 
-# Per-model knobs read off a `v2.models` (or tutor roster) entry when --model
-# names one. poll_interval is not among them: it is a property of the round, not
-# the model, so it stays whatever the v2 block says.
-ROSTER_KEYS = ("thinking", "thinking_budget", "reasoning_effort", "effort")
+@dataclass(frozen=True)
+class V2Spec:
+    """One classification round's model and the request parameters it runs at.
 
-
-def model_knobs(model: str, scoped: dict, config_path=None) -> dict:
-    """Generation knobs for a --model id: ``v2.models`` first, tutor roster second.
-
-    Scoring models for this round belong under the v2 block: they classify
-    moments and are never replayed as tutors, while the top-level ``models``
-    roster is the candidate list `tutormoments run` draws from. Ids already on
-    that roster still resolve, so a model configured there needs no second
-    entry.
-
-    Either lookup missing raises rather than defaulting: an unconfigured model
-    has no declared thinking config, and guessing one would misreport how a
-    label was made.
+    ``thinking`` holds the provider-native parameters exactly as the config
+    stated them -- ``{"thinking": {"type": "adaptive"}, "effort": "xhigh"}``
+    for Anthropic, ``{"reasoning": "xhigh"}`` for OpenAI, ``{"thinking_budget":
+    -1, "include_thoughts": True}`` for Gemini -- and is handed to ``run_batch``
+    unchanged. Recorded on every prediction, so what a label was made at is
+    readable off the record without consulting a mapping.
     """
-    from tutormoments.client import infer_provider
-    from tutormoments.config import resolve_model
+
+    model: str
+    provider: str
+    thinking: dict
+    poll_interval: int
+
+
+def _native_thinking(block: str, model: str, entry: dict) -> dict:
+    """Pull the provider-native thinking parameters out of a config entry.
+
+    The legal keys depend on the model's provider, so an entry that names
+    another vendor's knob (an OpenAI model carrying Anthropic's ``effort``) is
+    a config error rather than a silently dropped setting. Validation is the
+    runtime's own ``resolve_thinking``, and it runs at config-read time: a
+    round that cannot be submitted as configured must fail before a batch is
+    built, not after it is paid for.
+    """
+    allowed = NATIVE_THINKING_KEYS[infer_provider(model)]
+    unknown = set(entry) - allowed
+    if unknown:
+        raise ThinkingConfigError(
+            f"config {block}: unknown key(s) {sorted(unknown)} for model "
+            f"{model}. Allowed: {sorted(allowed)}."
+        )
+    try:
+        resolve_thinking(model, entry)
+    except ThinkingConfigError as exc:
+        raise ThinkingConfigError(f"config {block}: {exc}") from None
+    return dict(entry)
+
+
+def model_knobs(model: str, scoped: dict, config_path=None) -> tuple[str, str, dict]:
+    """Request parameters for a ``--model`` id: ``v2.models``, then the arms.
+
+    Returns ``(block name, model id, the entry's raw provider-native keys)``.
+    The model id is resolved rather than echoed back: an arm may be named for
+    the filesystem while carrying a vendor-prefixed id, and it is the id the
+    client has to be pointed at.
+
+    Scoring models for this round belong under ``v2.models``: they classify
+    moments and are never replayed as tutors, while ``benchmark_models`` is the
+    arm roster ``tutormoments run`` draws its candidates from. A model already
+    on that roster needs no second entry -- it resolves to its arm, so it
+    classifies at exactly the parameters the benchmark runs it with.
+
+    A model in neither place raises rather than defaulting: an unconfigured
+    model has no declared reasoning condition, and guessing one would misreport
+    how a label was made. A model id carried by several arms is equally
+    ambiguous -- the arms differ precisely in the parameters being asked for --
+    so it raises too, naming them so the arm can be picked by name.
+    """
+    from tutormoments.config import load_config, resolve_arm
 
     if model in scoped:
-        # The tutor roster path gets this check from resolve_model. An id no
-        # client can route has to fail here rather than at batch submission.
-        infer_provider(model)
-        return scoped[model] or {}
+        return f"v2.models.{model}", model, dict(scoped[model] or {})
 
-    try:
-        return resolve_model(model, config_path)["kwargs"]
-    except ValueError as exc:
-        # Name both places a comparison model can be configured, so the fix is
-        # obvious from the error.
+    # An arm is named by its key but carries a model id, and the two differ
+    # where an arm name had to be spelled for the filesystem
+    # (deepseek-v4-pro -> deepseek-ai/DeepSeek-V4-Pro). Match either, with an
+    # exact key match winning outright.
+    raw_arms = load_config(config_path).get("benchmark_models") or {}
+    if model in raw_arms:
+        matches = [model]
+    else:
+        matches = [
+            name
+            for name, entry in raw_arms.items()
+            if (entry or {}).get("model", name) == model
+        ]
+    if len(matches) > 1:
         raise ValueError(
-            f"{exc} Models under the config `v2.models`: "
-            f"{', '.join(scoped) or '(none)'}"
-        ) from exc
+            f"Model '{model}' is carried by several arms "
+            f"({', '.join(matches)}), which differ in exactly the parameters "
+            "being asked for. Name the arm instead."
+        )
+    if matches:
+        arm = resolve_arm(matches[0], config_path)
+        return f"benchmark_models.{arm.name}", arm.model, dict(arm.thinking)
+
+    # Name both places a comparison model can be configured, so the fix is
+    # obvious from the error.
+    raise ValueError(
+        f"Model '{model}' is configured nowhere. Models under the config "
+        f"`v2.models`: {', '.join(scoped) or '(none)'}. Arms under "
+        f"`benchmark_models`: {', '.join(raw_arms) or '(none)'}"
+    )
 
 
-def phase_config(config_path=None, model: str | None = None) -> dict:
-    """Return the v2 classification phase config (model/thinking/poll_interval).
+def phase_config(config_path=None, model: str | None = None) -> V2Spec:
+    """Return the v2 classification phase spec (model/thinking/poll_interval).
 
-    ``model`` overrides the v2 block's model. Its generation knobs then come
-    from ``model_knobs``, so a comparison run is configured in the config file
-    rather than on the command line; anything that entry does not set keeps the
-    v2 block's value. The v2 block's own model needs no entry -- it is already
-    fully specified there.
+    ``model`` overrides the v2 block's model. Its request parameters then come
+    wholesale from ``model_knobs``, never merged with the v2 block's: the
+    entry is the override's *complete* reasoning condition, and inheriting
+    anything would cross vendors -- an OpenAI model carrying the baseline's
+    Anthropic ``effort`` -- or misreport the depth a label was made at. Every
+    entry therefore states its condition in full; a provider with a reasoning
+    knob and an entry that sets none of it is a config error, not a default.
+
+    ``poll_interval`` is a property of the round, not of the model, so it stays
+    whatever the v2 block says under an override.
     """
     from tutormoments.config import load_config
 
@@ -286,37 +361,22 @@ def phase_config(config_path=None, model: str | None = None) -> dict:
     else:
         cfg.update(block)
 
-    # `v2.models` is a lookup table for --model, not a setting of the round, so
-    # it must not ride along in the returned spec (which is recorded per
-    # prediction and passed to the batch).
+    # `v2.models` is a lookup table for --model, not a setting of the round.
     scoped = cfg.pop("models", None) or {}
+    poll_interval = int(cfg.pop("poll_interval", 60))
 
     if model and model != cfg["model"]:
-        kwargs = model_knobs(model, scoped, config_path)
-        cfg["model"] = model
-        # The entry is the override's *complete* generation config, so every
-        # per-model knob is cleared before it is applied. Inheriting them would
-        # cross vendors -- an OpenAI model carrying the baseline's Anthropic
-        # `effort` -- and misreport the depth a label was made at. `thinking`
-        # then defaults off rather than to the v2 block's adaptive: a configured
-        # model that sets no thinking key means thinking off.
-        for key in ROSTER_KEYS:
-            cfg.pop(key, None)
-        cfg["thinking"] = False
-        cfg.update({k: v for k, v in kwargs.items() if k in ROSTER_KEYS})
+        block_name, model, entry = model_knobs(model, scoped, config_path)
+    else:
+        model = cfg.pop("model")
+        block_name, entry = "v2", dict(cfg)
 
-    return cfg
-
-
-def use_thinking(cfg: dict) -> bool:
-    """Normalise the config ``thinking`` value to the bool run_batch expects.
-
-    Mirrors ``tutormoments_build.groundtruth._use_thinking``: a string like
-    "adaptive"/"enabled" (or True) enables thinking, anything else disables it.
-    Passing the raw config string through would make any non-empty string --
-    "disabled" included -- truthy.
-    """
-    return cfg.get("thinking", False) in ("adaptive", "enabled", True)
+    return V2Spec(
+        model=model,
+        provider=infer_provider(model),
+        thinking=_native_thinking(block_name, model, entry),
+        poll_interval=poll_interval,
+    )
 
 
 # ===========================================================================
@@ -592,7 +652,7 @@ def parse_over_scaffolding(text: str) -> tuple[dict, bool]:
 # ===========================================================================
 
 
-def run_entries(entries: list[dict], cfg: dict, batch_id: str | None = None) -> dict:
+def run_entries(entries: list[dict], cfg: V2Spec, batch_id: str | None = None) -> dict:
     """Submit one batch and return {key: {"text", "usage"} | {"error", ...}}.
 
     ``batch_id`` resumes polling an in-flight batch instead of submitting a new
@@ -601,7 +661,7 @@ def run_entries(entries: list[dict], cfg: dict, batch_id: str | None = None) -> 
     """
     from tutormoments.client import ModelClient, run_batch
 
-    client = ModelClient(cfg["model"])
+    client = ModelClient(cfg.model)
 
     def _created(created_id):
         logger.info(
@@ -613,11 +673,8 @@ def run_entries(entries: list[dict], cfg: dict, batch_id: str | None = None) -> 
         entries,
         json_mode=True,
         display_name="v2_classify_excerpts",
-        poll_interval=cfg.get("poll_interval", 60),
-        thinking=use_thinking(cfg),
-        thinking_budget=cfg.get("thinking_budget", 0),
-        reasoning_effort=cfg.get("reasoning_effort", ""),
-        effort=cfg.get("effort", ""),
+        poll_interval=cfg.poll_interval,
+        thinking=cfg.thinking,
         existing_batch_id=batch_id,
         on_batch_created=_created,
     )
@@ -659,7 +716,7 @@ def _pass_result(raw: dict | None, parse) -> dict:
 
 
 def build_record(
-    excerpt_record: dict, raw_entries: dict, cfg: dict, prompts: PromptSet
+    excerpt_record: dict, raw_entries: dict, cfg: V2Spec, prompts: PromptSet
 ) -> dict:
     """Assemble one prediction record from an excerpt record and the batch results.
 
@@ -694,17 +751,15 @@ def build_record(
         "transcript_id": excerpt_record["transcript_id"],
         "conversation_id": excerpt_record.get("conversation_id"),
         "split": excerpt_record["split"],
-        "model": cfg["model"],
-        "thinking": cfg.get("thinking"),
-        # The reasoning-depth knobs the round actually ran with, under the names
-        # the two APIs use (`effort` is Anthropic's, `reasoning_effort` OpenAI's;
-        # a model uses one or neither). Recorded because they are part of how a
-        # label was produced: the same model at a pinned effort and at the API
-        # default can answer a borderline moment differently, and without these
-        # two rounds write identical-looking metadata.
-        "effort": cfg.get("effort") or None,
-        "reasoning_effort": cfg.get("reasoning_effort") or None,
-        "thinking_budget": cfg.get("thinking_budget") or None,
+        "model": cfg.model,
+        "provider": cfg.provider,
+        # The request parameters the round actually ran with, in the provider's
+        # own parlance and exactly as they went on the wire. Recorded because
+        # they are part of how a label was produced: the same model at a pinned
+        # effort and at the API default can answer a borderline moment
+        # differently, and without them two rounds write identical-looking
+        # metadata.
+        "thinking": dict(cfg.thinking),
         # Which prompts wrote this label. The version is what the output path
         # is keyed on; the paths are kept beside it so a record still names the
         # templates if the directories are ever reorganised.
@@ -731,7 +786,7 @@ def build_record(
 
 def classify(
     excerpts: dict[str, list[dict]],
-    cfg: dict,
+    cfg: V2Spec,
     prompts: PromptSet,
     *,
     batch_id: str | None = None,
@@ -749,9 +804,7 @@ def classify(
 
     out: dict[str, list[dict]] = {}
     for stem, records in excerpts.items():
-        built = [
-            build_record(record, raw_entries, cfg, prompts) for record in records
-        ]
+        built = [build_record(record, raw_entries, cfg, prompts) for record in records]
         for record in built:
             if not record["classified"]:
                 continue
@@ -849,22 +902,17 @@ def _yes_no_counts(records: list[dict], pass_name: str, field: str) -> str:
     return f"{yes} / {no} / {bad}"
 
 
-def _model_line(cfg: dict | None) -> list[str]:
+def _model_line(cfg: "V2Spec | None") -> list[str]:
     """The model the round ran (or would run) against, and its reasoning settings.
 
-    The effort knobs are shown only when set, so a dry run reports the depth the
-    round will actually be submitted at rather than leaving it to be inferred
-    from the config file.
+    The parameters are printed in the provider's own parlance, so a dry run
+    reports the depth the round will actually be submitted at rather than
+    leaving it to be inferred from the config file.
     """
     if not cfg:
         return []
-    knobs = [f"thinking: {cfg.get('thinking')}"]
-    knobs += [
-        f"{name}: {cfg[name]}"
-        for name in ("effort", "reasoning_effort", "thinking_budget")
-        if cfg.get(name)
-    ]
-    return [f"  model: {cfg['model']} ({', '.join(knobs)})", ""]
+    knobs = ", ".join(f"{k}: {v}" for k, v in sorted(cfg.thinking.items()))
+    return [f"  model: {cfg.model} ({knobs or 'no reasoning params sent'})", ""]
 
 
 def _prompt_line(prompts: "PromptSet | None", out_dir: str | None) -> list[str]:
@@ -886,7 +934,7 @@ def report(
     out: dict[str, list[dict]],
     counts: Counter,
     dry_run: bool,
-    cfg: dict | None = None,
+    cfg: "V2Spec | None" = None,
     prompts: "PromptSet | None" = None,
     out_dir: str | None = None,
 ) -> str:
@@ -986,10 +1034,10 @@ def build_parser() -> argparse.ArgumentParser:
         default=None,
         metavar="MODEL",
         help="Scoring model to classify with, for comparing models on the same "
-        "excerpts. Must be configured under `v2.models` in the config (or on "
-        "the `models` tutor roster), which is where its thinking/effort "
-        "settings come from. Default: the config's v2 model. Predictions land "
-        "in <out-dir>/<model>/.",
+        "excerpts. Must be configured under `v2.models` in the config, or be a "
+        "`benchmark_models` arm (by arm name or model id); that entry is where "
+        "its provider-native reasoning parameters come from. Default: the "
+        "config's v2 model. Predictions land in <out-dir>/<model>/.",
     )
     parser.add_argument(
         "--prompt-version",
@@ -1106,7 +1154,7 @@ def main(argv: list[str] | None = None) -> int:
     # Resolved before the dry run too, so an unknown --model fails there rather
     # than only once a real round is submitted.
     cfg = phase_config(model=args.model)
-    out_dir = prediction_dir(args.out_dir, cfg["model"], prompts.version)
+    out_dir = prediction_dir(args.out_dir, cfg.model, prompts.version)
 
     if args.dry_run:
         _, counts = build_entries(
@@ -1114,9 +1162,7 @@ def main(argv: list[str] | None = None) -> int:
             prompts,
         )
         print(
-            report(
-                {}, counts, dry_run=True, cfg=cfg, prompts=prompts, out_dir=out_dir
-            )
+            report({}, counts, dry_run=True, cfg=cfg, prompts=prompts, out_dir=out_dir)
         )
         return 0
 
@@ -1126,8 +1172,8 @@ def main(argv: list[str] | None = None) -> int:
     logger.info(
         "classifying %d moment(s) with model=%s thinking=%s prompts=v%s",
         sum(len(records) for records in excerpts.values()),
-        cfg["model"],
-        cfg.get("thinking"),
+        cfg.model,
+        cfg.thinking,
         prompts.version,
     )
 
@@ -1140,9 +1186,7 @@ def main(argv: list[str] | None = None) -> int:
             write_split(out_dir, stem, records),
         )
 
-    print(
-        report(out, counts, dry_run=False, cfg=cfg, prompts=prompts, out_dir=out_dir)
-    )
+    print(report(out, counts, dry_run=False, cfg=cfg, prompts=prompts, out_dir=out_dir))
     return 0
 
 

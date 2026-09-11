@@ -104,11 +104,11 @@ def resolve_student(student_id: str | None = None) -> dict:
         - kind == "registered": {"kind": "registered", "fn": <callable>}
         - kind == "hosted": {"kind": "hosted", "client": ModelClient, "kwargs": dict}
     """
-    from tutormoments.client import ModelClient
+    from tutormoments.client import get_client
     from tutormoments.config import get_registered_student, student_spec
 
     spec = student_spec()
-    model = student_id or spec["model"]
+    model = student_id or spec.model
 
     # FIRST: check registry for either an explicit student_id or config student.model.
     if model is not None:
@@ -117,11 +117,11 @@ def resolve_student(student_id: str | None = None) -> dict:
             return {"kind": "registered", "fn": registered_fn}
 
     # ELSE: use the hosted student model from config or the explicit id.
-    client = ModelClient(model)
-    kwargs = {k: v for k, v in spec.items() if k not in {"model", "mode"}}
-    kwargs.setdefault("thinking", False)
+    # Shared per model (see tutormoments.client.get_client): a fresh client per
+    # moment would pay a TLS handshake inside the measured window.
+    client = get_client(model)
     return {
         "kind": "hosted",
         "client": client,
-        "kwargs": kwargs,
+        "kwargs": {"thinking": spec.thinking},
     }

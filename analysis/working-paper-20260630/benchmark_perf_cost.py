@@ -16,6 +16,12 @@ The y-axis of the latency plot = mean(scaffold_calibrated, rigor_calibrated),
 i.e. the mean of the Appropriate-Scaffolding and Appropriate-Rigor rates in the
 paper table. The token-usage plot was cut (cost tracking deferred); output-token
 columns remain in results_table.md for reference.
+
+`tutor_latencies` is end-to-end wall-clock seconds per tutor call and means the
+same thing before and after the streaming work, so this figure stays comparable
+across runs. It has never captured time to *first* token; for that (and for
+cross-model-comparable latency generally) use `tutormoments latency` and see
+docs/latency.md.
 """
 
 from __future__ import annotations

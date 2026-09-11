@@ -27,9 +27,8 @@ benchmark runtime. Everything a run depends on ships inside the package:
 
 ## Running
 
-TODO: Update the dataset path
-Point the runner at the released Hugging Face dataset and provide an API key to
-run the benchmark.
+Provide an API key and run the benchmark; the dataset source defaults to the
+released Hugging Face dataset (see `--dataset` below).
 
 ```bash
 export ANTHROPIC_API_KEY=...   # or the provider's key
@@ -37,8 +36,7 @@ export ANTHROPIC_API_KEY=...   # or the provider's key
 tutormoments run \
   --tutors claude-opus-4-8 \
   --modes plain scaffolding_rigor \
-  --sample 10 \
-  --dataset <org>/tutormoments-transcripts-preview
+  --sample 10
 ```
 
 Useful run options:
@@ -47,7 +45,7 @@ Useful run options:
 |---|---|
 | `--tutors MODEL_ID ...` | Tutor model IDs or registered custom tutor names to evaluate. |
 | `--modes MODE ...` | Tutor prompt modes. Defaults to `plain scaffolding_rigor`. |
-| `--dataset HF_ID` | Hugging Face dataset id (default: `dataset.id` from config). |
+| `--dataset HF_ID` | Hugging Face dataset id. Defaults to [`allenai/tutormoments-preview`](https://huggingface.co/datasets/allenai/tutormoments-preview) (`dataset.id` in config). |
 | `--data_path DIR` | Run from a local data dir; wins over `--dataset`. |
 | `--dataset-revision REV` | Pin a HF dataset revision for reproducibility. |
 | `--sample N` | Use the first `N` moments from the dataset. |
@@ -88,6 +86,24 @@ the dataset manifest when running from a local release dir. A run is
 reproducible from: pinned dataset revision + content hash and the resolved
 config (up to LLM sampling nondeterminism).
 
+## Latency
+
+`run` records time-to-first-token and time-to-last-token on every transcript, but those
+figures are gathered under `--concurrency` and are not comparable across models. For the
+reportable number, run the serial probe:
+
+```bash
+tutormoments latency --tutor claude-sonnet-5 --mode scaffolding_rigor
+```
+
+This writes `results/<run_id>/latency.json`. `tutormoments report` then joins that onto the
+leaderboard as `ttft_p50`, split into `ttft_first_p50` / `ttft_later_p50` (the first message
+of a session against turns 3 and 5), matching on tutor model and prompt mode; a cell with no
+probe run shows `-` rather than the concurrency-distorted figure from its benchmark run.
+
+See [docs/latency.md](docs/latency.md) for what the metrics mean, why warm and cold cache
+states are reported separately, and the caveats that apply before quoting a number.
+
 ## Reports And Viewers
 
 Aggregate completed run summaries into leaderboard files:
@@ -96,7 +112,9 @@ Aggregate completed run summaries into leaderboard files:
 tutormoments report --results-root results --out leaderboard
 ```
 
-This writes `leaderboard.md` and `leaderboard.csv`.
+This writes `leaderboard.md` and `leaderboard.csv`. Columns are the paper's three metrics,
+then TTFT from any serial [latency](#latency) probe in the same results root, then the run's
+own end-to-end tutor latency and token totals.
 
 Build a self-contained HTML viewer:
 
@@ -108,26 +126,42 @@ The report and viewer commands read `summary.json` files from run directories.
 
 ## Running new tutor models
 
-No code changes are needed for hosted models: add a roster entry in your config
-and export the provider API key. The provider is inferred from the model id
-(`claude-*` → anthropic, `gpt-*` → openai, `gemini-*` → gemini,
-`deepseek-ai/*` → together).
+The `benchmark_models:` roster maps **arms** — benchmark conditions — not
+bare models. Each entry names the provider model id, states the exact
+provider-native reasoning parameters the run will send, and includes a
+`condition:` label for grouping results. This keeps the benchmark config
+auditable in provider parlance. The same model can run under several arms:
 
 ```yaml
-models:
-  my-new-model-id: { thinking: true, effort: high }
+benchmark_models:
+  gemini-2.5-low: { model: gemini-2.5-pro, thinking_budget: 4096, condition: low }
+  gemini-2.5-dyn: { model: gemini-2.5-pro, thinking_budget: -1, condition: dynamic }
+  gpt-5.5-low:    { model: gpt-5.5-2026-04-23, reasoning: low, condition: low }
 ```
 
 ```bash
-tutormoments run --tutors my-new-model-id --data_path <release dir>
+tutormoments run --tutors gemini-2.5-low gpt-5.5-low --data_path <release dir>
 ```
+
+Running a model for the first time needs the provider API key exported and an
+entry in `src/tutormoments/models.yaml` — the per-model facts table (provider
+routing, pricing for cost tracking, output caps). It holds no reasoning
+configuration: what each arm sends is stated in the config YAML itself, in
+provider parlance, and validated at load (see `docs/thinking.md`). Verify a
+new arm live with `tutormoments smoke` before benchmarking it.
 
 Tutors are selectable per-run via the CLI. The Student model is set in the config; changing the student model would change the shape of the evaluation. Modify your 
 config to swap the student model with another API-callable model:
 
 ```yaml
-student: { model: claude-opus-4-6, mode: oracle, thinking: false } # default
+student: { model: claude-opus-4-6, mode: oracle, thinking: { type: disabled } } # default
 ```
+
+The student/scorer/taxonomy/groundtruth blocks state their thinking
+parameters the same provider-native way as arms (minus `condition` — they are
+the fixed evaluation apparatus, not the tutor conditions being reported).
+Keeping them inline means retuning a tutor arm can never silently change the
+student or scoring regime.
 
 ## Custom Tutor / Student Models
 
@@ -276,6 +310,7 @@ tutormoments taxonomy headline --human ./human/classified.csv --lm ./lm/classifi
 ├── src/tutormoments/            installable benchmark runtime
 ├── tutormoments_build/           maintainer-only dataset construction + release tooling
 ├── analysis/                paper notebooks, plots, taxonomy figures
+├── docs/                    methodology docs (latency.md)
 ├── data/                    local datasets and release dirs, gitignored
 ├── results/                 run outputs, gitignored
 └── tests/                   tutormoments/ (runtime), tutormoments_build/, analysis/
@@ -363,6 +398,26 @@ Run the runtime test suite without real API calls:
 pytest tests/tutormoments -q          # runtime only (needs [dev])
 pytest tests -q                   # full suite (needs [dev,build-dev,analysis]; missing extras skip)
 ```
+
+### Live smoke checks
+
+The test suite mocks every provider SDK, so it can never prove a provider
+actually accepts our wire formats. `tutormoments smoke` is the live half: one
+tiny real call per configured arm/role with its exact thinking condition
+(costs cents), plus one submit-then-cancel batch per provider, with a
+thinking-evidence column that catches silently-ignored knobs. Run it before
+merging changes to core API logic (`client.py`, `models.py`, `models.yaml`,
+`config.py`, `default_config.yaml`, `smoke.py`) — CI posts an advisory
+reminder on such PRs but stays offline by design.
+
+```bash
+tutormoments smoke                          # everything in the active config
+tutormoments smoke --arms gemini-2.5-pro    # one arm
+tutormoments smoke --providers anthropic --no-batch
+```
+
+Exit codes: 0 = all passed, 1 = a check failed, 2 = config/environment error
+(a missing API key for a selected provider is an error, not a silent skip).
 
 
 ### Dataset construction (maintainers)

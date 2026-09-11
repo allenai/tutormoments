@@ -13,6 +13,7 @@ from unittest.mock import MagicMock, patch
 
 import pytest
 
+from tutormoments.config import ArmSpec, ScorerSpec, StudentSpec
 from tutormoments.moments import Moment
 from tutormoments.scoring import Annotation
 
@@ -71,11 +72,6 @@ def _make_transcript(
     t.scenario_id = sid
     t.tutor_model = "claude-opus-4-8"
     t.generated_turns = [{"turn_number": 2, "role": "TUTOR", "text": "Hi"}]
-    t.to_dict.return_value = {
-        "scenario_id": sid,
-        "completed": True,
-        "generated_turns": [],
-    }
     t.tutor_latencies = tutor_latencies if tutor_latencies is not None else []
     t.student_latencies = student_latencies if student_latencies is not None else []
     t.tutor_usage = (
@@ -88,6 +84,18 @@ def _make_transcript(
         if student_usage is not None
         else {"input_tokens": 0, "output_tokens": 0, "total_tokens": 0}
     )
+    # Mirror the real Transcript.to_dict shape so tests exercising the resume
+    # path get usage/latency data back from disk, like a real resumed run.
+    t.to_dict.return_value = {
+        "scenario_id": sid,
+        "tutor_model": t.tutor_model,
+        "completed": True,
+        "generated_turns": [],
+        "tutor_usage": t.tutor_usage,
+        "student_usage": t.student_usage,
+        "tutor_latencies": t.tutor_latencies,
+        "student_latencies": t.student_latencies,
+    }
     return t
 
 
@@ -153,8 +161,24 @@ _TAX_RESULT = {
 }
 
 
-def _make_run_config(sample=2, dataset="test_ds", max_turns=4, replay_concurrency=1):
-    """Build a fake RunConfig-like object."""
+def _make_run_config(
+    sample=2,
+    dataset="test_ds",
+    max_turns=4,
+    replay_concurrency=1,
+    arm="claude-opus-4-8",
+    model=None,
+    thinking=None,
+    condition="dynamic",
+):
+    """Build a fake RunConfig-like object.
+
+    `arm` is the roster key results are keyed by; `model` is the resolved
+    provider model id (defaults to the arm name, as in the config schema).
+    """
+    model = model or arm
+    if thinking is None:
+        thinking = {"thinking": {"type": "adaptive"}}
     cfg = MagicMock()
     cfg.dataset = dataset
     cfg.data_path = None
@@ -162,13 +186,25 @@ def _make_run_config(sample=2, dataset="test_ds", max_turns=4, replay_concurrenc
     cfg.dataset_config = "moments"
     cfg.sample = sample
     cfg.max_turns = max_turns
-    cfg.tutors = ["claude-opus-4-8"]
+    cfg.tutors = [arm]
     cfg.modes = ["plain"]
     cfg.trials = 1
     cfg.replay_concurrency = replay_concurrency
-    cfg.student = {"model": "claude-haiku", "mode": "oracle", "thinking": "adaptive"}
-    cfg.scorer = {"model": "claude-opus-4-6", "thinking": "adaptive"}
-    cfg.resolved_tutors = {"claude-opus-4-8": {}}
+    cfg.student = StudentSpec(
+        model="claude-haiku", mode="oracle", thinking={"thinking": None}
+    )
+    cfg.scorer = ScorerSpec(
+        model="claude-opus-4-6", thinking={"thinking": {"type": "adaptive"}}
+    )
+    cfg.resolved_tutors = {
+        arm: ArmSpec(
+            name=arm,
+            model=model,
+            provider="anthropic",
+            thinking=thinking,
+            condition=condition,
+        )
+    }
     cfg.config_source = "test"
     return cfg
 
@@ -217,6 +253,32 @@ def test_run_cell_writes_all_files(tmp_path):
     assert isinstance(cfg_data, dict)
     # --seed was removed (never seeded anything); must not be recorded
     assert "seed" not in cfg_data
+    # Arm-based identity: `tutor`/`arm` are the roster key, `model` the
+    # resolved provider model id.
+    assert cfg_data["tutor"] == "claude-opus-4-8"
+    assert cfg_data["arm"] == "claude-opus-4-8"
+    assert cfg_data["model"] == "claude-opus-4-8"
+    assert cfg_data["condition"] == "dynamic"
+    # Frozen specs are serialized as plain dicts; thinking is the exact
+    # provider-native mapping the run sent.
+    assert cfg_data["student"] == {
+        "model": "claude-haiku",
+        "mode": "oracle",
+        "thinking": {"thinking": None},
+    }
+    assert cfg_data["scorer"] == {
+        "model": "claude-opus-4-6",
+        "thinking": {"thinking": {"type": "adaptive"}},
+    }
+    assert cfg_data["resolved_tutors"] == {
+        "claude-opus-4-8": {
+            "name": "claude-opus-4-8",
+            "model": "claude-opus-4-8",
+            "provider": "anthropic",
+            "thinking": {"thinking": {"type": "adaptive"}},
+            "condition": "dynamic",
+        }
+    }
 
     # 2 transcripts
     for s in scenarios:
@@ -233,6 +295,12 @@ def test_run_cell_writes_all_files(tmp_path):
     # summary.json
     assert (run_dir / "summary.json").exists()
     summary = json.loads((run_dir / "summary.json").read_text(encoding="utf-8"))
+
+    # Identity block: tutor_model is the ARM name; model the resolved id.
+    assert summary["tutor_model"] == "claude-opus-4-8"
+    assert summary["model"] == "claude-opus-4-8"
+    assert summary["condition"] == "dynamic"
+    assert summary["mode"] == "plain"
 
     # summary metrics == aggregate of the 2 annotations
     assert summary["n_scenarios"] == expected_summary["n_scenarios"]
@@ -271,13 +339,29 @@ def test_run_cell_writes_latency_and_tokens(tmp_path):
 
     scenarios = list(FIXTURE_SCENARIOS)
 
-    # Two transcripts with known latencies and token counts
+    # Two transcripts with known latencies and token counts. The first tutor
+    # usage carries the full canonical vector + provenance (what Phase 1
+    # capture produces); the second is legacy-only, as an old resumed
+    # transcript would be.
     transcripts = [
         _make_transcript(
             "scenario_001",
             tutor_latencies=[1.0, 3.0],
             student_latencies=[0.5],
-            tutor_usage={"input_tokens": 100, "output_tokens": 50, "total_tokens": 150},
+            tutor_usage={
+                "input_tokens": 100,
+                "output_tokens": 50,
+                "total_tokens": 150,
+                "input_uncached": 20,
+                "cache_read": 80,
+                "cache_write": 0,
+                "output": 50,
+                "reasoning": 0,
+                "total": 150,
+                "provider": "anthropic",
+                "model": "claude-opus-4-8",
+                "endpoint": "sync",
+            },
             student_usage={
                 "input_tokens": 80,
                 "output_tokens": 20,
@@ -338,15 +422,39 @@ def test_run_cell_writes_latency_and_tokens(tmp_path):
         f"p95 expected 3.0, got {lat['p95_seconds']}"
     )
 
-    # tokens.total block must be present
+    # tokens block must carry per-role components (tutor/student/scorer/total)
     assert "tokens" in summary, "summary must have 'tokens' key"
-    assert "total" in summary["tokens"], "summary['tokens'] must have 'total' key"
-    tok = summary["tokens"]["total"]
-    assert "total_tokens" in tok, "tokens.total must have total_tokens"
-    # tutor: 150+300=450, student: 100+200=300, total: 750
-    assert tok["total_tokens"] == 750, (
-        f"total_tokens expected 750, got {tok['total_tokens']}"
+    tokens = summary["tokens"]
+    for role in ("tutor", "student", "scorer", "total"):
+        assert role in tokens, f"summary['tokens'] must have '{role}' key"
+    # tutor: 150+300=450, student: 100+200=300 -- legacy totals summed as-is,
+    # never recomputed from input+output.
+    assert tokens["tutor"]["total_tokens"] == 450
+    assert tokens["student"]["total_tokens"] == 300
+    # scorer: the two mocked annotations carry 15 total_tokens each, and the
+    # run total includes them (they were omitted before the cost-tracking fix).
+    assert tokens["scorer"]["total_tokens"] == 30
+    tok = tokens["total"]
+    assert tok["total_tokens"] == 780, (
+        f"total_tokens expected 780 (450+300+30), got {tok['total_tokens']}"
     )
+    # The canonical cost vector's keys survive aggregation to disk.
+    for key in (
+        "input_uncached",
+        "cache_read",
+        "cache_write",
+        "output",
+        "reasoning",
+        "total",
+    ):
+        assert key in tok, f"tokens.total must carry canonical key '{key}'"
+    # ... with the captured values intact (scenario_001's tutor vector), and
+    # provenance preserved when uniform.
+    tutor_tok = tokens["tutor"]
+    assert tutor_tok["cache_read"] == 80
+    assert tutor_tok["input_uncached"] == 20
+    assert tutor_tok["provider"] == "anthropic"
+    assert tutor_tok["endpoint"] == "sync"
 
 
 # ---------------------------------------------------------------------------
@@ -356,11 +464,25 @@ def test_run_cell_writes_latency_and_tokens(tmp_path):
 
 def test_run_cell_resumes(tmp_path):
     """Second run_cell call finds both scenarios already done; 0 new conversation
-    calls are made (is_done returns True for both)."""
+    calls are made (is_done returns True for both), and the rewritten
+    summary.json still carries the full run's token usage (tutor/student
+    reloaded from the on-disk transcripts, scorer from the on-disk scores) --
+    not just the zero API spend of the resumed invocation."""
     from tutormoments.cli import run_cell
 
     scenarios = list(FIXTURE_SCENARIOS)
-    transcripts = [_make_transcript(s.id) for s in scenarios]
+    transcripts = [
+        _make_transcript(
+            s.id,
+            tutor_usage={"input_tokens": 100, "output_tokens": 50, "total_tokens": 150},
+            student_usage={
+                "input_tokens": 60,
+                "output_tokens": 40,
+                "total_tokens": 100,
+            },
+        )
+        for s in scenarios
+    ]
     annotations = [_make_annotation(s.id) for s in scenarios]
 
     cfg_mock = _make_run_config(sample=2)
@@ -404,6 +526,17 @@ def test_run_cell_resumes(tmp_path):
     # summary.json still written on resume
     run_dir = tmp_path / run_id
     assert (run_dir / "summary.json").exists()
+
+    # ... and its token block still covers the resumed moments: tutor/student
+    # usage reloaded from the transcripts on disk, scorer usage from the
+    # reloaded annotations (2 moments x 15 total_tokens each).
+    summary = json.loads((run_dir / "summary.json").read_text(encoding="utf-8"))
+    tokens = summary["tokens"]
+    assert tokens["tutor"]["total_tokens"] == 300
+    assert tokens["student"]["total_tokens"] == 200
+    assert tokens["scorer"]["total_tokens"] == 30
+    assert tokens["total"]["total_tokens"] == 530
+    assert summary["run_counts"]["resumed"] == 2
 
 
 # ---------------------------------------------------------------------------
@@ -498,12 +631,48 @@ def test_run_cell_raises_when_all_scenarios_fail(tmp_path):
 # Test 4: cell expansion -- tutors x modes = cells with correct lane assignment
 # ---------------------------------------------------------------------------
 
+# An arm-based roster covering all three providers, plus an arm whose key is
+# NOT a model id (lane must come from its resolved model's provider).
+_ARM_CONFIG_YAML = """
+providers:
+  anthropic: { env: ANTHROPIC_API_KEY }
+  openai:    { env: OPENAI_API_KEY }
+  gemini:    { env: GEMINI_API_KEY }
 
-def test_cell_expansion_and_lane_assignment():
+benchmark_models:
+  claude-opus-4-8:   { thinking: { type: adaptive }, condition: dynamic }
+  claude-sonnet-4-6: { thinking: { type: adaptive }, condition: dynamic }
+  gemini-2.5-pro:    { thinking_budget: -1, condition: dynamic }
+  gpt-5.5:           { reasoning: high, condition: high }
+  sonnet-high:       { model: claude-sonnet-4-6, thinking: { type: adaptive }, effort: high, condition: high }
+
+student: { model: claude-haiku-4-5, mode: oracle, thinking: null }
+scorer:  { model: claude-opus-4-6, thinking: { type: adaptive } }
+
+defaults: { trials: 1, max_turns: 4 }
+retry: { max_retries: 1, base_delay: 1 }
+batch: { timeout: 60 }
+""".strip()
+
+
+@pytest.fixture
+def arm_config(tmp_path, monkeypatch):
+    """Point TUTORMOMENTS_CONFIG at a roster of arms for lane-resolution tests."""
+    from tutormoments.config import _reset_config_cache
+
+    config_path = tmp_path / "arm_config.yaml"
+    config_path.write_text(_ARM_CONFIG_YAML, encoding="utf-8")
+    monkeypatch.setenv("TUTORMOMENTS_CONFIG", str(config_path))
+    _reset_config_cache()
+    yield
+    _reset_config_cache()
+
+
+def test_cell_expansion_and_lane_assignment(arm_config):
     """3 tutors x 2 modes = 6 cells; each cell gets the correct provider lane."""
     from tutormoments.cli import expand_cells
 
-    tutors = ["claude-opus-4-8", "gemini-3.1-pro-preview", "gpt-5.4"]
+    tutors = ["claude-opus-4-8", "gemini-2.5-pro", "gpt-5.5"]
     modes = ["plain", "scaffolding_rigor"]
 
     cells = expand_cells(tutors, modes)
@@ -516,11 +685,21 @@ def test_cell_expansion_and_lane_assignment():
         for m in modes:
             assert (t, m) in pairs, f"Missing cell ({t}, {m})"
 
-    # Check lane assignment by provider
+    # Check lane assignment by the arm's resolved model's provider
     lane_map = {c["tutor"]: c["lane"] for c in cells}
     assert lane_map["claude-opus-4-8"] == "anthropic"
-    assert lane_map["gemini-3.1-pro-preview"] == "gemini"
-    assert lane_map["gpt-5.4"] == "openai"
+    assert lane_map["gemini-2.5-pro"] == "gemini"
+    assert lane_map["gpt-5.5"] == "openai"
+
+
+def test_cell_expansion_arm_key_that_is_not_a_model_id(arm_config):
+    """An arm named after its condition (not a model id) still lands on the
+    lane of its resolved model's provider."""
+    from tutormoments.cli import expand_cells
+
+    cells = expand_cells(["sonnet-high"], ["plain"])
+
+    assert cells == [{"tutor": "sonnet-high", "mode": "plain", "lane": "anthropic"}]
 
 
 # ---------------------------------------------------------------------------
@@ -528,12 +707,12 @@ def test_cell_expansion_and_lane_assignment():
 # ---------------------------------------------------------------------------
 
 
-def test_scheduler_within_lane_sequential(tmp_path):
+def test_scheduler_within_lane_sequential(tmp_path, arm_config):
     """Cells within a lane are called in order; all 6 run_cell calls complete."""
     from tutormoments.cli import expand_cells, run_sweep
 
     # 2 tutors in the same lane (anthropic), 1 mode each -> 2 cells in 1 lane
-    tutors = ["claude-opus-4-8", "claude-haiku-3-5"]
+    tutors = ["claude-opus-4-8", "claude-sonnet-4-6"]
     modes = ["plain"]
 
     cells = expand_cells(tutors, modes)
@@ -557,9 +736,9 @@ def test_scheduler_within_lane_sequential(tmp_path):
     # All 2 cells produced a run_id
     assert len(run_ids) == 2
 
-    # Within-lane sequential: claude-opus-4-8 before claude-haiku-3-5 (sweep order)
+    # Within-lane sequential: claude-opus-4-8 before claude-sonnet-4-6 (sweep order)
     tutors_in_order = [t for t, m in call_order]
-    assert tutors_in_order == ["claude-opus-4-8", "claude-haiku-3-5"]
+    assert tutors_in_order == ["claude-opus-4-8", "claude-sonnet-4-6"]
 
 
 def test_scheduler_multiple_lanes_all_cells_run(tmp_path):
@@ -604,9 +783,16 @@ def _make_run_config_trials(
     cfg.modes = ["plain"]
     cfg.trials = n_trials
     cfg.replay_concurrency = replay_concurrency
-    cfg.student = {"model": "claude-haiku", "mode": "oracle", "thinking": "adaptive"}
-    cfg.scorer = {"model": "claude-opus-4-6", "thinking": "adaptive"}
-    cfg.resolved_tutors = {"claude-opus-4-8": {}}
+    cfg.student = StudentSpec(model="claude-haiku", mode="oracle", thinking="dynamic")
+    cfg.scorer = ScorerSpec(model="claude-opus-4-6", thinking="dynamic")
+    cfg.resolved_tutors = {
+        "claude-opus-4-8": ArmSpec(
+            name="claude-opus-4-8",
+            model="claude-opus-4-8",
+            provider="anthropic",
+            thinking="dynamic",
+        )
+    }
     cfg.config_source = "test"
     return cfg
 
@@ -829,6 +1015,154 @@ def test_report_writes_leaderboard_md_and_csv(tmp_path):
     assert len(csv_lines) == 3, f"Expected header + 2 rows, got: {csv_lines}"
 
 
+def _make_probe_run(root: Path, run_id: str, tutor_model: str, mode: str) -> None:
+    """Write a minimal `tutormoments latency` result inside root/run_id/."""
+    run_dir = root / run_id
+    run_dir.mkdir(parents=True, exist_ok=True)
+    (run_dir / "latency.json").write_text(
+        json.dumps(
+            {
+                "source": "probe",
+                "tutor_model": tutor_model,
+                "mode": mode,
+                "tutor": {
+                    "ttft": {"all": {"n": 336, "p50_seconds": 9.043}},
+                    "ttlt": {"all": {"n": 336, "p50_seconds": 10.52}},
+                },
+                "samples": [
+                    {"ttft_seconds": 13.217, "turn_index": 0},
+                    {"ttft_seconds": 7.9, "turn_index": 1},
+                    {"ttft_seconds": 7.993, "turn_index": 1},
+                    {"ttft_seconds": 8.1, "turn_index": 2},
+                ],
+                "subsample": {
+                    "subsample_source": "frozen_packaged",
+                    "subsample_id": "589e8acf8ac761f2",
+                    "subsample_complete": True,
+                },
+                "measurement_environment": {"measured_at": "2026-08-18T14:21:39"},
+            }
+        ),
+        encoding="utf-8",
+    )
+
+
+def test_report_joins_probe_ttft_onto_the_matching_run(tmp_path):
+    """End to end: a probe run sitting beside a benchmark run in the same
+    results root fills that cell's TTFT columns, and only that cell's."""
+    from tutormoments.cli import main
+
+    results_root = tmp_path / "results"
+    _make_fake_run(
+        results_root,
+        "model-alpha_scaffolding_rigor_ds_20260818",
+        "model-alpha",
+        "scaffolding_rigor",
+    )
+    _make_fake_run(
+        results_root, "model-alpha_plain_ds_20260818", "model-alpha", "plain"
+    )
+    _make_probe_run(
+        results_root,
+        "model-alpha_scaffolding_rigor_latency_20260818",
+        "model-alpha",
+        "scaffolding_rigor",
+    )
+
+    out_stem = str(tmp_path / "leaderboard")
+    main(["report", "--results-root", str(results_root), "--out", out_stem])
+
+    rows = {
+        line.split("|")[3].strip(): line
+        for line in (tmp_path / "leaderboard.md").read_text("utf-8").splitlines()
+        if line.startswith("| model-alpha")
+    }
+    assert "9.043" in rows["scaffolding_rigor"]
+    assert "13.217" in rows["scaffolding_rigor"]
+    assert "9.043" not in rows["plain"]
+
+
+def test_report_recovers_the_cell_from_config_not_the_run_id(tmp_path):
+    """Runs predating tutor_model/mode in summary.json must still join. The run
+    id cannot supply the mode: make_run_id joins fields with underscores that
+    occur inside a mode too, so splitting it yields "scaffolding" for
+    "scaffolding_rigor" -- which would silently miss the probe."""
+    from tutormoments.cli import main
+
+    results_root = tmp_path / "results"
+    run_id = "claude-opus-4-8_scaffolding_rigor_tutormoments-preview_20260807"
+    _make_fake_run(results_root, run_id, "claude-opus-4-8", "scaffolding_rigor")
+    summary_path = results_root / run_id / "summary.json"
+    summary = json.loads(summary_path.read_text("utf-8"))
+    del summary["tutor_model"]
+    del summary["mode"]
+    summary_path.write_text(json.dumps(summary), encoding="utf-8")
+    (results_root / run_id / "config.json").write_text(
+        json.dumps({"tutor": "claude-opus-4-8", "mode": "scaffolding_rigor"}),
+        encoding="utf-8",
+    )
+    _make_probe_run(
+        results_root,
+        "claude-opus-4-8_scaffolding_rigor_latency_20260818",
+        "claude-opus-4-8",
+        "scaffolding_rigor",
+    )
+
+    out_stem = str(tmp_path / "leaderboard")
+    main(["report", "--results-root", str(results_root), "--out", out_stem])
+
+    row = next(
+        line
+        for line in (tmp_path / "leaderboard.md").read_text("utf-8").splitlines()
+        if line.startswith("| claude-opus-4-8")
+    )
+    assert "| scaffolding_rigor |" in row
+    assert "9.043" in row
+
+
+def test_report_warns_when_probes_mix_subsamples(tmp_path, caplog):
+    """Two frozen-but-different samples each pass per-probe eligibility, so the
+    table would compare figures measured over different prompts."""
+    from tutormoments.cli import main
+
+    results_root = tmp_path / "results"
+    _make_fake_run(
+        results_root,
+        "model-alpha_scaffolding_rigor_ds_20260818",
+        "model-alpha",
+        "scaffolding_rigor",
+    )
+    _make_probe_run(
+        results_root,
+        "model-alpha_scaffolding_rigor_latency_20260818",
+        "model-alpha",
+        "scaffolding_rigor",
+    )
+    _make_probe_run(
+        results_root,
+        "model-beta_scaffolding_rigor_latency_20260817",
+        "model-beta",
+        "scaffolding_rigor",
+    )
+    stale = results_root / "model-beta_scaffolding_rigor_latency_20260817"
+    block = json.loads((stale / "latency.json").read_text("utf-8"))
+    block["subsample"]["subsample_id"] = "84b4ad5615876a3e"
+    (stale / "latency.json").write_text(json.dumps(block), encoding="utf-8")
+
+    with caplog.at_level(logging.WARNING):
+        main(
+            [
+                "report",
+                "--results-root",
+                str(results_root),
+                "--out",
+                str(tmp_path / "leaderboard"),
+            ]
+        )
+
+    assert "mix 2 latency subsamples" in caplog.text
+
+
 # ---------------------------------------------------------------------------
 # Test 8: view subcommand writes non-empty HTML
 # ---------------------------------------------------------------------------
@@ -966,11 +1300,11 @@ def test_run_config_argument_becomes_active_config_for_late_resolution(
 providers:
   openai: { env: OPENAI_API_KEY }
 
-models:
-  gpt-4o-mini: {}
+benchmark_models:
+  gpt-5.5: { reasoning: high, condition: high }
 
-student: { model: mock-student, mode: oracle, thinking: false }
-scorer: { model: gpt-4o-mini, thinking: false }
+student: { model: claude-haiku-4-5, mode: oracle, thinking: null }
+scorer: { model: gpt-5.5, reasoning: high }
 
 defaults: { trials: 1, max_turns: 1 }
 retry: { max_retries: 1, base_delay: 1 }
@@ -982,11 +1316,11 @@ batch: { timeout: 60 }
     observed = {}
 
     def fake_run_sweep(cells, run_cfg, *, date, results_root):
-        from tutormoments.config import resolve_model, scorer_spec, student_spec
+        from tutormoments.config import resolve_arm, scorer_spec, student_spec
 
-        observed["provider"] = resolve_model("gpt-4o-mini")["provider"]
-        observed["student"] = student_spec()["model"]
-        observed["scorer"] = scorer_spec()["model"]
+        observed["provider"] = resolve_arm("gpt-5.5").provider
+        observed["student"] = student_spec().model
+        observed["scorer"] = scorer_spec().model
         observed["run_cfg_source"] = run_cfg.config_source
         return ["fake_run"]
 
@@ -1001,7 +1335,7 @@ batch: { timeout: 60 }
                 "--config",
                 str(config_path),
                 "--tutors",
-                "gpt-4o-mini",
+                "gpt-5.5",
                 "--dataset",
                 "readme_mock",
             ]
@@ -1009,8 +1343,8 @@ batch: { timeout: 60 }
 
         assert observed == {
             "provider": "openai",
-            "student": "mock-student",
-            "scorer": "gpt-4o-mini",
+            "student": "claude-haiku-4-5",
+            "scorer": "gpt-5.5",
             "run_cfg_source": str(config_path),
         }
         assert os.environ["TUTORMOMENTS_CONFIG"] == str(config_path)
@@ -1182,6 +1516,75 @@ def test_run_cell_folds_taxonomy_block_into_summary(tmp_path):
 
 
 # ---------------------------------------------------------------------------
+# Arm identity: an arm keyed by a condition name, not a model id
+# ---------------------------------------------------------------------------
+
+
+def test_run_cell_keys_results_by_arm_name_not_model_id(tmp_path):
+    """For an arm whose key is not a model id (sonnet-high -> claude-sonnet-4-6):
+    the run id is keyed by the ARM name, config.json records arm == tutor ==
+    the arm name with model == the resolved id, and the summary identity block
+    carries both."""
+    import tutormoments.results as results_mod
+    from tutormoments.cli import run_cell
+
+    scenarios = list(FIXTURE_SCENARIOS)
+    transcripts = [_make_transcript(s.id) for s in scenarios]
+    annotations = [_make_annotation(s.id) for s in scenarios]
+
+    cfg_mock = _make_run_config(
+        sample=2,
+        arm="sonnet-high",
+        model="claude-sonnet-4-6",
+        thinking={"thinking": {"type": "adaptive"}, "effort": "high"},
+        condition="high",
+    )
+
+    with (
+        patch(_CFG_PATCH, return_value=cfg_mock),
+        patch(_LOAD_PATCH, return_value=_load_result(scenarios)),
+        patch(_CONV_PATCH, side_effect=transcripts),
+        patch(_SCORE_PATCH, side_effect=_score_batch_from(annotations)),
+        patch(_TAX_PATCH, return_value=_TAX_RESULT),
+        patch(
+            "tutormoments.cli.results.make_run_id", wraps=results_mod.make_run_id
+        ) as mock_run_id,
+    ):
+        run_id = run_cell(
+            tutor="sonnet-high",
+            mode="plain",
+            run_cfg=None,
+            date="20260626",
+            results_root=str(tmp_path),
+        )
+
+    # make_run_id received the ARM name, not the resolved model id
+    mock_run_id.assert_called_once_with("sonnet-high", "plain", "test_ds", "20260626")
+    assert "sonnet-high" in run_id
+    assert "claude-sonnet-4-6" not in run_id
+
+    run_dir = tmp_path / run_id
+    cfg_data = json.loads((run_dir / "config.json").read_text(encoding="utf-8"))
+    assert cfg_data["arm"] == "sonnet-high"
+    assert cfg_data["tutor"] == "sonnet-high"
+    assert cfg_data["model"] == "claude-sonnet-4-6"
+    assert cfg_data["condition"] == "high"
+    assert cfg_data["resolved_tutors"]["sonnet-high"] == {
+        "name": "sonnet-high",
+        "model": "claude-sonnet-4-6",
+        "provider": "anthropic",
+        "thinking": {"thinking": {"type": "adaptive"}, "effort": "high"},
+        "condition": "high",
+    }
+
+    summary = json.loads((run_dir / "summary.json").read_text(encoding="utf-8"))
+    assert summary["tutor_model"] == "sonnet-high"
+    assert summary["model"] == "claude-sonnet-4-6"
+    assert summary["condition"] == "high"
+    assert summary["mode"] == "plain"
+
+
+# ---------------------------------------------------------------------------
 # Replay concurrency (result-preserving parallel replay of moments)
 # ---------------------------------------------------------------------------
 
@@ -1255,7 +1658,16 @@ def test_replay_concurrency_matches_serial(tmp_path):
             for p in (base / sub).glob("*.json")
         )
 
-    assert _summary(root_serial, rid_serial) == _summary(root_conc, rid_conc)
+    # Scores must be byte-identical across concurrency settings. The latency
+    # block is deliberately excluded: concurrency genuinely does change
+    # latency (shared decode batches, edge queueing near rate limits), which
+    # is why the block records the concurrency it was gathered at and why the
+    # reportable figure comes from `tutormoments latency` instead.
+    serial_summary = _summary(root_serial, rid_serial)
+    conc_summary = _summary(root_conc, rid_conc)
+    assert serial_summary.pop("latency")["concurrency"] == 1
+    assert conc_summary.pop("latency")["concurrency"] == 4
+    assert serial_summary == conc_summary
     assert _files(root_serial, rid_serial) == _files(root_conc, rid_conc)
 
 

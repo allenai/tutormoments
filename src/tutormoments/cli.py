@@ -64,8 +64,7 @@ def expand_cells(tutors: list[str], modes: list[str]) -> list[dict]:
         List of cell dicts in sweep order (tutor-major, mode-minor).
     """
     # Lazy import to avoid module-level SDK import
-    from tutormoments.client import infer_provider
-    from tutormoments.config import get_registered_tutor
+    from tutormoments.config import get_registered_tutor, resolve_arm
 
     cells = []
     for tutor in tutors:
@@ -74,7 +73,7 @@ def expand_cells(tutors: list[str], modes: list[str]) -> list[dict]:
             lane = "default"
         else:
             try:
-                lane = infer_provider(tutor)
+                lane = resolve_arm(tutor).provider
             except ValueError:
                 lane = "default"
         for mode in modes:
@@ -162,6 +161,7 @@ def _import_modules():
 # These are imported at function call time, not at module load time,
 # but we re-export references so patch targets resolve correctly.
 import tutormoments.conversation as conversation
+import tutormoments.latency as latency
 import tutormoments.report as report
 import tutormoments.results as results
 import tutormoments.scoring as scoring
@@ -178,6 +178,7 @@ from tutormoments.moments import (
     load_manifest,
     load_moments,
 )
+from tutormoments.usage import add_usage, sum_usage
 
 
 def _dataset_label(cfg) -> str:
@@ -194,6 +195,19 @@ def _dataset_label(cfg) -> str:
 def _json_sha256(data) -> str:
     payload = json.dumps(data, sort_keys=True, default=str).encode("utf-8")
     return hashlib.sha256(payload).hexdigest()
+
+
+def _spec_json(spec) -> dict | None:
+    """JSON-safe dict for a frozen config spec (ArmSpec/StudentSpec/...).
+
+    Thinking configs are plain provider-native dicts (or None), so asdict is
+    already JSON-safe. None passes through (registered tutors have no spec).
+    """
+    if spec is None:
+        return None
+    from dataclasses import asdict
+
+    return asdict(spec)
 
 
 def _package_version() -> str | None:
@@ -427,8 +441,20 @@ def run_cell(
     # under run_sweep the lane already set the same tag.
     run_log_path = os.path.join(results_root, run_id, "run.log")
     with per_run_log_file(run_log_path) as run_log, log_context(f"{tutor}/{mode}"):
+        # JSON-safe views of the frozen specs. `tutor` is the ARM name (the
+        # roster key -- what results are keyed by); `model` is the resolved
+        # provider model id (None for registered tutors, which have no model).
+        arm_spec = cfg.resolved_tutors.get(tutor)
+        student_json = _spec_json(cfg.student)
+        scorer_json = _spec_json(cfg.scorer)
+        resolved_tutors_json = {
+            name: _spec_json(spec) for name, spec in cfg.resolved_tutors.items()
+        }
         config_dict = {
             "tutor": tutor,
+            "arm": tutor,
+            "model": arm_spec.model if arm_spec is not None else None,
+            "condition": arm_spec.condition if arm_spec is not None else None,
             "mode": mode,
             "dataset": {
                 "id": cfg.dataset,
@@ -444,18 +470,18 @@ def run_cell(
             # Informational only: replay concurrency does not affect results, so
             # it is deliberately kept out of reproducibility.config_hash below.
             "replay_concurrency": getattr(cfg, "replay_concurrency", None),
-            "student": cfg.student,
-            "scorer": cfg.scorer,
-            "resolved_tutors": cfg.resolved_tutors,
+            "student": student_json,
+            "scorer": scorer_json,
+            "resolved_tutors": resolved_tutors_json,
             "config_source": getattr(cfg, "config_source", None),
             "reproducibility": {
                 "tutormoments_version": _package_version(),
                 "git_commit": _git_commit(),
                 "config_hash": _json_sha256(
                     {
-                        "student": cfg.student,
-                        "scorer": cfg.scorer,
-                        "resolved_tutors": cfg.resolved_tutors,
+                        "student": student_json,
+                        "scorer": scorer_json,
+                        "resolved_tutors": resolved_tutors_json,
                         "defaults": {
                             "sample": cfg.sample,
                             "max_turns": cfg.max_turns,
@@ -498,27 +524,6 @@ def run_cell(
         # ---------------------------------------------------------------------------
         # Latency / token helpers
         # ---------------------------------------------------------------------------
-
-        def _latency_stats(samples: list) -> dict | None:
-            """Mean / p50 / p95 over per-call latency samples. None on empty.
-
-            Sorted-index percentile: p50 = s[n//2], p95_idx = max(0, min(n-1, round(0.95*n)-1)).
-            """
-            if not samples:
-                return None
-            s = sorted(samples)
-            n = len(s)
-            p50 = s[n // 2]
-            p95_idx = max(0, min(n - 1, int(round(0.95 * n)) - 1))
-            p95 = s[p95_idx]
-            total = sum(samples)
-            return {
-                "n": n,
-                "total_seconds": round(total, 3),
-                "mean_seconds": round(total / n, 3),
-                "p50_seconds": round(p50, 3),
-                "p95_seconds": round(p95, 3),
-            }
 
         def _run_trial(trial_idx: int) -> tuple:
             """Run all scenarios once (one trial): conversations, then pooled scoring.
@@ -563,8 +568,8 @@ def run_cell(
                 trial_idx,
                 n_trials,
                 n_total,
-                (cfg.student or {}).get("model"),
-                (cfg.student or {}).get("mode", "oracle"),
+                cfg.student.model,
+                cfg.student.mode or "oracle",
                 cfg.max_turns,
                 replay_concurrency,
             )
@@ -597,18 +602,31 @@ def run_cell(
 
                         try:
                             ann = Annotation(**score_dict)
+                            # Reload the transcript alongside the score:
+                            # summary.json describes the whole run (run_counts
+                            # and the aggregate metrics already count resumed
+                            # moments), so the token/latency blocks must carry
+                            # their tutor/student usage too -- not just this
+                            # invocation's API spend. is_done guaranteed the
+                            # transcript file exists.
+                            transcript_dict = results.read_transcript(
+                                run_id, resume_sid, results_root=results_root
+                            )
                             completed_scenarios.append(scenario)
                             completed_annotations.append(ann)
+                            if transcript_dict is not None:
+                                completed_transcripts.append(
+                                    conversation.Transcript.from_dict(transcript_dict)
+                                )
                             counts["succeeded"] += 1
                             counts["resumed"] += 1
-                            # No transcript object on resume -- latencies not available
                         except Exception as e:
                             counts["failed"] += 1
                             failed_scenarios.append(
                                 {"id": sid, "error": str(e), "phase": "resume"}
                             )
                             logger.warning(
-                                "[trial %d][%d/%d] Could not reload score for %s: %s",
+                                "[trial %d][%d/%d] Could not reload score/transcript for %s: %s",
                                 trial_idx,
                                 i,
                                 n_total,
@@ -651,8 +669,8 @@ def run_cell(
                     scenario,
                     tutor_id=tutor,
                     tutor_mode=mode if mode else None,
-                    student_id=(cfg.student or {}).get("model"),
-                    student_mode=(cfg.student or {}).get("mode", "oracle"),
+                    student_id=cfg.student.model,
+                    student_mode=cfg.student.mode or "oracle",
                     max_turns=cfg.max_turns,
                 )
 
@@ -811,40 +829,52 @@ def run_cell(
         # Build latency + token blocks from all completed transcripts
         tutor_lat_samples: list = []
         student_lat_samples: list = []
-        tutor_input = tutor_output = 0
-        student_input = student_output = 0
+        tutor_timings: list = []
+        student_timings: list = []
+        tutor_tokens = sum_usage()
+        student_tokens = sum_usage()
         for tx in all_trial_transcripts:
             tutor_lat_samples.extend(getattr(tx, "tutor_latencies", []) or [])
             student_lat_samples.extend(getattr(tx, "student_latencies", []) or [])
-            tu = getattr(tx, "tutor_usage", {}) or {}
-            su = getattr(tx, "student_usage", {}) or {}
-            tutor_input += tu.get("input_tokens", 0) or 0
-            tutor_output += tu.get("output_tokens", 0) or 0
-            student_input += su.get("input_tokens", 0) or 0
-            student_output += su.get("output_tokens", 0) or 0
+            tutor_timings.extend(getattr(tx, "tutor_timings", []) or [])
+            student_timings.extend(getattr(tx, "student_timings", []) or [])
+            add_usage(tutor_tokens, getattr(tx, "tutor_usage", {}) or {})
+            add_usage(student_tokens, getattr(tx, "student_usage", {}) or {})
 
-        tutor_tokens = {
-            "input_tokens": tutor_input,
-            "output_tokens": tutor_output,
-            "total_tokens": tutor_input + tutor_output,
-        }
-        student_tokens = {
-            "input_tokens": student_input,
-            "output_tokens": student_output,
-            "total_tokens": student_input + student_output,
-        }
-        total_tokens = {
-            "input_tokens": tutor_input + student_input,
-            "output_tokens": tutor_output + student_output,
-            "total_tokens": tutor_input + tutor_output + student_input + student_output,
-        }
+        # Scorer usage: the three pooled scoring passes per moment, accumulated
+        # onto each Annotation by score_batch. Endpoint provenance ("batch")
+        # rides along -- that is what the batch discount applies to in costing.
+        scorer_tokens = sum_usage()
+        for ann in all_trial_annotations:
+            ann_usage = (
+                ann.get("usage")
+                if isinstance(ann, dict)
+                else getattr(ann, "usage", None)
+            )
+            add_usage(scorer_tokens, ann_usage or {})
+
+        # Role sums keep every usage key: legacy provider counters (summed
+        # as-is, never recomputed -- the canonical `total` is the single
+        # consistent definition) plus the canonical cost vector + provenance.
+        total_tokens = sum_usage(tutor_tokens, student_tokens, scorer_tokens)
+        # `tutor`/`student` keep their historical shape and meaning
+        # (end-to-end wall-clock seconds per call) so report.py, the paper's
+        # figure pipeline and the website refresh script keep working
+        # unchanged. The ttft/ttlt blocks are additive. source="run" marks these as concurrency-confounded: a run
+        # replays through a thread pool, so its figures are not comparable
+        # across models. Use `tutormoments latency` for that.
         latency_block = {
-            "tutor": _latency_stats(tutor_lat_samples),
-            "student": _latency_stats(student_lat_samples),
+            "source": "run",
+            "concurrency": replay_concurrency,
+            "tutor": latency.latency_stats(tutor_lat_samples),
+            "student": latency.latency_stats(student_lat_samples),
+            "tutor_streamed": latency.aggregate_timings(tutor_timings),
+            "student_streamed": latency.aggregate_timings(student_timings),
         }
         token_block = {
             "tutor": tutor_tokens,
             "student": student_tokens,
+            "scorer": scorer_tokens,
             "total": total_tokens,
         }
 
@@ -865,6 +895,13 @@ def run_cell(
 
         # Merge latency + token blocks into summary (spec S7)
         metrics = dict(metrics)
+        # Identity block: `tutor_model` stays the ARM name (the historical
+        # join key for report/latency/website); `model` is the resolved
+        # provider model id so the arm's provenance is explicit.
+        metrics["tutor_model"] = tutor
+        metrics["model"] = arm_spec.model if arm_spec is not None else None
+        metrics["condition"] = arm_spec.condition if arm_spec is not None else None
+        metrics["mode"] = mode
         metrics["latency"] = latency_block
         metrics["tokens"] = token_block
 
@@ -883,9 +920,7 @@ def run_cell(
         tax_usage = (tax or {}).get("usage") or {}
         if tax_usage:
             metrics["tokens"]["taxonomy"] = tax_usage
-            total = metrics["tokens"]["total"]
-            for k in ("input_tokens", "output_tokens", "total_tokens"):
-                total[k] = total.get(k, 0) + int(tax_usage.get(k, 0) or 0)
+            add_usage(metrics["tokens"]["total"], tax_usage)
 
         results.write_summary(run_id, metrics, results_root=results_root)
         run_counts = metrics["run_counts"]
@@ -1007,6 +1042,46 @@ def _build_parser() -> argparse.ArgumentParser:
         "typically 4). Result-preserving; lower it on smaller API tiers that "
         "hit rate limits.",
     )
+    # -- latency subcommand ---------------------------------------------------
+    lat_p = subs.add_parser(
+        "latency",
+        help="Measure TTFT/TTLT for one tutor, serially (the reportable number)",
+        parents=[log_parent],
+        description=(
+            "Measure time-to-first-token and time-to-last-token over the frozen "
+            "moment subsample, strictly serially. `run` also records latency, "
+            "but under --concurrency, which distorts it by a model-dependent "
+            "amount; only this command's figures are comparable across models. "
+            "See docs/latency.md."
+        ),
+    )
+    lat_p.add_argument(
+        "--tutor", required=True, metavar="MODEL", help="Tutor model id to measure"
+    )
+    lat_p.add_argument(
+        "--mode", default="", metavar="MODE", help="Prompt mode (default: plain)"
+    )
+    lat_p.add_argument(
+        "--n",
+        type=int,
+        default=None,
+        metavar="N",
+        help="Subsample size, used only when the release carries no frozen "
+        "id list (default: 112, one per conversation). Ignored when a frozen "
+        "list is present -- that list is what keeps measurements comparable "
+        "over time.",
+    )
+    lat_p.add_argument("--dataset", default=None, metavar="HF_ID")
+    lat_p.add_argument("--data_path", default=None, dest="data_path", metavar="DIR")
+    lat_p.add_argument(
+        "--dataset-revision", default=None, dest="dataset_revision", metavar="REV"
+    )
+    lat_p.add_argument("--max-turns", type=int, default=None, dest="max_turns")
+    lat_p.add_argument("--config", default=None, metavar="PATH")
+    lat_p.add_argument(
+        "--results-root", default="results", dest="results_root", metavar="DIR"
+    )
+
     # -- report subcommand ----------------------------------------------------
     report_p = subs.add_parser(
         "report",
@@ -1058,7 +1133,108 @@ def _build_parser() -> argparse.ArgumentParser:
     )
     tax_p.add_argument("args", nargs=argparse.REMAINDER)
 
+    # smoke: live verification of the active config's wire formats. The
+    # offline suite can only prove the code agrees with itself; this makes one
+    # tiny REAL call per arm/role (cents) plus a submit-then-cancel batch per
+    # provider. Run before merging changes to core API logic (see AGENTS.md).
+    smoke_p = subs.add_parser(
+        "smoke",
+        help="Live-verify the active config's provider wire formats (real API calls)",
+        parents=[log_parent],
+    )
+    smoke_p.add_argument(
+        "--config", default=None, metavar="FILE", help="Explicit config file"
+    )
+    smoke_p.add_argument(
+        "--arms",
+        nargs="+",
+        default=None,
+        metavar="ARM",
+        help="Only these roster arms (default: all)",
+    )
+    smoke_p.add_argument(
+        "--roles",
+        nargs="+",
+        default=None,
+        metavar="ROLE",
+        choices=["tutor", "student", "scorer", "taxonomy", "groundtruth"],
+        help="Only these roles (default: all)",
+    )
+    smoke_p.add_argument(
+        "--providers",
+        nargs="+",
+        default=None,
+        metavar="P",
+        help="Only these providers (others reported as SKIP)",
+    )
+    smoke_p.add_argument(
+        "--no-sync",
+        dest="sync",
+        action="store_false",
+        help="Skip the per-arm sync generate checks",
+    )
+    smoke_p.add_argument(
+        "--no-batch",
+        dest="batch",
+        action="store_false",
+        help="Skip the per-provider batch submit+cancel checks",
+    )
+    smoke_p.add_argument(
+        "--max-tokens",
+        type=int,
+        default=0,
+        metavar="N",
+        help="Output cap for the sync pings (default 0 = model max, "
+        "same resolution the benchmark uses)",
+    )
+    smoke_p.add_argument(
+        "--strict-thinking",
+        action="store_true",
+        help="Escalate model-paced-thinking WARNs (no thinking observed) to FAIL",
+    )
+    smoke_p.add_argument(
+        "--json",
+        default=None,
+        metavar="FILE",
+        help="Also write a machine-readable report (e.g. results/smoke/<ts>.json)",
+    )
+
     return parser
+
+
+def _cmd_smoke(args) -> int:
+    """Implement the 'smoke' subcommand; returns the exit code."""
+    from tutormoments.config import describe_config_source
+    from tutormoments.smoke import build_smoke_plan, format_smoke_report, run_smoke
+
+    if args.config:
+        os.environ["TUTORMOMENTS_CONFIG"] = args.config
+    try:
+        plan = build_smoke_plan(
+            config_path=args.config,
+            arms=args.arms,
+            roles=args.roles,
+            providers=args.providers,
+            include_sync=args.sync,
+            include_batch=args.batch,
+        )
+    except (ValueError, FileNotFoundError) as e:
+        print("Error: " + str(e), file=sys.stderr)
+        return 2
+
+    report_obj = run_smoke(
+        plan,
+        strict_thinking=args.strict_thinking,
+        max_tokens=args.max_tokens,
+        config_source=describe_config_source(args.config),
+    )
+    print(format_smoke_report(report_obj))
+    if args.json:
+        os.makedirs(os.path.dirname(args.json) or ".", exist_ok=True)
+        with open(args.json, "w", encoding="utf-8") as f:
+            f.write(report_obj.to_json())
+        print(f"json report: {args.json}")
+    return 1 if report_obj.failed else 0
 
 
 def _cmd_report(args) -> None:
@@ -1072,23 +1248,52 @@ def _cmd_report(args) -> None:
         if summary is None:
             logger.warning("No summary.json for run %s -- skipping", run_id)
             continue
-        # Inject run_id-derived fields if not already present
-        if "tutor_model" not in summary or not summary.get("tutor_model"):
-            # Best-effort: parse tutor from run_id prefix
+        # Identify the cell. Runs from before the summary carried these fields
+        # need them recovered, and the recovery has to be exact: (tutor_model,
+        # mode) is the key the TTFT probe figures join on, and it is also what
+        # the mode column prints.
+        if not summary.get("tutor_model") or not summary.get("mode"):
+            # config.json records both verbatim, so prefer it over the run id.
+            cfg_json = results.read_config(run_id, results_root=args.results_root) or {}
+            # Last resort: split the run id. Lossy -- make_run_id joins
+            # {tutor}_{mode}_{dataset}_{date} with underscores that also occur
+            # inside a tutor id ("deepseek-ai/DeepSeek-V4-Pro" becomes
+            # "deepseek-ai_DeepSeek-V4-Pro") and inside a mode
+            # ("scaffolding_rigor"), so this can only be trusted to find a
+            # first field. A mode read this way is a prefix of the real one,
+            # which is why it must not be the first choice: it silently misses
+            # the probe join and mislabels the row.
             parts = run_id.split("_")
             summary = dict(summary)
-            summary.setdefault("tutor_model", parts[0] if parts else run_id)
-        if "mode" not in summary or not summary.get("mode"):
-            parts = run_id.split("_")
-            summary = dict(summary)
-            summary.setdefault("mode", parts[1] if len(parts) > 1 else "")
+            if not summary.get("tutor_model"):
+                summary["tutor_model"] = cfg_json.get("tutor") or (
+                    parts[0] if parts else run_id
+                )
+            if not summary.get("mode"):
+                summary["mode"] = cfg_json.get("mode") or (
+                    parts[1] if len(parts) > 1 else ""
+                )
         summaries.append(summary)
 
     if not summaries:
         print("No run summaries found in: " + args.results_root)
         return
 
-    markdown, csv_str = report.leaderboard(summaries)
+    # Join the serial-probe TTFT figures onto the run summaries. Probes write
+    # their own run directories under the same results root; nothing else
+    # reads them.
+    probes = latency.probe_runs(args.results_root)
+    sample_ids = {i for i in latency.probe_subsample_ids(probes) if i}
+    if len(sample_ids) > 1:
+        logger.warning(
+            "TTFT columns mix %d latency subsamples (%s); those figures were "
+            "measured over different prompts and are not comparable to each "
+            "other -- re-measure the roster against one subsample",
+            len(sample_ids),
+            ", ".join(sorted(sample_ids)),
+        )
+
+    markdown, csv_str = report.leaderboard(summaries, probes)
 
     out_stem = args.out
     md_path = Path(out_stem + ".md")
@@ -1101,6 +1306,33 @@ def _cmd_report(args) -> None:
     print("  md : " + str(md_path))
     print("  csv: " + str(csv_path))
     print("Rows: " + str(len(summaries)))
+
+
+def _cmd_latency(args) -> None:
+    """Implement the 'latency' subcommand: serial TTFT/TTLT probe."""
+    from tutormoments.latency import DEFAULT_SUBSAMPLE_SIZE
+
+    if args.config:
+        os.environ["TUTORMOMENTS_CONFIG"] = args.config
+    cfg = build_run_config(
+        tutors=[args.tutor],
+        modes=[args.mode],
+        dataset=args.dataset,
+        data_path=args.data_path,
+        dataset_revision=args.dataset_revision,
+        max_turns=args.max_turns,
+        config_path=args.config,
+    )
+    run_id, block = latency.run_probe(
+        args.tutor,
+        args.mode,
+        cfg=cfg,
+        n=args.n or DEFAULT_SUBSAMPLE_SIZE,
+        results_root=args.results_root,
+        package_version=_package_version(),
+    )
+    print(latency.format_probe_summary(block))
+    print("Wrote: " + os.path.join(args.results_root, run_id, latency.LATENCY_FILENAME))
 
 
 def _cmd_view(args) -> None:
@@ -1181,11 +1413,21 @@ def main(argv=None) -> None:
         for run_id in run_ids:
             print("Completed run: " + run_id)
 
+    elif args.command == "latency":
+        try:
+            _cmd_latency(args)
+        except DatasetNotFoundError as e:
+            print("Error: " + str(e), file=sys.stderr)
+            sys.exit(2)
+
     elif args.command == "report":
         _cmd_report(args)
 
     elif args.command == "view":
         _cmd_view(args)
+
+    elif args.command == "smoke":
+        sys.exit(_cmd_smoke(args))
 
     else:
         parser.print_help()

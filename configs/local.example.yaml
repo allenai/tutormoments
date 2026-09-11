@@ -15,17 +15,26 @@ providers:
   gemini:    { env: GEMINI_API_KEY }
   together:  { env: TOGETHER_API_KEY }
 
-models:
-  claude-opus-4-8:             { thinking: true, effort: xhigh }
-  claude-sonnet-4-6:           { thinking: true, effort: high }
-  gemini-2.5-pro:              { thinking: true, thinking_budget: -1 }
-  gemini-3.5-flash:            { thinking: true, thinking_budget: -1 }
-  gpt-5.4-mini-2026-03-17:     { thinking: true, reasoning_effort: high }
-  gpt-5.5-2026-04-23:          { thinking: true, reasoning_effort: high }
-  deepseek-ai/DeepSeek-V4-Pro: {}
+# Each key is an ARM (a benchmark condition). `model` names the provider model
+# id, provider-native keys state the exact request parameters, and `condition`
+# is the grouping label written into results:
+#   gemini-2.5-low: { model: gemini-2.5-pro, thinking_budget: 4096, condition: low }
+#   gpt-5.5-low:   { model: gpt-5.5-2026-04-23, reasoning: low, condition: low }
+benchmark_models:
+  claude-opus-4-8:         { model: claude-opus-4-8, thinking: { type: adaptive }, effort: xhigh, condition: xhigh }
+  claude-sonnet-4-6:       { model: claude-sonnet-4-6, thinking: { type: adaptive }, effort: high, condition: high }
+  gemini-2.5-pro:          { model: gemini-2.5-pro, include_thoughts: true, thinking_budget: -1, condition: dynamic }
+  gemini-3.5-flash:        { model: gemini-3.5-flash, include_thoughts: true, thinking_budget: -1, condition: dynamic }
+  gpt-5.4-mini-2026-03-17: { model: gpt-5.4-mini-2026-03-17, reasoning: high, condition: high }
+  gpt-5.5-2026-04-23:      { model: gpt-5.5-2026-04-23, reasoning: high, condition: high }
+  deepseek-v4-pro:         { model: deepseek-ai/DeepSeek-V4-Pro, condition: dynamic }
 
-student: { model: claude-opus-4-6, mode: oracle, thinking: false }
-scorer:  { model: claude-opus-4-6, thinking: adaptive }
+# Role blocks state provider-native thinking parameters the same way arms do.
+# "Off" is stated explicitly ({type: disabled}) rather than by omitting the
+# param, so the condition stays stable under model swaps and smoke can assert
+# it; `thinking: {type: adaptive}` is model-paced thinking.
+student: { model: claude-opus-4-6, mode: oracle, thinking: { type: disabled } }
+scorer:  { model: claude-opus-4-6, thinking: { type: adaptive } }
 
 defaults: { trials: 1, max_turns: 5 }
 retry:    { max_retries: 5, base_delay: 5 }

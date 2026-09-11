@@ -1,4 +1,21 @@
-"""Config loading and tutor/student registries for tutormoments."""
+"""Config loading and tutor/student registries for tutormoments.
+
+The config boundary normalizes model-bearing blocks once, at load time, into
+frozen spec objects. ``benchmark_models:`` is the tutor roster: each key is an
+auditable benchmark arm, ``model`` names the provider model id, provider-
+native thinking knobs state the exact request parameters, and ``condition``
+gives the result grouping label. The student/scorer/taxonomy/groundtruth role
+blocks state their thinking parameters the same provider-native way -- every
+configured condition is readable in provider parlance without consulting a
+mapping.
+
+Every stated thinking config is validated through
+tutormoments.models.resolve_thinking HERE, so a malformed or provider-
+mismatched setting fails at config load -- before any tokens are spent -- for
+every block, not just the ones a particular run touches. Downstream code
+consumes the frozen specs; nothing re-reads or re-interprets the raw YAML
+values, so validation-time and request-time semantics cannot diverge.
+"""
 
 import os
 from dataclasses import dataclass
@@ -7,14 +24,71 @@ from typing import Optional
 
 import yaml
 
-from tutormoments.client import infer_provider
+from tutormoments.models import (
+    NATIVE_THINKING_KEYS,
+    ThinkingConfigError,
+    infer_provider,
+    resolve_thinking,
+)
 from tutormoments.resources import resource_text
 
 _CONFIG_CACHE = {}
+_NORMALIZED_CACHE = {}
 _TUTOR_REGISTRY: dict[str, callable] = {}
 _STUDENT_REGISTRY: dict[str, callable] = {}
 _CONFIG_ENV_VAR = "TUTORMOMENTS_CONFIG"
 _DEFAULT_CONFIG_RESOURCE = "default_config.yaml"
+
+_COMMON_ARM_KEYS = {"model", "condition"}
+
+
+# ---------------------------------------------------------------------------
+# Normalized spec objects (frozen: shared safely from the config cache).
+# ---------------------------------------------------------------------------
+
+
+@dataclass(frozen=True)
+class ArmSpec:
+    """One benchmark arm: a model under a stated reasoning condition."""
+
+    name: str
+    model: str
+    provider: str
+    # Exact provider-native thinking config (the keys the config stated).
+    thinking: dict
+    condition: str = ""
+
+
+@dataclass(frozen=True)
+class StudentSpec:
+    model: str
+    mode: str
+    # Provider-native thinking config; None for registered (scripted)
+    # students, which are code callables with no API wire form.
+    thinking: dict | None
+
+
+@dataclass(frozen=True)
+class ScorerSpec:
+    model: str
+    thinking: dict
+
+
+@dataclass(frozen=True)
+class TaxonomySpec:
+    model: str
+    thinking: dict
+    batch_size: int
+
+
+@dataclass(frozen=True)
+class GroundtruthSpec:
+    model: str
+    thinking: dict
+    poll_interval: int
+    # Labeller template routing: {annotation_type: prompt_name} or a single
+    # prompt name for all types. Routing data, not LM configuration.
+    labeller: "dict | str | None"
 
 
 def _config_source(path: str | os.PathLike | None = None) -> tuple[str, str]:
@@ -42,14 +116,19 @@ def describe_config_source(path: str | os.PathLike | None = None) -> str:
 
 
 def load_config(path: str | os.PathLike | None = None) -> dict:
-    """Load and parse a Tutormoments config file, with module-level caching.
+    """Load, validate, and parse a Tutormoments config file, with caching.
+
+    Model-bearing blocks are normalized and validated on first load (see
+    module docstring): a config with malformed or provider-mismatched
+    thinking parameters in any arm or role block raises here.
 
     Args:
         path: Optional explicit config path. If omitted, precedence is
             TUTORMOMENTS_CONFIG, cwd/config.yaml, then packaged default_config.yaml.
 
     Returns:
-        Parsed dict from yaml.safe_load().
+        Parsed dict from yaml.safe_load() (the raw config; model-bearing
+        blocks are additionally available as frozen specs via the accessors).
     """
     source = _config_source(path)
     if source not in _CONFIG_CACHE:
@@ -63,13 +142,167 @@ def load_config(path: str | os.PathLike | None = None) -> dict:
                     f"Tutormoments config file not found: {file_path}"
                 )
             content = file_path.read_text(encoding="utf-8")
-        _CONFIG_CACHE[source] = yaml.safe_load(content)
+        raw = yaml.safe_load(content)
+        # Normalize BEFORE caching: a config that fails validation must not
+        # poison the cache as if it had loaded.
+        _NORMALIZED_CACHE[source] = _normalize_config(raw)
+        _CONFIG_CACHE[source] = raw
     return _CONFIG_CACHE[source]
+
+
+def _normalized(path: str | os.PathLike | None = None) -> dict:
+    """Return the normalized spec bundle for the active config."""
+    load_config(path)
+    return _NORMALIZED_CACHE[_config_source(path)]
 
 
 def _reset_config_cache() -> None:
     """Clear the config cache (for testing)."""
     _CONFIG_CACHE.clear()
+    _NORMALIZED_CACHE.clear()
+
+
+# ---------------------------------------------------------------------------
+# Normalization: raw YAML -> frozen specs, exactly once.
+# ---------------------------------------------------------------------------
+
+
+def _block_provider(block_name: str, model: str) -> str:
+    try:
+        return infer_provider(model)
+    except ValueError as e:
+        raise ThinkingConfigError(f"config {block_name}: {e}") from None
+
+
+def _native_thinking(
+    block_name: str, model: str, entry: dict, extra_keys: set[str]
+) -> dict:
+    """Extract and validate the entry's provider-native thinking keys.
+
+    Every model-bearing block states its thinking parameters in the provider's
+    own parlance; the set of legal keys therefore depends on the model's
+    provider. Unknown keys and malformed or provider-mismatched settings fail
+    here, at config load.
+    """
+    provider = _block_provider(block_name, model)
+    allowed = extra_keys | NATIVE_THINKING_KEYS[provider]
+    unknown = set(entry) - allowed
+    if unknown:
+        raise ThinkingConfigError(
+            f"config {block_name}: unknown key(s) {sorted(unknown)} for "
+            f"provider {provider}. Allowed: {sorted(allowed)}."
+        )
+    thinking = {k: entry[k] for k in NATIVE_THINKING_KEYS[provider] if k in entry}
+    try:
+        resolve_thinking(model, thinking)
+    except ThinkingConfigError as e:
+        raise ThinkingConfigError(f"config {block_name}: {e}") from None
+    return thinking
+
+
+def _require_model(block_name: str, entry: dict, default: str | None = None) -> str:
+    model = entry.get("model", default)
+    if not isinstance(model, str) or not model:
+        raise ThinkingConfigError(
+            f"config {block_name}: `model` must be a non-empty string."
+        )
+    return model
+
+
+def _condition(block_name: str, entry: dict) -> str:
+    condition = entry.get("condition")
+    if not isinstance(condition, str) or not condition:
+        raise ThinkingConfigError(
+            f"config {block_name}: `condition` must be a non-empty string."
+        )
+    return condition
+
+
+def _normalize_arm(name: str, entry) -> ArmSpec:
+    block = f"benchmark_models.{name}"
+    if entry is None:
+        entry = {}
+    if not isinstance(entry, dict):
+        raise ThinkingConfigError(f"config {block}: expected a mapping")
+    model = _require_model(block, entry, default=name)
+    thinking = _native_thinking(block, model, entry, _COMMON_ARM_KEYS)
+    return ArmSpec(
+        name=name,
+        model=model,
+        provider=infer_provider(model),
+        condition=_condition(block, entry),
+        thinking=thinking,
+    )
+
+
+def _normalize_config(raw: dict) -> dict:
+    """Build the frozen spec bundle from a parsed config dict."""
+    bundle: dict = {"arms": {}}
+
+    if "models" in raw:
+        raise ThinkingConfigError(
+            "config: the `models:` roster was replaced by `benchmark_models:` "
+            "(each arm states provider-native thinking parameters plus a "
+            '`condition` label); see README "Running new tutor models".'
+        )
+
+    for name, entry in (raw.get("benchmark_models") or {}).items():
+        bundle["arms"][name] = _normalize_arm(name, entry)
+
+    student = raw.get("student")
+    if student is not None:
+        model = _require_model("student", student)
+        # A registered (scripted) student is a code callable, not an API
+        # model; it has no provider wire form and takes no thinking keys.
+        if get_registered_student(model) is not None:
+            unknown = set(student) - {"model", "mode"}
+            if unknown:
+                raise ThinkingConfigError(
+                    f"config student: registered student '{model}' takes no "
+                    f"thinking keys; unknown key(s) {sorted(unknown)}."
+                )
+            thinking = None
+        else:
+            thinking = _native_thinking("student", model, student, {"model", "mode"})
+        bundle["student"] = StudentSpec(
+            model=model, mode=student.get("mode", ""), thinking=thinking
+        )
+
+    scorer = raw.get("scorer")
+    if scorer is not None:
+        model = _require_model("scorer", scorer)
+        bundle["scorer"] = ScorerSpec(
+            model=model,
+            thinking=_native_thinking("scorer", model, scorer, {"model"}),
+        )
+
+    taxonomy = raw.get("taxonomy")
+    if taxonomy is not None:
+        model = _require_model("taxonomy", taxonomy)
+        bundle["taxonomy"] = TaxonomySpec(
+            model=model,
+            thinking=_native_thinking(
+                "taxonomy", model, taxonomy, {"model", "batch_size"}
+            ),
+            batch_size=taxonomy.get("batch_size", 50),
+        )
+
+    groundtruth = raw.get("groundtruth")
+    if groundtruth is not None:
+        model = _require_model("groundtruth", groundtruth)
+        bundle["groundtruth"] = GroundtruthSpec(
+            model=model,
+            thinking=_native_thinking(
+                "groundtruth",
+                model,
+                groundtruth,
+                {"model", "poll_interval", "labeller"},
+            ),
+            poll_interval=groundtruth.get("poll_interval", 60),
+            labeller=groundtruth.get("labeller"),
+        )
+
+    return bundle
 
 
 def register_tutor(name: str):
@@ -152,66 +385,65 @@ def get_batch_timeout(config_path: str | os.PathLike | None = None) -> int:
     return load_config(config_path)["batch"]["timeout"]
 
 
-def resolve_model(model_id: str, config_path: str | os.PathLike | None = None) -> dict:
-    """Resolve a model ID to provider, env var, and kwargs.
+def resolve_arm(arm_name: str, config_path: str | os.PathLike | None = None) -> ArmSpec:
+    """Resolve an arm name to its normalized spec.
 
     Args:
-        model_id: Model identifier (must be in the config models roster).
+        arm_name: Arm identifier (a key of the config benchmark_models roster).
 
     Returns:
-        Dict with keys: provider (str), env (str), kwargs (dict).
+        The frozen ArmSpec (name, model, provider, thinking).
 
     Raises:
-        ValueError: If model_id is not in the roster.
+        ValueError: If arm_name is not in the roster.
     """
-    cfg = load_config(config_path)
-    if model_id not in cfg["models"]:
-        valid_ids = list(cfg["models"].keys())
+    arms = _normalized(config_path)["arms"]
+    if arm_name not in arms:
         raise ValueError(
-            f"Model '{model_id}' not in roster. Valid models: {', '.join(valid_ids)}"
+            f"Arm '{arm_name}' not in roster. Valid arms: {', '.join(arms)}"
         )
-    provider = infer_provider(model_id)
-    env = cfg["providers"][provider]["env"]
-    kwargs = cfg["models"][model_id]
-    return {"provider": provider, "env": env, "kwargs": kwargs}
+    return arms[arm_name]
 
 
-def student_spec(config_path: str | os.PathLike | None = None) -> dict:
-    """Return the student spec block from config.
+def student_spec(config_path: str | os.PathLike | None = None) -> StudentSpec:
+    """Return the normalized student spec from config."""
+    bundle = _normalized(config_path)
+    if "student" not in bundle:
+        raise ValueError("config has no student block")
+    return bundle["student"]
 
-    Returns:
-        Dict with model, mode, thinking keys.
+
+def scorer_spec(config_path: str | os.PathLike | None = None) -> ScorerSpec:
+    """Return the normalized scorer spec from config."""
+    bundle = _normalized(config_path)
+    if "scorer" not in bundle:
+        raise ValueError("config has no scorer block")
+    return bundle["scorer"]
+
+
+def taxonomy_spec(config_path: str | os.PathLike | None = None) -> TaxonomySpec:
+    """Return the normalized taxonomy classifier spec from config.
+
+    Used by the action classifier that runs on every run and by
+    `tutormoments taxonomy`.
     """
-    return load_config(config_path)["student"]
+    bundle = _normalized(config_path)
+    if "taxonomy" not in bundle:
+        raise ValueError("config has no taxonomy block")
+    return bundle["taxonomy"]
 
 
-def scorer_spec(config_path: str | os.PathLike | None = None) -> dict:
-    """Return the scorer spec block from config.
+def get_groundtruth_phase_config(
+    config_path: str | os.PathLike | None = None,
+) -> GroundtruthSpec:
+    """Return the normalized ground-truth build phase spec.
 
-    Returns:
-        Dict with model and thinking keys.
+    Used by the dev-only `tutormoments dataset build-ground-truth` pipeline.
     """
-    return load_config(config_path)["scorer"]
-
-
-def taxonomy_spec(config_path: str | os.PathLike | None = None) -> dict:
-    """Return the taxonomy classifier spec block from config.
-
-    Returns:
-        Dict with model, thinking, and batch_size keys. Used by the action
-        classifier that runs on every run and by `tutormoments taxonomy`.
-    """
-    return load_config(config_path)["taxonomy"]
-
-
-def get_groundtruth_phase_config(config_path: str | os.PathLike | None = None) -> dict:
-    """Return the ground-truth build phase config block.
-
-    Reads from config: groundtruth -> {model, poll_interval, thinking,
-    thinking_budget, reasoning_effort, labeller}. Used by the dev-only
-    `tutormoments dataset build-ground-truth` pipeline.
-    """
-    return load_config(config_path)["groundtruth"]
+    bundle = _normalized(config_path)
+    if "groundtruth" not in bundle:
+        raise ValueError("config has no groundtruth block")
+    return bundle["groundtruth"]
 
 
 def get_labeller_config(config_path: str | os.PathLike | None = None):
@@ -220,7 +452,7 @@ def get_labeller_config(config_path: str | os.PathLike | None = None):
     A dict ({annotation_type: prompt_name}) routes per type; a string loads a
     single template for all types. Reads from config: groundtruth -> labeller.
     """
-    return load_config(config_path)["groundtruth"]["labeller"]
+    return get_groundtruth_phase_config(config_path).labeller
 
 
 @dataclass
@@ -228,7 +460,7 @@ class RunConfig:
     """Configuration for a tutormoments run.
 
     Attributes:
-        tutors: List of tutor model IDs to run.
+        tutors: List of tutor arm names (or registered tutor names) to run.
         modes: List of evaluation modes (e.g., ["plain", "scaffolding_rigor"]).
         dataset: Hugging Face dataset id holding the released benchmark
             (None when running from a local release dir).
@@ -242,9 +474,10 @@ class RunConfig:
         max_turns: Maximum turns per conversation.
         replay_concurrency: Number of per-moment replays to run concurrently
             within a cell. Result-preserving (only overlaps network round-trips).
-        student: Student spec dict (model, mode, thinking).
-        scorer: Scorer spec dict (model, thinking).
-        resolved_tutors: Dict[model_id -> kwargs dict] for resolved tutors.
+        student: Normalized StudentSpec.
+        scorer: Normalized ScorerSpec.
+        resolved_tutors: Dict[arm name -> ArmSpec] for roster arms; a
+            registered tutor maps to None (it has no model spec).
         config_source: Where the config was loaded from.
     """
 
@@ -258,9 +491,9 @@ class RunConfig:
     trials: int
     max_turns: int
     replay_concurrency: int
-    student: dict
-    scorer: dict
-    resolved_tutors: dict[str, dict]
+    student: StudentSpec
+    scorer: ScorerSpec
+    resolved_tutors: dict[str, ArmSpec | None]
     config_source: str
 
 
@@ -281,7 +514,7 @@ def build_run_config(
     """Build a RunConfig from CLI arguments and config defaults.
 
     Args:
-        tutors: List of tutor model IDs (required).
+        tutors: List of tutor arm names (required).
         modes: Evaluation modes. Default: ["plain", "scaffolding_rigor"].
         dataset: Hugging Face dataset id. Default: config `dataset.id`.
         data_path: Local release dir with moments.jsonl (wins over dataset).
@@ -300,7 +533,7 @@ def build_run_config(
         RunConfig with all fields filled.
 
     Raises:
-        ValueError: If any tutor model_id is not in the roster.
+        ValueError: If any tutor arm name is not in the roster.
     """
     cfg = load_config(config_path)
     d = cfg["defaults"]
@@ -323,20 +556,14 @@ def build_run_config(
         # Fall back to 4 if the execution block is absent (older configs).
         replay_concurrency = (cfg.get("execution") or {}).get("replay_concurrency", 4)
 
-    # Resolve tutors (check registry first, then roster)
-    resolved_tutors = {}
+    # Resolve tutors (check registry first, then roster). All thinking
+    # validation already happened at load_config time.
+    resolved_tutors: dict[str, ArmSpec | None] = {}
     for tutor_id in tutors:
         if get_registered_tutor(tutor_id) is not None:
-            # Registered tutor: no kwargs needed
-            resolved_tutors[tutor_id] = {}
+            resolved_tutors[tutor_id] = None
         else:
-            # Resolve via roster
-            resolved = resolve_model(tutor_id, config_path=config_path)
-            resolved_tutors[tutor_id] = resolved["kwargs"]
-
-    # Get student and scorer specs
-    student = student_spec(config_path)
-    scorer = scorer_spec(config_path)
+            resolved_tutors[tutor_id] = resolve_arm(tutor_id, config_path=config_path)
 
     return RunConfig(
         tutors=tutors,
@@ -349,8 +576,8 @@ def build_run_config(
         trials=trials,
         max_turns=max_turns,
         replay_concurrency=replay_concurrency,
-        student=student,
-        scorer=scorer,
+        student=student_spec(config_path),
+        scorer=scorer_spec(config_path),
         resolved_tutors=resolved_tutors,
         config_source=describe_config_source(config_path),
     )

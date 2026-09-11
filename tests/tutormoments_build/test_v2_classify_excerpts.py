@@ -6,6 +6,7 @@ from collections import Counter
 
 import pytest
 
+from tutormoments.models import ThinkingConfigError
 from tutormoments_build.v2 import classify_excerpts as C
 
 
@@ -216,7 +217,12 @@ def test_parse_over_scaffolding_reports_unparseable_output_as_none():
 # ===========================================================================
 
 
-CFG = {"model": "test-model", "thinking": "adaptive"}
+CFG = C.V2Spec(
+    model="test-model",
+    provider="anthropic",
+    thinking={"thinking": {"type": "adaptive"}},
+    poll_interval=60,
+)
 
 # The real prompt set, loaded once. The tests assert on how the templates are
 # filled and recorded, so a stub would only be asserting against itself.
@@ -335,8 +341,8 @@ def test_classify_counts_unparsed_responses(monkeypatch):
 
 
 def test_run_entries_forwards_the_models_generation_knobs(monkeypatch):
-    """thinking/effort/reasoning_effort have to reach the batch, or a comparison
-    model runs on the wrong settings while the record claims otherwise."""
+    """The provider-native params have to reach the batch verbatim, or a
+    comparison model runs on settings the record does not name."""
     import tutormoments.client as client
 
     seen = {}
@@ -350,18 +356,16 @@ def test_run_entries_forwards_the_models_generation_knobs(monkeypatch):
 
     C.run_entries(
         [],
-        {
-            "model": "gpt-5.5-2026-04-23",
-            "thinking": True,
-            "reasoning_effort": "high",
-            "poll_interval": 30,
-        },
+        C.V2Spec(
+            model="gpt-5.5-2026-04-23",
+            provider="openai",
+            thinking={"reasoning": "high"},
+            poll_interval=30,
+        ),
     )
 
     assert seen["model"] == "gpt-5.5-2026-04-23"
-    assert seen["thinking"] is True
-    assert seen["reasoning_effort"] == "high"
-    assert seen["effort"] == ""
+    assert seen["thinking"] == {"reasoning": "high"}
     assert seen["poll_interval"] == 30
 
 
@@ -370,28 +374,15 @@ def test_run_entries_forwards_the_models_generation_knobs(monkeypatch):
 # ===========================================================================
 
 
-@pytest.mark.parametrize(
-    "value,expected",
-    [
-        ("adaptive", True),
-        ("enabled", True),
-        (True, True),
-        ("disabled", False),
-        (False, False),
-    ],
-)
-def test_use_thinking_normalises_the_config_value(value, expected):
-    assert C.use_thinking({"thinking": value}) is expected
-
-
 def test_phase_config_reads_the_v2_block():
     cfg = C.phase_config()
 
-    assert cfg["model"] == "claude-opus-5"
-    assert cfg["thinking"] == "adaptive"
-    # Pinned, not left at the API default, so the baseline is effort-matched to
-    # the xhigh comparison models and reproducible across rounds.
-    assert cfg["effort"] == "xhigh"
+    assert cfg.model == "claude-opus-5"
+    assert cfg.provider == "anthropic"
+    # Effort is pinned, not left at the API default, so the baseline is
+    # effort-matched to the xhigh comparison models and reproducible.
+    assert cfg.thinking == {"thinking": {"type": "adaptive"}, "effort": "xhigh"}
+    assert cfg.poll_interval == 60
 
 
 def test_the_fallback_spec_matches_the_shipped_v2_block():
@@ -399,34 +390,48 @@ def test_the_fallback_spec_matches_the_shipped_v2_block():
     none. Drifting from the shipped block would run the baseline at a different
     reasoning depth than the default config does, silently."""
     shipped = C.phase_config()
+    fallback = dict(C.FALLBACK_SPEC)
 
-    for key, value in C.FALLBACK_SPEC.items():
-        assert shipped[key] == value
-
-
-def test_model_override_takes_its_knobs_from_the_roster():
-    """A comparison model is configured in the config file, not on the CLI."""
-    cfg = C.phase_config(model="claude-sonnet-5")
-
-    assert cfg["model"] == "claude-sonnet-5"
-    assert cfg["thinking"] == "adaptive"
-    assert cfg["effort"] == "xhigh"
-    assert cfg["poll_interval"] == 60  # a round property, not a model one
+    assert shipped.model == fallback.pop("model")
+    assert shipped.poll_interval == fallback.pop("poll_interval")
+    assert shipped.thinking == fallback
 
 
-def test_a_rostered_model_without_thinking_does_not_inherit_adaptive():
-    """Otherwise a model configured thinking-off would silently run with the
-    v2 block's adaptive thinking, and the record would name the wrong setting."""
+def test_a_comparison_model_resolves_to_its_arm_on_the_tutor_roster():
+    """gemini-3.5-flash is scored at exactly the parameters the benchmark
+    replays it with, so a model already on the roster needs no second entry --
+    and cannot drift from the arm by having one."""
+    cfg = C.phase_config(model="gemini-3.5-flash")
+
+    assert cfg.model == "gemini-3.5-flash"
+    assert cfg.provider == "gemini"
+    assert cfg.thinking == {"include_thoughts": True, "thinking_budget": -1}
+    assert cfg.poll_interval == 60  # a round property, not a model one
+
+
+def test_an_arm_name_that_differs_from_its_model_id_resolves_either_way():
+    """deepseek-v4-pro is the arm; deepseek-ai/DeepSeek-V4-Pro is the model id
+    --model would naturally be given. Both have to reach the same arm."""
+    by_arm = C.phase_config(model="deepseek-v4-pro")
+    by_id = C.phase_config(model="deepseek-ai/DeepSeek-V4-Pro")
+
+    assert by_arm.thinking == by_id.thinking == {}
+    assert by_arm.provider == "together"
+
+
+def test_an_override_does_not_inherit_the_baselines_parameters():
+    """Otherwise a model configured with no reasoning knobs would silently run
+    at the v2 block's adaptive/xhigh, and the record would name the wrong
+    setting -- or, across vendors, a knob the API rejects."""
     cfg = C.phase_config(model="deepseek-ai/DeepSeek-V4-Pro")
 
-    assert cfg["thinking"] is False
-    assert C.use_thinking(cfg) is False
+    assert cfg.thinking == {}
 
 
 def test_the_v2_model_needs_no_roster_entry():
     """It is fully specified by the v2 block; naming it explicitly must work
     even though it is not on the tutor roster."""
-    assert C.phase_config(model="claude-opus-5")["model"] == "claude-opus-5"
+    assert C.phase_config(model="claude-opus-5").model == "claude-opus-5"
 
 
 def test_the_openai_comparison_model_resolves_and_can_be_batched():
@@ -434,79 +439,108 @@ def test_the_openai_comparison_model_resolves_and_can_be_batched():
     Its `v2.models` entry has to resolve to an OpenAI reasoning config, and
     OpenAI has to be a provider run_batch supports -- either failure surfaces
     only after a whole round has been built and submitted."""
-    from tutormoments.client import infer_provider
-
     cfg = C.phase_config(model="gpt-5.6-sol")
 
-    assert cfg["model"] == "gpt-5.6-sol"
-    assert C.use_thinking(cfg) is True
-    assert cfg["reasoning_effort"] == "xhigh"
-    # `effort` is the Anthropic knob; sending it to OpenAI would be rejected.
-    assert cfg.get("effort", "") == ""
-    assert infer_provider(cfg["model"]) == "openai"
+    assert cfg.model == "gpt-5.6-sol"
+    assert cfg.provider == "openai"
+    # `reasoning` is OpenAI's knob; Anthropic's `effort` would be rejected.
+    assert cfg.thinking == {"reasoning": "xhigh"}
+
+
+# The scoring models this round compares, and the exact request each sends.
+# This is the machine-checkable statement of what a v2 round costs and at what
+# depth its labels were made: a config edit that changes a row here changes the
+# round's condition and must be deliberate.
+#
+# model -> (anthropic thinking, anthropic effort, gemini thinking_config,
+#           openai reasoning_effort)
+EXPECTED_V2_WIRE = {
+    "claude-opus-5": ({"type": "adaptive"}, "xhigh", None, None),
+    "gemini-3.5-flash": (
+        None,
+        None,
+        {"include_thoughts": True, "thinking_budget": -1},
+        None,
+    ),
+    "gpt-5.6-sol": (None, None, None, "xhigh"),
+}
+
+
+@pytest.mark.parametrize("model", sorted(EXPECTED_V2_WIRE))
+def test_every_shipped_v2_model_states_a_condition_the_client_can_send(model):
+    """A config that cannot be put on the wire has to fail here, not once a
+    round has been built and paid for."""
+    from tutormoments.models import resolve_thinking
+
+    anth, effort, gem, oai = EXPECTED_V2_WIRE[model]
+    cfg = C.phase_config(model=model)
+
+    assert cfg.model == model
+    wire = resolve_thinking(cfg.model, cfg.thinking)
+    assert wire.provider == cfg.provider
+    assert wire.anthropic_thinking == anth
+    assert wire.anthropic_effort == effort
+    assert wire.gemini_thinking_config == gem
+    assert wire.openai_reasoning_effort == oai
+
+
+def test_a_cross_vendor_knob_is_refused_rather_than_dropped():
+    """An OpenAI model carrying Anthropic's `effort` would otherwise run at the
+    API default while the record named an effort it never used."""
+    with pytest.raises(ThinkingConfigError, match="unknown key"):
+        C._native_thinking("v2.models.x", "gpt-5.6-sol", {"effort": "xhigh"})
+
+
+def test_a_provider_with_a_reasoning_knob_must_state_one():
+    """Silence is not "off": what an omitted param means depends on the model
+    generation, so an unstated condition is a config error."""
+    with pytest.raises(ThinkingConfigError):
+        C._native_thinking("v2.models.x", "gpt-5.6-sol", {})
 
 
 def test_the_record_names_the_reasoning_depth_the_round_ran_at():
-    """Without these, an effort-pinned round and one at the API default write
+    """Without this, an effort-pinned round and one at the API default write
     identical metadata, and a prediction file cannot say how its labels were
     made."""
     record = C.build_record(
-        SCAFFOLDED,
-        RAW,
-        {"model": "gpt-5.6-sol", "thinking": True, "reasoning_effort": "xhigh"},
-        PROMPTS,
+        SCAFFOLDED, RAW, C.phase_config(model="gpt-5.6-sol"), PROMPTS
     )
 
-    assert record["reasoning_effort"] == "xhigh"
-    # The Anthropic knob was not in play, and must not read as if it were.
-    assert record["effort"] is None
-    assert record["thinking_budget"] is None
+    assert record["model"] == "gpt-5.6-sol"
+    assert record["provider"] == "openai"
+    assert record["thinking"] == {"reasoning": "xhigh"}
 
 
 def test_the_report_names_the_effort_it_will_submit_at(capsys):
-    cfg = {"model": "gpt-5.6-sol", "thinking": True, "reasoning_effort": "xhigh"}
+    out = C.report({}, Counter(), dry_run=True, cfg=C.phase_config(model="gpt-5.6-sol"))
 
-    out = C.report({}, Counter(), dry_run=True, cfg=cfg)
-
-    assert "model: gpt-5.6-sol (thinking: True, reasoning_effort: xhigh)" in out
-
-
-def test_the_scoped_model_table_does_not_leak_into_the_spec():
-    """`v2.models` is a lookup table, not a setting of the round. Left in, it
-    would be recorded in every prediction record and passed to the batch."""
-    assert "models" not in C.phase_config()
-    assert "models" not in C.phase_config(model="gpt-5.6-sol")
-
-
-def test_a_scoped_model_shadows_nothing_on_the_tutor_roster():
-    """Both lookups have to keep working: the roster is where an id already
-    configured for `tutormoments run` gets its knobs from."""
-    cfg = C.phase_config(model="claude-sonnet-5")
-
-    assert cfg["effort"] == "xhigh"
-    assert cfg["thinking"] == "adaptive"
+    assert "model: gpt-5.6-sol (reasoning: xhigh)" in out
 
 
 def test_model_knobs_rejects_an_unroutable_scoped_id():
-    """A `v2.models` entry skips resolve_model, so provider inference is the only
-    thing standing between a typo'd id and a failed batch submission."""
+    """A `v2.models` entry is not validated by the runtime config loader, so
+    provider inference is the only thing standing between a typo'd id and a
+    failed batch submission."""
     with pytest.raises(ValueError, match="Cannot infer provider"):
-        C.model_knobs("gtp-5.6-sol", {"gtp-5.6-sol": {"thinking": True}})
+        C._native_thinking("v2.models.gtp-5.6-sol", "gtp-5.6-sol", {})
 
 
 def test_an_unknown_model_error_names_both_config_places():
     """The id is missing from two tables; the error has to say so, or the fix
     looks like it belongs on the tutor roster."""
-    with pytest.raises(ValueError, match="not in roster") as exc:
+    with pytest.raises(ValueError, match="configured nowhere") as exc:
         C.phase_config(model="gpt-5.6-sol-typo")
 
     assert "v2.models" in str(exc.value)
     assert "gpt-5.6-sol" in str(exc.value)
+    assert "benchmark_models" in str(exc.value)
 
 
 def test_an_unrostered_model_is_refused_with_the_roster_listed():
-    with pytest.raises(ValueError, match="not in roster"):
+    with pytest.raises(ValueError, match="configured nowhere") as exc:
         C.phase_config(model="claude-opus-5-typo")
+
+    assert "gemini-3.5-flash" in str(exc.value)
 
 
 # ===========================================================================
@@ -636,7 +670,14 @@ def test_the_test_split_is_held_out_unless_asked_for_by_name(tmp_path, monkeypat
 
     assert (
         C.main(
-            ["--excerpt-dir", excerpt_dir, "--out-dir", str(out_dir), "--splits", "test"]
+            [
+                "--excerpt-dir",
+                excerpt_dir,
+                "--out-dir",
+                str(out_dir),
+                "--splits",
+                "test",
+            ]
         )
         == 0
     )
@@ -765,8 +806,8 @@ def test_the_chosen_model_reaches_the_batch(tmp_path, monkeypatch):
         ]
     )
 
-    assert seen["cfg"]["model"] == "claude-sonnet-5"
-    assert seen["cfg"]["effort"] == "xhigh"
+    assert seen["cfg"].model == "claude-sonnet-5"
+    assert seen["cfg"].thinking == {"thinking": {"type": "adaptive"}, "effort": "xhigh"}
 
 
 def test_an_unknown_model_fails_on_the_dry_run(tmp_path, monkeypatch):
@@ -777,7 +818,7 @@ def test_an_unknown_model_fails_on_the_dry_run(tmp_path, monkeypatch):
 
     monkeypatch.setattr(C, "run_entries", _boom)
 
-    with pytest.raises(ValueError, match="not in roster"):
+    with pytest.raises(ValueError, match="configured nowhere"):
         C.main(
             [
                 "--excerpt-dir",
@@ -1026,7 +1067,14 @@ def test_a_second_round_refuses_to_replace_the_first(tmp_path, monkeypatch):
     monkeypatch.setattr(C, "run_entries", lambda entries, cfg, batch_id=None: RAW)
     out_dir = tmp_path / "out"
     # Version pinned: what is under test is the refusal, not which prompts ran.
-    argv = ["--excerpt-dir", excerpt_dir, "--out-dir", str(out_dir), "--prompt-version", "1"]
+    argv = [
+        "--excerpt-dir",
+        excerpt_dir,
+        "--out-dir",
+        str(out_dir),
+        "--prompt-version",
+        "1",
+    ]
 
     assert C.main(argv) == 0
     written = (out_dir / "claude-opus-5" / "1" / "iteration.jsonl").read_text(
@@ -1061,7 +1109,14 @@ def test_overwrite_replaces_the_earlier_round(tmp_path, monkeypatch):
     excerpt_dir = _write_excerpts(tmp_path)
     monkeypatch.setattr(C, "run_entries", lambda entries, cfg, batch_id=None: RAW)
     out_dir = tmp_path / "out"
-    argv = ["--excerpt-dir", excerpt_dir, "--out-dir", str(out_dir), "--prompt-version", "1"]
+    argv = [
+        "--excerpt-dir",
+        excerpt_dir,
+        "--out-dir",
+        str(out_dir),
+        "--prompt-version",
+        "1",
+    ]
 
     assert C.main(argv) == 0
     assert C.main(argv + ["--overwrite"]) == 0
@@ -1073,9 +1128,11 @@ def test_a_new_prompt_version_is_not_an_overwrite(tmp_path, monkeypatch):
     excerpt_dir = _write_excerpts(tmp_path)
     monkeypatch.setattr(C, "run_entries", lambda entries, cfg, batch_id=None: RAW)
     monkeypatch.setattr(
-        C, "load_prompt_set", lambda version: C.PromptSet(
+        C,
+        "load_prompt_set",
+        lambda version: C.PromptSet(
             version=version, paths=PROMPTS.paths, templates=PROMPTS.templates
-        )
+        ),
     )
     out_dir = tmp_path / "out"
     argv = ["--excerpt-dir", excerpt_dir, "--out-dir", str(out_dir)]

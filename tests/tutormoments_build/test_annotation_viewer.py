@@ -592,8 +592,10 @@ class TestAdjudicatorPasses:
     def test_how_they_resolved_the_two_passes_is_carried_through(self):
         decisions = {"situation": "agreed", "action": "reannotator"}
         pass_ = self._adjudicated(
-            final=judged(), rationale="  took the second read on the action  ",
-            decisions=decisions, meta={},
+            final=judged(),
+            rationale="  took the second read on the action  ",
+            decisions=decisions,
+            meta={},
         )
         assert pass_["rationale"] == "took the second read on the action"
         assert pass_["decisions"] == decisions
@@ -660,13 +662,13 @@ class TestAdjudicatorPasses:
                     ],
                     moment_id="thrown",
                 ),
-                record([annotation("a", "selector", **judged())], moment_id="untouched"),
+                record(
+                    [annotation("a", "selector", **judged())], moment_id="untouched"
+                ),
             ]
         )
         adjudicator = {
-            m["id"]: next(
-                (p for p in m["passes"] if p["role"] == "adjudicator"), None
-            )
+            m["id"]: next((p for p in m["passes"] if p["role"] == "adjudicator"), None)
             for m in moments
         }
         assert adjudicator["untouched"] is None

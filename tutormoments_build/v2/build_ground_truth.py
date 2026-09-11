@@ -18,9 +18,9 @@ If ``scaffolding_present and not scaffolding_appropriate``, it counts as
 over-scaffolding.
 
 Project staff (``EXCLUDED_ANNOTATORS``) are filtered out before anything is
-resolved. 
+resolved.
 
-Moments the reannotator flagged ``meta.throw_out`` are dropped. 
+Moments the reannotator flagged ``meta.throw_out`` are dropped.
 Where the reannotator redrew boundaries, the redrawn values are emitted
 and the originals preserved under ``original_boundaries``.
 

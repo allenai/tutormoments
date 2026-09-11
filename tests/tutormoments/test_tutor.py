@@ -143,5 +143,5 @@ def test_resolve_tutor_unknown_raises():
     _reset_config_cache()
 
     # Attempt to resolve an unknown tutor
-    with pytest.raises(ValueError, match="Model 'not-a-model' not in roster"):
+    with pytest.raises(ValueError, match="Arm 'not-a-model' not in roster"):
         resolve_tutor("not-a-model")
