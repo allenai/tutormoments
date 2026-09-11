@@ -201,12 +201,14 @@ class TestCoarseAxes:
         assert axes["meaningful_success"] is True
         assert axes["high_engagement"] is True
 
-    def test_over_scaffolding_is_unjudged_when_no_scaffolding_was_seen(self):
+    def test_seeing_no_scaffolding_declares_no_over_scaffolding(self):
+        # The amount question was never put to them, but the call their pass carries is
+        # still "not over-scaffolded" -- the reading v2/adjudicator_agreement.py scores.
         axes = coarse_axes(
             judged(action=action(scaffolding_present=False, scaffolding_amount=None))
         )
         assert axes["scaffolding_present"] is False
-        assert axes["over_scaffolding"] is None
+        assert axes["over_scaffolding"] is False
 
     def test_over_scaffolding_is_the_amount_the_rater_chose(self):
         axes = coarse_axes(judged(action=action(scaffolding_amount="over_scaffolding")))
@@ -222,14 +224,22 @@ class TestDiffAxes:
         second = coarse_axes(judged(situation=situation(rigor=True)))
         assert diff_axes(first, second) == {"rigor_appropriate"}
 
-    def test_over_scaffolding_is_skipped_unless_both_saw_scaffolding(self):
+    def test_calling_it_over_scaffolded_differs_from_seeing_no_scaffolding(self):
         saw = coarse_axes(judged(action=action(scaffolding_amount="over_scaffolding")))
         did_not = coarse_axes(
             judged(action=action(scaffolding_present=False, scaffolding_amount=None))
         )
-        # They differ about whether scaffolding happened at all, which is one disagreement --
-        # not two, with "was there too much of it" counted a second time.
-        assert diff_axes(saw, did_not) == {"scaffolding_present"}
+        # One underlying split, named on both rows: they differ about whether scaffolding
+        # happened at all, and so about whether there was too much of it. It is the same
+        # moment either way -- the split on scaffolding_present already made it a
+        # disagreement, so naming over-scaffolding too moves no moment across that line.
+        assert diff_axes(saw, did_not) == {"scaffolding_present", "over_scaffolding"}
+
+    def test_two_raters_who_saw_no_scaffolding_agree_about_over_scaffolding(self):
+        none = coarse_axes(
+            judged(action=action(scaffolding_present=False, scaffolding_amount=None))
+        )
+        assert diff_axes(none, dict(none)) == set()
 
     def test_an_unjudged_axis_is_not_a_disagreement(self):
         assert diff_axes(coarse_axes(judged()), coarse_axes(None)) == set()
@@ -244,14 +254,20 @@ class TestDiffAxes:
 
 
 class TestAxisPairs:
-    def test_pairs_only_the_axes_both_raters_judged(self):
+    def test_pairs_every_axis_both_raters_judged(self):
         saw = coarse_axes(judged(action=action(scaffolding_amount="over_scaffolding")))
         did_not = coarse_axes(
             judged(action=action(scaffolding_present=False, scaffolding_amount=None))
         )
         pairs = axis_pairs(saw, did_not)
-        assert "over_scaffolding" not in pairs
+        # Over-scaffolding is pooled on every moment both raters judged, including the
+        # ones where a rater saw no scaffolding: their call is "not over-scaffolded", so
+        # a kappa over it is scored on the same moments adjudicator_agreement.py uses.
+        assert pairs["over_scaffolding"] == [True, False]
         assert pairs["scaffolding_present"] == [True, False]
+
+    def test_a_pass_with_no_judgment_has_nothing_to_pool(self):
+        assert axis_pairs(coarse_axes(judged()), coarse_axes(None)) == {}
 
 
 def whos_who(passes):
@@ -592,6 +608,37 @@ class TestAdjudicatorPasses:
         assert pass_["sar"] is None
         assert pass_["axes"] is None
 
+    def test_one_adjudicator_is_not_a_pair(self):
+        # A lone final call has nobody to be compared against: the moment carries no
+        # adjudicator comparison at all rather than a half-filled one.
+        moments = build_moments(
+            [
+                record(
+                    [
+                        annotation("a", "selector", **judged()),
+                        annotation("b", "reannotator", **judged()),
+                        annotation("c", "adjudicator", final=judged(), meta={}),
+                    ]
+                )
+            ]
+        )
+        assert moments[0]["adjudicator_pairs"] == {}
+        assert moments[0]["adjudicator_pair"] == []
+
+    def test_an_unadjudicated_moment_carries_no_adjudicator_comparison(self):
+        moments = build_moments(
+            [
+                record(
+                    [
+                        annotation("a", "selector", **judged()),
+                        annotation("b", "reannotator", **judged()),
+                    ]
+                )
+            ]
+        )
+        assert moments[0]["adjudicator_pairs"] == {}
+        assert moments[0]["adjudicator_pair"] == []
+
     def test_a_mixed_export_partitions_by_how_far_review_got(self):
         """What the page's adjudication filter slices on: whether a moment has an
         adjudicator pass at all, and whether that pass left labels or removed it."""
@@ -746,13 +793,69 @@ class TestTwoAdjudicators:
         assert tara["rationale"] == "read the rigor the other way"
 
     def test_agreement_is_still_measured_between_the_first_two_passes(self):
-        # Adjudication settles a moment; it is not a third rater to pool into kappa.
+        # Adjudication settles a moment; it is not a third rater to pool into the
+        # first-vs-second kappa. The two adjudicators are compared against each other
+        # instead, under their own key.
         moment = self._moments(
             self._tara(final=judged(situation=situation(rigor=True)), meta={})
         )[0]
         assert moment["outcome"] == "agreement"
         assert moment["diff"] == []
         assert moment["pairs"]["rigor_appropriate"] == [False, False]
+
+    def test_the_two_adjudicators_are_paired_against_each_other(self):
+        # The only other place in an export where two raters answered the same
+        # questions in the same role, so it is the other kappa the page can report.
+        moment = self._moments(
+            self._tara(final=judged(situation=situation(rigor=True)), meta={})
+        )[0]
+        assert moment["adjudicator_pair"] == ["erika", "tara"]
+        assert moment["adjudicator_pairs"]["rigor_appropriate"] == [False, True]
+        assert moment["adjudicator_pairs"]["scaffolding_appropriate"] == [True, True]
+
+    def test_the_pair_is_ordered_by_rater_not_by_who_ruled_first(self):
+        """Pooling several pairs of adjudicators into one kappa needs the same rater on
+        the same side every time, or the marginals chance agreement is computed from mix
+        the two raters together. The card columns still follow the ruling order."""
+        moments = build_moments(
+            [
+                record(
+                    [
+                        annotation("a", "selector", **judged()),
+                        annotation("b", "reannotator", **judged()),
+                        # zara ruled first, but sorts second.
+                        annotation(
+                            "zara",
+                            "adjudicator",
+                            created_at="2026-08-03T00:00:00Z",
+                            final=judged(situation=situation(rigor=True)),
+                            meta={},
+                        ),
+                        annotation(
+                            "erika",
+                            "adjudicator",
+                            created_at="2026-08-04T00:00:00Z",
+                            final=judged(),
+                            meta={},
+                        ),
+                    ]
+                )
+            ]
+        )
+        moment = moments[0]
+        assert whos_who(moment["passes"])[2:] == [
+            ("adjudicator", "zara"),
+            ("adjudicator", "erika"),
+        ]
+        assert moment["adjudicator_pair"] == ["erika", "zara"]
+        assert moment["adjudicator_pairs"]["rigor_appropriate"] == [False, True]
+
+    def test_an_adjudicator_who_threw_the_moment_out_left_nothing_to_compare(self):
+        # They answered no label questions, so the moment drops out of the adjudicator
+        # comparison rather than reading as a column of negatives.
+        moment = self._moments(self._tara(final={}, meta={"throw_out": True}))[0]
+        assert moment["adjudicator_pairs"] == {}
+        assert moment["adjudicator_pair"] == ["erika", "tara"]
 
     def test_either_adjudicator_can_mark_the_moment_for_removal(self):
         moment = self._moments(self._tara(final={}, meta={"throw_out": True}))[0]

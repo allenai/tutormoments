@@ -86,6 +86,29 @@ def _sole(grouped, role):
     return passes[0] if passes else None
 
 
+def _adjudicator_pair(grouped):
+    """The two adjudicators whose final calls are compared, or (None, None).
+
+    Most adjudicated moments go to two adjudicators, who answer the same questions in
+    the same role -- the only place in the export besides the selector/reannotator pair
+    where two raters judged the same thing independently.
+
+    Ordered by annotator id rather than by who ruled first, which is *not* the order the
+    cards number the columns in. Several different adjudicators appear across the export,
+    so pooling their moments into one kappa means every moment a given pair shares has to
+    put the same rater on the same side: kappa's chance-agreement term is computed from
+    each side's marginals, and ordering by ruling time would mix the two raters together
+    in them. Raw agreement is symmetric and does not care; kappa moves in the third
+    decimal. `v2/adjudicator_agreement.py` sorts by de-identified label for the same
+    reason, and the two orders agree on every pair of adjudicators in the export.
+
+    Where an export carries more than two, the first two by id rule the comparison, the
+    same reading `_sole` takes for a doubled single-rater role.
+    """
+    passes = sorted(grouped["adjudicator"], key=lambda p: p["annotator_id"])
+    return (passes[0], passes[1]) if len(passes) >= 2 else (None, None)
+
+
 def _name(row):
     """Who this is, as a reader recognises them.
 
@@ -208,6 +231,18 @@ def _thrown_out(moment, grouped):
     )
 
 
+def _pairs(a, b):
+    """Two passes' axis values, or nothing where there is no comparison to make.
+
+    A pass with no judgment -- a reannotator who threw the moment out, an adjudicator
+    who ruled the moment does not belong -- leaves nothing to compare, and so does a
+    moment only one of the two raters ever reached.
+    """
+    if not (a and b and a["axes"] and b["axes"]):
+        return {}
+    return axes_mod.axis_pairs(a["axes"], b["axes"])
+
+
 def build_moments(records, excluded=()):
     """Every annotated moment, newest pass per role, ready to filter and render."""
     excluded = set(excluded)
@@ -226,6 +261,7 @@ def build_moments(records, excluded=()):
             continue
         grouped = by_role(passes)
         first, second = _sole(grouped, "selector"), _sole(grouped, "reannotator")
+        adj_a, adj_b = _adjudicator_pair(grouped)
         moved, original = _boundaries(moment, grouped)
         moments.append(
             {
@@ -252,10 +288,16 @@ def build_moments(records, excluded=()):
                     else ()
                 ),
                 # Rater-vs-rater values, pooled across moments for the kappa table.
-                "pairs": (
-                    axes_mod.axis_pairs(first["axes"], second["axes"])
-                    if first and second and first["axes"] and second["axes"]
-                    else {}
+                "pairs": _pairs(first, second),
+                # The same values for the two adjudicators, which the page compares
+                # instead when the agreement filter is pointed at them. Their ids come
+                # alongside so the page can tell whether the pair survives a filter that
+                # drops one of them.
+                "adjudicator_pairs": _pairs(adj_a, adj_b),
+                "adjudicator_pair": (
+                    [adj_a["annotator_id"], adj_b["annotator_id"]]
+                    if adj_a and adj_b
+                    else []
                 ),
             }
         )

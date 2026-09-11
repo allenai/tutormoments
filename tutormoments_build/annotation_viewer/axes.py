@@ -5,6 +5,14 @@ Ported from the annotation platform the raters used (edu_dense_annotation
 disagreement here exactly when it did there. Keep the two in lockstep: changing an
 axis changes every agreement number the viewer reports.
 
+One deliberate divergence: over-scaffolding is read as the rater's declared call
+rather than as unjudged when they saw no scaffolding (see `coarse_axes`), which is
+what `v2/adjudicator_agreement.py` scores and so keeps the viewer's kappas and that
+script's answering the same question. It names over-scaffolding on more cards than the
+platform did, but no moment changes between agreement and disagreement over it: a
+split on over-scaffolding of the kind this newly catches is a split on
+`scaffolding_present` too, which already made the moment a disagreement.
+
 The axes are deliberately coarse. Strategy and reason checkboxes are shown on the
 cards but never compared: they are unlocked by the yes/no field above them, so two
 raters who ticked different strategies would otherwise be counted as disagreeing
@@ -71,6 +79,10 @@ CONSTRUCT_LABELS = {"sit": "Situation", "act": "Action", "res": "Result"}
 
 ROLES = ("selector", "reannotator", "adjudicator")
 
+# The amount choice that counts as over-scaffolding; every other answer, including the
+# amount question never being put to a rater who saw no scaffolding, does not.
+OVER_SCAFFOLDING = "over_scaffolding"
+
 
 def sar_of(role, payload):
     """The situation/action/result a pass recorded, or None when it recorded none.
@@ -91,22 +103,27 @@ def sar_of(role, payload):
 def coarse_axes(sar):
     """One pass's judgment reduced to the booleans agreement is measured on.
 
-    `over_scaffolding` is None when the rater saw no scaffolding at all: they were
-    never asked how much of it there was, so there is nothing to agree about.
+    `over_scaffolding` is the rater's declared call: did they say the tutor
+    over-scaffolded. A rater who saw no scaffolding at all declared no over-scaffolding
+    -- the form never put the amount question to them, but the answer their pass carries
+    is still "not over-scaffolded", and that is the label the benchmark ships. Reading it
+    as unjudged instead would drop every moment where one rater saw no scaffolding out of
+    the comparison, including the ones where the other called it over-scaffolding, which
+    are real disagreements about the shipped label.
+
+    This is the reading `v2/adjudicator_agreement.py` scores
+    (`over_scaffolding_declared`), so the two agree on the same moments.
     """
     if not sar:
         return dict.fromkeys(AXIS_KEYS)
     sit = sar.get("situation") or {}
     act = sar.get("action") or {}
     res = sar.get("result") or {}
-    present = bool(act.get("scaffolding_present"))
     return {
         "scaffolding_appropriate": bool(sit.get("scaffolding_appropriate")),
         "rigor_appropriate": bool(sit.get("rigor_appropriate")),
-        "scaffolding_present": present,
-        "over_scaffolding": (act.get("scaffolding_amount") == "over_scaffolding")
-        if present
-        else None,
+        "scaffolding_present": bool(act.get("scaffolding_present")),
+        "over_scaffolding": act.get("scaffolding_amount") == OVER_SCAFFOLDING,
         "rigor_present": bool(act.get("rigor_present")),
         "meaningful_success": res.get("problem_success") == "meaningful_success",
         "high_engagement": res.get("cognitive_engagement") == "high_or_good",
@@ -114,13 +131,16 @@ def coarse_axes(sar):
 
 
 def diff_axes(a, b):
-    """The axes two passes judged differently, skipping ones either left unjudged."""
+    """The axes two passes judged differently, skipping ones either left unjudged.
+
+    Two raters who split on whether there was scaffolding at all can now also be named
+    as splitting on over-scaffolding, where one of them called it over-scaffolded. That
+    is one disagreement showing up on two rows rather than two separate ones -- it never
+    turns an agreeing moment into a disagreeing one, since the split on
+    `scaffolding_present` already made it one.
+    """
     out = set()
     for key in AXIS_KEYS:
-        if key == "over_scaffolding" and not (
-            a.get("scaffolding_present") and b.get("scaffolding_present")
-        ):
-            continue
         av, bv = a.get(key), b.get(key)
         if av is not None and bv is not None and av != bv:
             out.add(key)
@@ -136,10 +156,6 @@ def axis_pairs(first, second):
     """
     pairs = {}
     for key in AXIS_KEYS:
-        if key == "over_scaffolding" and not (
-            first.get("scaffolding_present") and second.get("scaffolding_present")
-        ):
-            continue
         av, bv = first.get(key), second.get(key)
         if av is not None and bv is not None:
             pairs[key] = [av, bv]

@@ -279,6 +279,10 @@
     <select id="f-annotator"></select>
   </div>
   <div class="ctl">
+    <label for="f-pairs">Agreement between</label>
+    <select id="f-pairs"></select>
+  </div>
+  <div class="ctl">
     <label for="f-axis">Agreement on</label>
     <select id="f-axis"></select>
   </div>
@@ -344,6 +348,42 @@ function passLabel(pass, v) {
 }
 const SINGLE_PASS = "single pass";
 
+// The two rater pairs the agreement filter and the agreement table can be pointed at.
+// Both are two raters answering the same questions independently, which is what a
+// kappa needs; they are simply different pairs of raters, so each carries the words the
+// headings and tooltips use for its two sides. `key` names the map `view` puts the
+// moment's pairs under.
+const PAIR_SOURCES = {
+  passes: {
+    key: "pairs",
+    label: "First vs. second pass",
+    short: "the two passes",
+    first: "the first pass",
+    second: "the second pass",
+    other: "the other pass",
+    none: "No moment was judged twice on this axis.",
+  },
+  // The two sides are the moment's two adjudicators ordered by rater, not the card's
+  // "Adjudicator 1 / 2" columns, which are numbered by who ruled first: pooling several
+  // rater pairs into one kappa needs the same rater on the same side every time. So the
+  // sides are named for the comparison rather than for the columns.
+  adjudicators: {
+    key: "adjudicatorPairs",
+    label: "Adjudicator A vs. adjudicator B",
+    short: "the two adjudicators",
+    first: "adjudicator A",
+    second: "adjudicator B",
+    other: "the other adjudicator",
+    none: "No moment was adjudicated twice on this axis.",
+  },
+};
+const pairSource = () => PAIR_SOURCES[state.pairSource];
+// A side's name opens a sentence as often as it sits inside one.
+const cap = (s) => s.charAt(0).toUpperCase() + s.slice(1);
+
+/** The pairs the agreement filter and the agreement table read on one moment. */
+const pairsOf = (v) => v[pairSource().key];
+
 const TRANSCRIPTS = new Map(DATA.transcripts.map((t) => [t.transcript_id, t]));
 const MOMENTS_BY_TRANSCRIPT = new Map();
 for (const m of DATA.moments) {
@@ -356,6 +396,10 @@ for (const list of MOMENTS_BY_TRANSCRIPT.values()) {
 
 const state = {
   annotator: "",
+  // Which two raters the agreement filter and the agreement table compare:
+  // "passes" for the selector against the reannotator, "adjudicators" for the two
+  // adjudicators on a doubly adjudicated moment.
+  pairSource: "passes",
   // "agree:<axis>" / "differ:<axis>", or "" for every moment.
   axis: "",
   // "any" / "labels" / "thrown" / "none", or "" for every moment.
@@ -399,7 +443,17 @@ function view(moment) {
     outcome: bothPasses ? moment.outcome : SINGLE_PASS,
     diff: new Set(bothPasses ? moment.diff : []),
     pairs: bothPasses ? moment.pairs : {},
+    // The adjudicator pairs were computed between two named raters, so dropping either
+    // of them as a tester leaves no comparison rather than a different one.
+    adjudicatorPairs: bothAdjudicators(moment, adjudicators) ? moment.adjudicator_pairs : {},
   };
+}
+
+/** Whether both adjudicators the pairs were computed between are still in view. */
+function bothAdjudicators(moment, adjudicators) {
+  const live = new Set(adjudicators.map((p) => p.annotator_id));
+  const pair = moment.adjudicator_pair || [];
+  return pair.length === 2 && pair.every((id) => live.has(id));
 }
 
 function matchesAnnotator(v) {
@@ -411,17 +465,21 @@ function matchesDates(v) {
   return v.passes.some((p) => (!state.from || p.date >= state.from) && (!state.to || p.date <= state.to));
 }
 
-/** Whether the two passes landed the same way on one axis.
+/** Whether the selected pair of raters landed the same way on one axis.
  *
- *  The first pass anchors it: an axis is only in play when the selector judged it, and
- *  agreement means the reannotator came back with the selector's value. Axes only one
- *  of them was ever asked about -- over-scaffolding when the other saw no scaffolding
- *  at all, anything on a moment the reannotator threw out -- are neither, so those
- *  moments drop out under either half of the filter rather than counting as agreement. */
+ *  The earlier of the two anchors it: an axis is only in play when they judged it, and
+ *  agreement means the later one came back with the same value. A moment the second
+ *  rater threw out leaves no judgment to compare on any axis, so it is neither agreement
+ *  nor disagreement and drops out under either half of the filter.
+ *
+ *  Which pair that is comes from the "Agreement between" filter: the selector against
+ *  the reannotator, or the two adjudicators on a doubly adjudicated moment. A moment
+ *  with no pair of the selected kind is not in view under either half -- in adjudicator
+ *  mode that is most of the export, which is the point of the filter. */
 function matchesAxis(v) {
   if (!state.axis) return true;
   const [want, key] = state.axis.split(":");
-  const pair = v.pairs[key];
+  const pair = pairsOf(v)[key];
   if (!pair) return false;
   return (pair[0] === pair[1]) === (want === "agree");
 }
@@ -467,14 +525,18 @@ function selectedViews({ ignoreAdjudication = false } = {}) {
   return out;
 }
 
-/** Whether a rater filed one of the two passes agreement is measured between.
+/** Whether a rater filed one of the two passes agreement is currently measured between.
  *
- *  Adjudication is not one of them: it settles a moment the two passes split on rather
- *  than adding a third judgment to pool, so a rater who only adjudicated a moment did
- *  not take part in the comparison it contributes. */
+ *  In pass mode adjudication is not one of them: it settles a moment the two passes
+ *  split on rather than adding a third judgment to pool, so a rater who only adjudicated
+ *  a moment did not take part in the comparison it contributes. In adjudicator mode the
+ *  two adjudicators are the comparison and the selector and reannotator are the ones
+ *  standing outside it. */
 function judgedAsComparedPass(v, annotatorId) {
-  return [v.byRole.selector, v.byRole.reannotator]
-    .some((p) => p && p.annotator_id === annotatorId);
+  const compared = state.pairSource === "adjudicators"
+    ? v.adjudicators
+    : [v.byRole.selector, v.byRole.reannotator];
+  return compared.some((p) => p && p.annotator_id === annotatorId);
 }
 
 /** Moments the agreement table is computed over: everything in the export, narrowed by
@@ -984,15 +1046,21 @@ function analytics(views) {
   };
 }
 
-/** Agreement scores per reported axis, pooled over every moment judged twice in the
- *  set agreementViews selects -- the whole export, or one rater's moments. */
+/** Agreement scores per reported axis, pooled over every moment the selected pair of
+ *  raters both judged in the set agreementViews selects -- the whole export, or one
+ *  rater's moments.
+ *
+ *  In adjudicator mode this pools only the doubly adjudicated moments, which is a far
+ *  smaller n than the pass-mode table: read it as agreement among the adjudicators on
+ *  the hard moments they were called in for, not as a second estimate of the effort-wide
+ *  reliability the pass-mode table reports. */
 function agreement() {
   const pairs = Object.fromEntries(REPORTED_AXES.map((a) => [a.key, []]));
   let n = 0;
   for (const v of agreementViews()) {
-    if (!Object.keys(v.pairs).length) continue;
+    if (!Object.keys(pairsOf(v)).length) continue;
     n++;
-    for (const [axis, pair] of Object.entries(v.pairs)) {
+    for (const [axis, pair] of Object.entries(pairsOf(v))) {
       if (pairs[axis]) pairs[axis].push(pair);
     }
   }
@@ -1080,9 +1148,11 @@ function renderAnalytics(views) {
   // their moments, so the heading names them rather than leaving a much smaller n
   // reading as the effort-wide number it is not.
   const rater = state.annotator ? annotatorName(state.annotator) : "";
+  const src = pairSource();
+  const judged = state.pairSource === "adjudicators" ? "adjudicated twice" : "judged twice";
   right.append(el("h4", null, rater
-    ? `Agreement · ${rater} vs. the other pass · judged twice (n=${iaa.n})`
-    : `Inter-annotator agreement · judged twice (n=${iaa.n}, date filter only)`));
+    ? `Agreement · ${rater} vs. ${src.other} · ${judged} (n=${iaa.n})`
+    : `Inter-annotator agreement · ${src.label} · ${judged} (n=${iaa.n}, date filter only)`));
   const table = el("table", "agree");
   const thead = el("thead");
   const hrow = el("tr");
@@ -1091,14 +1161,14 @@ function renderAnalytics(views) {
   hrow.append(el("th", "num", "Raw"));
   hrow.append(el("th", "num", "κ"));
   for (const [label, title] of [
-    ["P", "Precision: of the moments the second pass judged true on this axis, the share "
-      + "the first pass judged true too."],
-    ["R", "Recall: of the moments the first pass judged true on this axis, the share the "
-      + "second pass judged true too."],
+    ["P", `Precision: of the moments ${src.second} judged true on this axis, the share `
+      + `${src.first} judged true too.`],
+    ["R", `Recall: of the moments ${src.first} judged true on this axis, the share `
+      + `${src.second} judged true too.`],
     ["F1", "Harmonic mean of precision and recall."],
   ]) {
     const cell = el("th", "num", label);
-    cell.title = title + " The first pass is the ground truth.";
+    cell.title = `${title} ${cap(src.first)} is the ground truth.`;
     hrow.append(cell);
   }
   thead.append(hrow);
@@ -1123,17 +1193,17 @@ function renderAnalytics(views) {
       const cell = el("td", "num kappa undef", "—");
       cell.title = s.n
         ? "Undefined: both raters used a single category, so chance agreement is already total."
-        : "No moment was judged twice on this axis.";
+        : src.none;
       tr.append(cell);
     } else {
       tr.append(el("td", "num kappa " + (s.kappa >= 0.4 ? "ok" : s.kappa >= 0.2 ? "mid" : "low"),
         s.kappa.toFixed(2)));
     }
-    const none = s.n ? "" : "No moment was judged twice on this axis.";
+    const none = s.n ? "" : src.none;
     tr.append(scoreCell(s.precision,
-      none || "The second pass never judged this axis true, so there is nothing to be precise about."));
+      none || `${cap(src.second)} never judged this axis true, so there is nothing to be precise about.`));
     tr.append(scoreCell(s.recall,
-      none || "The first pass never judged this axis true, so there is nothing to recall."));
+      none || `${cap(src.first)} never judged this axis true, so there is nothing to recall.`));
     tr.append(scoreCell(s.f1, none || "Precision or recall is undefined on this axis."));
     tbody.append(tr);
   }
@@ -1141,20 +1211,32 @@ function renderAnalytics(views) {
   const scroller = el("div", "table-scroll");
   scroller.append(table);
   right.append(scroller);
-  const note = "P · R · F1 score the second pass against the first as ground truth, with "
-    + "“axis true” as the positive class.";
-  // A rater cuts some of their moments and reviews others, so which side of the
-  // comparison they are on varies within their own table. κ does not care -- it is
-  // symmetric -- but P and R do, and reading them as "how often this rater was right"
-  // would be wrong.
+  const note = `P · R · F1 score ${src.second} against ${src.first} as ground `
+    + "truth, with “axis true” as the positive class.";
+  // A rater cuts some of their moments and reviews others -- and adjudicators are
+  // likewise first on some and second on others -- so which side of the comparison they
+  // are on varies within their own table. κ does not care -- it is symmetric -- but P
+  // and R do, and reading them as "how often this rater was right" would be wrong.
+  const mixed = state.pairSource === "adjudicators"
+    ? `Pooled over the moments ${rater} adjudicated alongside another adjudicator, where `
+      + "they may be on either side depending on who they sat with"
+    : `Pooled over the moments ${rater} selected or reannotated, so they are the first `
+      + "pass on some and the second on others";
+  // A and B are a fixed assignment per rater, so every moment a pair of adjudicators
+  // shares puts the same one on the same side -- what a pooled κ needs, and not what the
+  // cards do, where the columns are numbered by who ruled first.
+  const sides = state.pairSource === "adjudicators"
+    ? " A and B are fixed per rater so that κ pools each rater on one side; they are not "
+      + "the card's Adjudicator 1 and 2, which are numbered by who ruled first."
+    : "";
   right.append(el("p", "an-legend-note", rater
-    ? `${note} Pooled over the moments ${rater} selected or reannotated, so they are the `
-      + "first pass on some and the second on others: κ is symmetric, P · R · F1 are not. "
-      + "The axis filter does not narrow this table."
-    : `${note} The axis filter does not narrow this table.`));
+    ? `${note} ${mixed}: κ is symmetric, P · R · F1 are not. `
+      + `The axis filter does not narrow this table.${sides}`
+    : `${note} The axis filter does not narrow this table.${sides}`));
   if (rater && !iaa.n) {
-    right.append(el("p", "hint",
-      `No moment in range was judged twice with ${rater} as one of the two passes.`));
+    right.append(el("p", "hint", state.pairSource === "adjudicators"
+      ? `No moment in range was adjudicated twice with ${rater} as one of the two adjudicators.`
+      : `No moment in range was judged twice with ${rater} as one of the two passes.`));
   }
   body.append(right);
 }
@@ -1253,6 +1335,7 @@ function scrollToSpan(pane, turnIndex) {
 function render() {
   const views = selectedViews();
   labelAdjudicationOptions();
+  labelPairOptions();
   renderAnalytics(views);
   $("clear-dates").hidden = !state.from && !state.to;
   renderTranscriptMode(views, selectedVerdicts());
@@ -1262,6 +1345,27 @@ const annotatorSelect = $("f-annotator");
 annotatorSelect.append(new Option("All annotators", ""));
 for (const a of DATA.annotators) {
   annotatorSelect.append(new Option(`${a.name} (${a.total})`, a.id));
+}
+
+// Which pair of raters "Agreement on" and the agreement table compare. Counts sit in
+// the labels because only a fraction of the export is adjudicated twice: a maintainer
+// should see how much of it the adjudicator comparison rests on before selecting it.
+const pairSelect = $("f-pairs");
+for (const [value, source] of Object.entries(PAIR_SOURCES)) {
+  pairSelect.append(new Option(source.label, value));
+}
+
+/** The option labels, counted over the moments each pair is available on. */
+function labelPairOptions() {
+  const chosen = state.pairSource;
+  Object.keys(PAIR_SOURCES).forEach((value, i) => {
+    state.pairSource = value;
+    const n = DATA.moments
+      .map((m) => view(m))
+      .filter((v) => v && Object.keys(pairsOf(v)).length).length;
+    pairSelect.options[i].text = `${PAIR_SOURCES[value].label} (${n})`;
+  });
+  state.pairSource = chosen;
 }
 
 // The axis filter offers exactly the axes the agreement table reports on: the result
@@ -1307,6 +1411,7 @@ function labelAdjudicationOptions() {
 
 const BINDINGS = [
   ["f-annotator", "annotator"],
+  ["f-pairs", "pairSource"],
   ["f-axis", "axis"],
   ["f-adjudication", "adjudication"],
   ["f-from", "from"],
