@@ -39,6 +39,15 @@
    "heldout_fraction": 0.5,
    "balance_by": "transcripts",
    "n_assigned": 24
+  },
+  {
+   "batch": 5,
+   "created_at": "2026-09-10T14:54:17Z",
+   "source": "data/v2_annotations/source/tutoring_provider_a_annotations.jsonl",
+   "seed": 20260819,
+   "heldout_fraction": 0.5,
+   "balance_by": "transcripts",
+   "n_assigned": 5
   }
  ],
  "assignments": {
@@ -270,6 +279,12 @@
    "n_moments": 4,
    "no_key_moments": false
   },
+  "1f8f6a50-31ef-578e-9132-fa9e99c33443": {
+   "split": "heldout",
+   "batch": 5,
+   "n_moments": 13,
+   "no_key_moments": false
+  },
   "23ce7087-791e-5900-865a-2162cb1a2505": {
    "split": "heldout",
    "batch": 1,
@@ -371,6 +386,12 @@
    "batch": 2,
    "n_moments": 2,
    "no_key_moments": false
+  },
+  "3317f208-3e27-5768-bd59-63cfde2d2b26": {
+   "split": "iterate",
+   "batch": 5,
+   "n_moments": 0,
+   "no_key_moments": true
   },
   "3358dd2d-37b4-5904-b634-69b79b9aeb10": {
    "split": "heldout",
@@ -765,6 +786,12 @@
   "679eabdd-cebe-51a8-8411-2cfdaf3edb7f": {
    "split": "heldout",
    "batch": 1,
+   "n_moments": 0,
+   "no_key_moments": true
+  },
+  "6bc02182-0ddd-590f-8dd7-126c5b7ff4fd": {
+   "split": "heldout",
+   "batch": 5,
    "n_moments": 0,
    "no_key_moments": true
   },
@@ -1716,6 +1743,12 @@
    "n_moments": 5,
    "no_key_moments": false
   },
+  "dd2c0f2b-d5b5-5c05-9c89-cd1171736da8": {
+   "split": "heldout",
+   "batch": 5,
+   "n_moments": 6,
+   "no_key_moments": false
+  },
   "dd45b6a8-1c12-5c07-bb09-a437a5b086cf": {
    "split": "iterate",
    "batch": 1,
@@ -1900,6 +1933,12 @@
    "split": "heldout",
    "batch": 3,
    "n_moments": 2,
+   "no_key_moments": false
+  },
+  "f0edf48f-3417-5bd2-bc73-16398db293d7": {
+   "split": "iterate",
+   "batch": 5,
+   "n_moments": 5,
    "no_key_moments": false
   },
   "f1b53a57-0591-591a-a562-87bcbb0d2c4e": {
