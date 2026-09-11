@@ -67,6 +67,29 @@ def _annotation(name, role="selector", *, revision=1, **fields):
     }
 
 
+def _reannotator_threw_out(name="Anita", reason="not a good moment"):
+    """A second pass that threw the moment out.
+
+    The export nulls the whole payload when they do: they answered the throw
+    question and nothing else, so there are no labels and no free text behind
+    it. The nulls are the point of the fixture -- read as ``{}`` they would look
+    like a second pass who said no to every question.
+    """
+    return {
+        "annotator_id": f"id-{name.lower()}",
+        "annotator_name": name,
+        "role": "reannotator",
+        "revision": 1,
+        "payload": {
+            "situation": None,
+            "action": None,
+            "result": None,
+            "other_observations": "",
+            "meta": {"throw_out": True, "throw_out_reason": reason},
+        },
+    }
+
+
 def _adjudication(name="Tara", *, role="adjudicator", rationale="", **fields):
     return {
         "annotator_id": f"id-{name.lower()}",
@@ -206,6 +229,60 @@ def test_raters_are_ordered_consistently_across_moments(tmp_path):
     )
     rows = A.doubly_adjudicated(path, {"tara": "A05", "erika": "A18"})
     assert [row["raters"] for row in rows] == [("A05", "A18"), ("A05", "A18")]
+
+
+def test_each_adjudicator_gets_their_own_moments_with_themselves_first(tmp_path):
+    # The pooled table sorts the two by label; a per-person table cannot, or the
+    # adjudicator whose table it is would sit in column 1 on some of their
+    # moments and column 2 on the rest, splitting the marginal kappa reads.
+    path = _write(
+        tmp_path,
+        [
+            _row("m1", [_adjudication("Tara"), _adjudication("Erika")]),
+            _row("m2", [_adjudication("Erika"), _adjudication("Amanda")]),
+        ],
+    )
+    rows = A.doubly_adjudicated(path, {"tara": "A05", "erika": "A18", "amanda": "A08"})
+    tables = A.by_adjudicator(rows)
+
+    assert list(tables) == ["A05", "A08", "A18"]
+    assert [row["raters"] for row in tables["A18"]] == [("A18", "A05"), ("A18", "A08")]
+    assert [row["raters"] for row in tables["A05"]] == [("A05", "A18")]
+
+
+def test_a_moment_appears_in_both_of_its_adjudicators_tables(tmp_path):
+    # The tables overlap rather than partition: n across them is twice the
+    # number of moments, which is why their kappas cannot be averaged.
+    path = _write(
+        tmp_path, [_row("m1", [_adjudication("Tara"), _adjudication("Erika")])]
+    )
+    tables = A.by_adjudicator(
+        A.doubly_adjudicated(path, {"tara": "A05", "erika": "A18"})
+    )
+    assert [row["moment_id"] for row in tables["A05"]] == ["m1"]
+    assert [row["moment_id"] for row in tables["A18"]] == ["m1"]
+
+
+def test_reorienting_a_row_carries_that_adjudicators_own_labels(tmp_path):
+    path = _write(
+        tmp_path,
+        [
+            _row(
+                "m1",
+                [
+                    _adjudication("Tara", rigor_present=True),
+                    _adjudication("Erika", rigor_present=False),
+                ],
+            )
+        ],
+    )
+    tables = A.by_adjudicator(
+        A.doubly_adjudicated(path, {"tara": "A05", "erika": "A18"})
+    )
+    # A18 said False and was paired with A05, who said True -- not the other way
+    # round, which is what reading the sorted order unchanged would have given.
+    assert A.score(tables["A18"])["rigor_present"]["positives"] == [0, 1]
+    assert A.score(tables["A05"])["rigor_present"]["positives"] == [1, 0]
 
 
 def test_annotator_names_are_replaced_by_their_labels(tmp_path):
@@ -383,7 +460,7 @@ def test_main_runs_and_writes_json(tmp_path, capsys):
     written = json.loads(out.read_text(encoding="utf-8"))
     assert written["n_moments"] == 4
     assert written["overall"]["rigor_present"]["kappa"] == pytest.approx(1.0)
-    assert list(written["by_pair"]) == ["A05+A18"]
+    assert list(written["by_adjudicator"]) == ["A05", "A18"]
     assert "rigor_present" in capsys.readouterr().out
 
 
@@ -606,6 +683,98 @@ def test_resolution_n_is_agreed_plus_disagreed(tmp_path):
         assert counts["n"] == counts["agreed"] + counts["disagreed"] == 1
         assert counts["agreed"] == counts["agreed_yes"] + counts["agreed_no"]
         assert counts["upheld"] == counts["upheld_yes"] + counts["upheld_no"]
+
+
+def test_a_reannotator_who_threw_the_moment_out_resolves_nothing(tmp_path):
+    # Their situation/action/result come back null. Reading those as False would
+    # score them as a second pass who answered no to everything -- agreeing with
+    # the selector wherever he said no, and splitting with him wherever he said
+    # yes. Neither happened: they answered no label questions at all.
+    path = _write(
+        tmp_path,
+        [
+            _adjudicated(
+                "m1",
+                selector=_annotation("Paul", scaffolding_present=True),
+                reannotator=_reannotator_threw_out(),
+                adjudicators=[_adjudication("Tara", scaffolding_present=True)],
+            )
+        ],
+    )
+    results = A.resolution_counts(A.adjudications(path, {}))
+    for field in A.FINAL_FIELDS:
+        assert results[field]["n"] == 0
+        assert results[field]["agreed"] == results[field]["disagreed"] == 0
+
+
+def _throw_out_rates(tmp_path, *, reannotator, adjudicators):
+    path = _write(
+        tmp_path,
+        [
+            _adjudicated(
+                "m1",
+                selector=_annotation("Paul"),
+                reannotator=reannotator,
+                adjudicators=adjudicators,
+            )
+        ],
+    )
+    return A.throw_out_resolution(A.adjudications(path, {}))
+
+
+def test_reinstating_a_moment_the_second_pass_threw_out(tmp_path):
+    rates = _throw_out_rates(
+        tmp_path,
+        reannotator=_reannotator_threw_out(),
+        adjudicators=[_adjudication("Tara")],
+    )
+    assert (rates["reannotator_threw"], rates["upheld"], rates["reinstated"]) == (
+        1,
+        0,
+        1,
+    )
+    assert rates["reannotator_kept"] == 0
+
+
+def test_backing_a_throw_out_the_second_pass_called(tmp_path):
+    rates = _throw_out_rates(
+        tmp_path,
+        reannotator=_reannotator_threw_out(),
+        adjudicators=[_thrown_out("Tara")],
+    )
+    assert (rates["reannotator_threw"], rates["upheld"], rates["reinstated"]) == (
+        1,
+        1,
+        0,
+    )
+
+
+def test_throwing_out_a_moment_the_second_pass_kept(tmp_path):
+    rates = _throw_out_rates(
+        tmp_path,
+        reannotator=_annotation("Anita", "reannotator"),
+        adjudicators=[_thrown_out("Tara")],
+    )
+    assert (rates["reannotator_kept"], rates["thrown_anyway"]) == (1, 1)
+    assert (rates["reannotator_threw"], rates["kept_standing"]) == (0, 0)
+
+
+def test_both_halves_of_a_doubly_adjudicated_moment_count(tmp_path):
+    # Two adjudicators splitting over one throw is two independent calls on it,
+    # not one moment's worth of decision.
+    rates = _throw_out_rates(
+        tmp_path,
+        reannotator=_reannotator_threw_out(),
+        adjudicators=[_thrown_out("Tara"), _adjudication("Erika")],
+    )
+    assert rates["n"] == 2
+    assert (rates["upheld"], rates["reinstated"]) == (1, 1)
+
+
+def test_the_selector_is_never_asked_the_throw_question():
+    # Selectors have no meta block at all, so nothing to read as a throw.
+    assert A.threw_out(_annotation("Paul")["payload"]) is False
+    assert A.threw_out(_reannotator_threw_out()["payload"]) is True
 
 
 # ---------------------------------------------------------------------------

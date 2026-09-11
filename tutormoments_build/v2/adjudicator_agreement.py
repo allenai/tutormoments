@@ -28,14 +28,23 @@ decision that gates the rest: an adjudicator who throws a moment out leaves
 other five rows rather than being read as five negatives. ``n`` is therefore per
 row -- every moment reaches ``throw_out``, fewer reach the labels.
 
-Cohen's kappa is a two-rater statistic, but the pairs vary across moments (three
-distinct adjudicators appear). The headline number pools every doubly adjudicated
-moment and treats "the two adjudicators on this moment" as the two raters, which
-is the usual pooled reading; the per-pair block below it shows the same
-calculation restricted to one pair at a time. Read the per-pair kappas with their
-n in view -- a pair with a handful of moments is not an estimate of anything.
+Cohen's kappa is a two-rater statistic, but the pairs vary across moments (six
+distinct adjudicators appear, and they did not adjudicate in fixed pairs). The
+headline number pools every doubly adjudicated moment and treats "the two
+adjudicators on this moment" as the two raters, which is the usual pooled
+reading. Below it, one table per adjudicator runs the same calculation over the
+moments that adjudicator was on, with them as rater 1 and whoever else was on the
+moment as rater 2 -- how far each of them sits from the rest of the group.
 
-Two further sections look at the adjudicator against the pair they were called
+Read those with two things in view. Rater 2 is a composite, so the chance
+agreement being corrected for is the pooled marginal of everyone that adjudicator
+was paired with, not one colleague's habits; where most of somebody's moments
+came from a single partner the number is close to a pairwise one regardless. And
+every moment appears in two of the tables, once from each side, so the tables
+overlap rather than partitioning the moments and their kappas cannot be averaged.
+The partner counts printed under each title are there to make both readable.
+
+Three further sections look at the adjudicator against the pair they were called
 in to settle, and so are scored on *every* adjudication, not just the doubly
 adjudicated ones:
 
@@ -47,6 +56,15 @@ where the two passes split, how often the adjudicator picked the label rather
 than leaving it off. One side of a split said True by definition, so that
 "picked" rate is also the rate at which the adjudicator lands where the union
 rule ``build_ground_truth`` resolves the shipped labels does.
+
+**Whether the adjudicator backs a throw-out.** The second pass can throw a
+moment out too, and an adjudicator either agrees or reinstates it. This is kept
+apart from the section above because it has a different shape: only the
+reannotator answers the throw question -- the selector has no ``meta`` block and
+is never asked -- so it is a one-sided uphold rate, not an agreed/split split.
+It is also why a reannotator throw drops that adjudication from the label
+section: throwing out nulls their payload, so they answered no label questions
+and there is no second read to back or overturn.
 
 **How much the free-text boxes are edited.** The adjudicator's final call carries
 the same prose boxes the annotators filled in, and adjudicating one is a matter
@@ -135,6 +153,16 @@ def payload_labels(payload: dict) -> dict[str, bool]:
     return labels
 
 
+def threw_out(payload: dict) -> bool:
+    """Whether this payload's author threw the moment out.
+
+    Reannotators and adjudicators both answer this in ``meta.throw_out``;
+    selectors have no ``meta`` block and never answer it, so a selector payload
+    is always False here.
+    """
+    return bool((payload.get("meta") or {}).get("throw_out"))
+
+
 def adjudicator_labels(annotation: dict) -> dict[str, bool | None]:
     """Pull one adjudicator's decisions out of their adjudication.
 
@@ -150,7 +178,7 @@ def adjudicator_labels(annotation: dict) -> dict[str, bool | None]:
     with whoever did label the moment.
     """
     payload = annotation["payload"]
-    labels = {"throw_out": bool((payload.get("meta") or {}).get("throw_out"))}
+    labels = {"throw_out": threw_out(payload)}
 
     final = payload.get("final")
     if not final:
@@ -224,6 +252,44 @@ def doubly_adjudicated(path: str, labels: dict[str, str]) -> list[dict]:
             }
         )
     return rows
+
+
+def by_adjudicator(rows: list[dict]) -> dict[str, list[dict]]:
+    """One entry per adjudicator: their doubly adjudicated moments, them first.
+
+    ``doubly_adjudicated`` sorts each moment's two adjudicators by label, which
+    is what the pooled table wants but not what a per-person view does: an
+    adjudicator would land in column 1 on some of their moments and column 2 on
+    the rest, and the marginals kappa corrects for would be split across both.
+    Here each row is reoriented so the adjudicator whose table it is always sits
+    in column 1 and whoever else was on that moment in column 2.
+
+    **Every moment appears in two of these tables**, once from each adjudicator's
+    side. They are views of the same 162 moments, not a partition of them, so
+    their ``n`` sums to twice the pooled total and a kappa cannot be averaged
+    across them.
+
+    **Column 2 is not one person.** It is whoever else adjudicated each moment,
+    so the chance agreement kappa corrects for comes from the pooled marginal of
+    everyone this adjudicator was paired with. That is the intended reading of a
+    one-against-the-rest table -- how far this adjudicator sits from the group --
+    but it is not Cohen's kappa between two fixed raters, and where one
+    adjudicator supplies most of somebody's partners it is close to a pairwise
+    number wearing a pooled label. The partner counts are printed with each table
+    for that reason.
+    """
+    oriented = defaultdict(list)
+    for row in rows:
+        for index, label in enumerate(row["raters"]):
+            other = row["raters"][1 - index]
+            oriented[label].append(
+                row
+                | {
+                    "raters": (label, other),
+                    "labels": [row["labels"][index], row["labels"][1 - index]],
+                }
+            )
+    return dict(sorted(oriented.items()))
 
 
 def cohens_kappa(pairs: list[tuple[bool, bool]]) -> float | None:
@@ -371,7 +437,10 @@ def resolution_counts(rows: list[dict]) -> dict[str, dict]:
     tables: on a two-value label they say the same thing as ``picked`` about
     whose read prevailed, only keyed by role instead of by answer.
 
-    Thrown-out adjudications answer no label questions and are not counted.
+    Thrown-out adjudications answer no label questions and are not counted, and
+    neither are adjudications whose reannotator threw the moment out -- there is
+    no second read on the labels to back or overturn. ``throw_out_resolution``
+    covers those.
     """
     results = {
         field: dict.fromkeys(
@@ -395,6 +464,14 @@ def resolution_counts(rows: list[dict]) -> dict[str, dict]:
 
     for row in rows:
         if not row["final"]:
+            continue
+        # A reannotator who threw the moment out answered no label questions --
+        # the export nulls their situation/action/result outright. Reading those
+        # nulls would score them as a second pass who said no to everything,
+        # manufacturing agreement in the lopsided cells and inventing splits
+        # against a selector who answered yes. There is no second read here to
+        # back or overturn, so the adjudication is not counted.
+        if threw_out(row["reannotator"]):
             continue
         selector = payload_labels(row["selector"])
         reannotator = payload_labels(row["reannotator"])
@@ -452,6 +529,68 @@ def report_resolution(title: str, results: dict[str, dict]) -> str:
             f"{_count_pct(row['picked'], row['disagreed']):>14}"
         )
     return "\n".join(lines)
+
+
+def throw_out_resolution(rows: list[dict]) -> dict:
+    """How the adjudicator answered the second pass's throw-out call.
+
+    The throw question does not fit the shape ``resolution_counts`` uses, so it
+    is counted here instead. That table asks how an adjudicator settled two
+    annotators who both answered; only the reannotator ever answers this one --
+    the selector has no ``meta`` block and is never asked, and a moment reaching
+    a second pass at all is the selector's implicit vote to keep it. So this is
+    a one-sided uphold rate against the second pass, not an agreed/split split.
+
+    ``upheld`` is the adjudicator throwing a moment the reannotator threw;
+    ``reinstated`` is the adjudicator keeping one. The mirror half -- moments the
+    reannotator kept -- is counted too, since an adjudicator throwing out a
+    moment nobody below them wanted gone is the same decision in the other
+    direction, and kappa needs both rows.
+
+    Every adjudication counts, both halves of a doubly adjudicated moment
+    included: each is one person's independent call on the same moment.
+    """
+    pairs = [(threw_out(row["reannotator"]), row["final"] is None) for row in rows]
+    thrown = [adjudicator for reannotator, adjudicator in pairs if reannotator]
+    kept = [adjudicator for reannotator, adjudicator in pairs if not reannotator]
+
+    return {
+        "n": len(pairs),
+        "kappa": cohens_kappa(pairs),
+        "observed_agreement": (
+            sum(a == b for a, b in pairs) / len(pairs) if pairs else None
+        ),
+        "reannotator_threw": len(thrown),
+        "upheld": sum(thrown),
+        "reinstated": len(thrown) - sum(thrown),
+        "reannotator_kept": len(kept),
+        "kept_standing": len(kept) - sum(kept),
+        "thrown_anyway": sum(kept),
+    }
+
+
+def report_throw_out(title: str, results: dict) -> str:
+    """The throw-out row, as counts with the rate each rests on."""
+    kappa = "n/a" if results["kappa"] is None else f"{results['kappa']:.3f}"
+    agreement = (
+        "n/a"
+        if results["observed_agreement"] is None
+        else f"{results['observed_agreement']:.1%}"
+    )
+    return "\n".join(
+        [
+            title,
+            f"  the second pass threw it out    {results['reannotator_threw']:>4}  "
+            f"adjudicator agreed {_share(results['upheld'], results['reannotator_threw'])}"
+            f", reinstated {results['reinstated']}",
+            f"  the second pass kept it         {results['reannotator_kept']:>4}  "
+            f"adjudicator agreed "
+            f"{_share(results['kept_standing'], results['reannotator_kept'])}"
+            f", threw it out {results['thrown_anyway']}",
+            f"  kappa {kappa}, raw agreement {agreement} over "
+            f"{results['n']} adjudications",
+        ]
+    )
 
 
 # ===========================================================================
@@ -660,7 +799,7 @@ def main(argv: list[str] | None = None) -> int:
     def moments(n: int) -> str:
         return f"{n} moment" if n == 1 else f"{n} moments"
 
-    overall, pairs = {}, {}
+    overall, per_adjudicator = {}, {}
     if rows:
         thrown_out = sum(any(a["throw_out"] for a in row["labels"]) for row in rows)
         logger.info(
@@ -675,17 +814,19 @@ def main(argv: list[str] | None = None) -> int:
         overall = score(rows)
         print(report(f"All doubly adjudicated moments ({moments(len(rows))})", overall))
 
-        by_pair = defaultdict(list)
-        for row in rows:
-            by_pair[row["raters"]].append(row)
-
-        for pair, pair_rows in sorted(by_pair.items()):
-            name = "+".join(pair)
-            pairs[name] = score(pair_rows)
+        for name, own_rows in by_adjudicator(rows).items():
+            per_adjudicator[name] = score(own_rows)
+            partners = Counter(row["raters"][1] for row in own_rows)
             print()
             print(
                 report(
-                    f"{pair[0]} vs {pair[1]} ({len(pair_rows)} moments)", pairs[name]
+                    f"{name} vs every other adjudicator "
+                    f"({moments(len(own_rows))})\n  paired with: "
+                    + ", ".join(
+                        f"{partner} {count}"
+                        for partner, count in sorted(partners.items())
+                    ),
+                    per_adjudicator[name],
                 )
             )
     else:
@@ -695,25 +836,41 @@ def main(argv: list[str] | None = None) -> int:
         )
 
     finalised = [row for row in all_adjudications if row["final"]]
+    # The label table needs two reads to settle, so it drops the final calls
+    # whose reannotator threw the moment out and left no labels behind.
+    comparable = [row for row in finalised if not threw_out(row["reannotator"])]
     resolution = resolution_counts(all_adjudications)
+    throw_out_rates = throw_out_resolution(all_adjudications)
     edits = text_edits(all_adjudications)
     adjudicated_moments = moments(len({row["moment_id"] for row in all_adjudications}))
 
     logger.info(
-        "%d adjudication(s) over %s; %d threw the moment out and answered nothing, "
-        "so the sections below are scored on the other %d",
+        "%d adjudication(s) over %s; %d threw the moment out and answered nothing. "
+        "The label table is scored on the %d final calls whose reannotator left "
+        "labels to compare (%d more reinstated a moment the reannotator threw out, "
+        "so there are none)",
         len(all_adjudications),
         adjudicated_moments,
         len(all_adjudications) - len(finalised),
-        len(finalised),
+        len(comparable),
+        len(finalised) - len(comparable),
     )
 
     print()
     print(
         report_resolution(
             f"How often the adjudicator backed the first and second pass "
-            f"({len(finalised)} final calls over {adjudicated_moments})",
+            f"({len(comparable)} final calls over {adjudicated_moments})",
             resolution,
+        )
+    )
+
+    print()
+    print(
+        report_throw_out(
+            "How the adjudicator answered the second pass's throw-out call "
+            "(the selector is never asked)",
+            throw_out_rates,
         )
     )
 
@@ -741,10 +898,12 @@ def main(argv: list[str] | None = None) -> int:
                 {
                     "n_moments": len(rows),
                     "overall": overall,
-                    "by_pair": pairs,
+                    "by_adjudicator": per_adjudicator,
                     "n_adjudications": len(all_adjudications),
                     "n_final_calls": len(finalised),
+                    "n_comparable_final_calls": len(comparable),
                     "resolution": resolution,
+                    "throw_out_resolution": throw_out_rates,
                     "text_edits": edits,
                 },
                 fh,
