@@ -250,9 +250,10 @@ def _make_run_summary(
     tutor_lat_p50: float | None = None,
     tutor_lat_p95: float | None = None,
     tokens_total: int | None = None,
+    cost: dict | None = None,
 ) -> dict:
     """Build a fake run summary dict matching the shape report.leaderboard expects."""
-    return {
+    summary = {
         "tutor_model": tutor_model,
         "mode": mode,
         "n_scenarios": n,
@@ -285,6 +286,9 @@ def _make_run_summary(
             }
         },
     }
+    if cost is not None:
+        summary["cost"] = cost
+    return summary
 
 
 SUMMARY_A = _make_run_summary(
@@ -297,6 +301,14 @@ SUMMARY_A = _make_run_summary(
     tutor_lat_p50=1.234,
     tutor_lat_p95=3.456,
     tokens_total=500000,
+    cost={
+        "tutor_list_cost_usd": 3.7248,
+        "tutor_cost_per_conversation_usd": 0.0372,
+        "n_conversations": 100,
+        "run_billed_cost_estimate_usd": 12.3456,
+        "pricing_version": "2026-09-16",
+        "rates": {},
+    },
 )
 
 SUMMARY_B = _make_run_summary(
@@ -338,6 +350,7 @@ EXPECTED_COLUMNS = [
     "tutor_lat_p50",
     "tutor_lat_p95",
     "tokens_total",
+    "tutor_cost_per_conversation",
 ]
 
 
@@ -522,10 +535,71 @@ def test_leaderboard_latency_and_tokens_non_dash():
 
 
 # ---------------------------------------------------------------------------
+# Cost column (docs/cost.md): tutor list cost per conversation
+# ---------------------------------------------------------------------------
+
+
+def test_leaderboard_cost_column_four_decimals():
+    """The cost column renders at 4 decimals (per-conversation costs are
+    cents; the default 3-decimal format would round them to noise)."""
+    md, csv_str = leaderboard([SUMMARY_A])
+    row = next(l for l in md.split("\n") if "model-alpha" in l)
+    assert "0.0372" in row
+    csv_row = next(l for l in csv_str.split("\n") if "model-alpha" in l)
+    assert "0.0372" in csv_row
+
+
+def test_leaderboard_cost_dash_for_uncosted_runs():
+    """A summary without a cost block (pre-cost run) shows '-' / '', never 0."""
+    md, csv_str = leaderboard([SUMMARY_B])
+    row = next(l for l in md.split("\n") if "model-beta" in l)
+    assert row.rstrip().endswith("- |")
+    csv_row = next(l for l in csv_str.split("\n") if "model-beta" in l)
+    assert csv_row.rstrip().endswith(",")
+
+
+def test_view_embeds_cost():
+    html = view([SUMMARY_A])
+    assert "tutor_cost_per_conversation" in html
+    assert "0.0372" in html
+
+
+# ---------------------------------------------------------------------------
 # format_run_summary() -- the end-of-run terminal summary
 # ---------------------------------------------------------------------------
 
 from tutormoments.report import format_run_summary
+
+
+def test_format_run_summary_shows_cost_lines():
+    """A metrics dict carrying a cost block prints both dollar figures."""
+    text = format_run_summary(
+        dict(SUMMARY_A), tutor_model="model-alpha", mode="scaffolding_rigor"
+    )
+    assert "$0.0372" in text
+    assert "$12.35" in text  # billed estimate at 2 decimals
+
+
+def test_format_run_summary_omits_cost_when_uncosted():
+    """No cost block, or all-None figures -> no cost lines, never $0."""
+    text = format_run_summary(
+        dict(SUMMARY_B), tutor_model="model-beta", mode="scaffolding_rigor"
+    )
+    assert "$" not in text
+
+    uncosted = dict(SUMMARY_B)
+    uncosted["cost"] = {
+        "tutor_list_cost_usd": None,
+        "tutor_cost_per_conversation_usd": None,
+        "n_conversations": 0,
+        "run_billed_cost_estimate_usd": None,
+        "pricing_version": "2026-09-16",
+        "rates": {},
+    }
+    text = format_run_summary(
+        uncosted, tutor_model="model-beta", mode="scaffolding_rigor"
+    )
+    assert "$" not in text
 
 
 def test_format_run_summary_single_trial():
