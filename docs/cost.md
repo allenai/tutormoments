@@ -6,8 +6,8 @@ TutorMoments exists to help people choose a tutoring model, and price is part of
 choice. A model that scores a few points higher on Appropriate Scaffolding but costs ten
 times as much per conversation is a different product decision than one that costs the
 same, and a leaderboard that hides that difference is answering only half of the question
-an ed-tech team is actually asking. Latency has its own methodology doc for the same
-reason; this one covers money.
+an ed-tech team is actually asking. Ed-tech is a famously resource-constrained industry;
+cost vs performance matters a lot in ed-tech.
 
 There is a second audience: anyone deciding whether to replicate a run. Reproducibility is
 this project's first priority, and "what will this cost me?" is a real barrier to
@@ -19,16 +19,15 @@ records its token usage, and the computed run cost is designed to be checked aga
 provider's own invoice. If the two disagree, either our usage capture or our understanding
 of the provider's billing is wrong — and both are things we want to find out.
 
-These three purposes need two different numbers, which is why the summary reports two.
+## Reported figures
 
-## The two figures
+The summary reports the cost per conversation (relevant to ed techs) and the cost to run
+the benchmark (relevant to reproducers).
 
 **Tutor cost per conversation** answers the deployment question: what would it cost to run
 this model as the tutor? It counts tutor-model tokens only, priced at the provider's list
 rates with the cache mix the run actually produced (tokens served from cache are priced at
-the cheaper cache-read rate). It is never batch-discounted, for two reasons: batching is a
-choice the harness makes about throughput, not a property of the model being ranked, and
-conversations cannot be batched anyway — the tutor and the simulated student alternate
+the cheaper cache-read rate). It is never batch-discounted because conversations cannot be batched efficiently — the tutor and the simulated student alternate
 turns, so each call depends on the last. The leaderboard reports this figure divided by the
 number of conversations in the run, so it does not scale with how many moments a particular
 run happened to replay.
@@ -126,9 +125,15 @@ Two billing subtleties are encoded in the table's conventions rather than in cod
   if it did: storage bills in token-*hours*, a time dimension that no per-response usage
   field reports. Adopting explicit caching would be a schema revisit, like the 1-hour TTL.
 
-Long-prompt pricing tiers (gemini-2.5-pro above 200k input tokens, gpt-5.5 above 272k) are
-not modelled. Benchmark prompts sit orders of magnitude below both thresholds, so the
-entries carry the base tier, with a comment in the YAML marking the assumption.
+Long-prompt pricing tiers (gemini-2.5-pro bills higher above 200k input tokens, gpt-5.5
+above 272k) are not modelled. Those thresholds apply per request, and the largest request
+this benchmark makes stays well under them: the longest moment context in the release is
+55,681 characters (see [docs/latency.md](latency.md)), which together with the largest
+prompt template (~10k characters, the scorer's annotate pass) and a full conversation's
+generated turns comes to roughly 20k tokens — about a tenth of the lower threshold — and
+the median request is a few thousand tokens. The entries therefore carry the base-tier
+rates, with a comment in the YAML marking the assumption. A future release with much
+longer source transcripts would need this re-checked before its costs are trusted.
 
 ## From tokens to dollars
 
