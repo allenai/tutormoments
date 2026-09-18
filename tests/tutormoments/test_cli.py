@@ -536,9 +536,7 @@ def test_run_cell_writes_cost_block(tmp_path):
     ) / 1_000_000
     assert cost["tutor_list_cost_usd"] == pytest.approx(expected_list)
     assert cost["n_conversations"] == 2
-    assert cost["tutor_cost_per_conversation_usd"] == pytest.approx(
-        expected_list / 2
-    )
+    assert cost["tutor_cost_per_conversation_usd"] == pytest.approx(expected_list / 2)
     # Scorer usage is legacy-only in these mocks -> the whole-run billed
     # estimate is null, never a partial (understated) sum.
     assert cost["run_billed_cost_estimate_usd"] is None

@@ -485,13 +485,9 @@ def format_run_summary(
     per_conv = cost.get("tutor_cost_per_conversation_usd")
     billed = cost.get("run_billed_cost_estimate_usd")
     if per_conv is not None:
-        lines.append(
-            f"  {'Tutor cost/conversation':<26} ${per_conv:.4f} (list rates)"
-        )
+        lines.append(f"  {'Tutor cost/conversation':<26} ${per_conv:.4f} (list rates)")
     if billed is not None:
-        lines.append(
-            f"  {'Run cost estimate':<26} ${billed:.2f} (billed, all roles)"
-        )
+        lines.append(f"  {'Run cost estimate':<26} ${billed:.2f} (billed, all roles)")
 
     return "\n".join(lines)
 

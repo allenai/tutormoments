@@ -246,9 +246,7 @@ def test_summary_cost_block_shape_and_figures():
     block = summary_cost_block(tokens, n_conversations=4)
     expected_list = role_cost_usd(_tutor_usage())
     assert block["tutor_list_cost_usd"] == pytest.approx(expected_list)
-    assert block["tutor_cost_per_conversation_usd"] == pytest.approx(
-        expected_list / 4
-    )
+    assert block["tutor_cost_per_conversation_usd"] == pytest.approx(expected_list / 4)
     assert block["n_conversations"] == 4
     assert block["run_billed_cost_estimate_usd"] == pytest.approx(
         billed_cost_estimate(_tokens_block())

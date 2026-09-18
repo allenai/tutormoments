@@ -16,7 +16,7 @@ layout.
   taxonomy *data generation* lives in the runtime (`tutormoments.taxonomy`); these
   notebooks render its tables.
 - `docs/` — methodology docs for runtime features, kept out of the README to
-  stop it growing without bound (`latency.md`, `cost.md`).
+  stop it growing without bound (`latency.md`, `cost.md`, `thinking.md`).
 - `tests/` — `tutormoments/` (runtime), `tutormoments_build/`, `analysis/`.
 
 Import rule: build and analysis code may import `tutormoments`; the runtime never
