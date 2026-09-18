@@ -456,6 +456,101 @@ def test_run_cell_writes_latency_and_tokens(tmp_path):
     assert tutor_tok["provider"] == "anthropic"
     assert tutor_tok["endpoint"] == "sync"
 
+    # Cost block: always written, but the legacy-only second transcript makes
+    # the tutor aggregate pre-vector-contaminated (canonical total 150 < legacy
+    # 450), so every figure is null rather than an understated dollar amount.
+    cost = summary["cost"]
+    assert cost["tutor_list_cost_usd"] is None
+    assert cost["tutor_cost_per_conversation_usd"] is None
+    assert cost["run_billed_cost_estimate_usd"] is None
+    assert cost["n_conversations"] == 2
+    assert cost["pricing_version"]
+
+
+def test_run_cell_writes_cost_block(tmp_path):
+    """A run whose usage all carries the canonical vector + provenance gets
+    real dollar figures: tutor list cost from the registry's rates, divided by
+    the number of conversations. The scorer's legacy-only mocked usage keeps
+    the all-roles billed estimate null (any unpriceable role nulls it)."""
+    from tutormoments.cli import run_cell
+    from tutormoments.models import get_pricing, pricing_version
+
+    scenarios = list(FIXTURE_SCENARIOS)
+
+    def _vector(input_uncached, cache_read, output):
+        total = input_uncached + cache_read + output
+        return {
+            "input_tokens": input_uncached,
+            "output_tokens": output,
+            "total_tokens": input_uncached + output,
+            "input_uncached": input_uncached,
+            "cache_read": cache_read,
+            "cache_write": 0,
+            "output": output,
+            "reasoning": 0,
+            "total": total,
+            "provider": "anthropic",
+            "model": "claude-opus-4-8",
+            "endpoint": "sync",
+        }
+
+    transcripts = [
+        _make_transcript(
+            "scenario_001",
+            tutor_usage=_vector(20, 80, 50),
+            student_usage=_vector(100, 0, 30),
+        ),
+        _make_transcript(
+            "scenario_002",
+            tutor_usage=_vector(200, 0, 100),
+            student_usage=_vector(120, 0, 40),
+        ),
+    ]
+    annotations = [_make_annotation(s.id) for s in scenarios]
+    cfg_mock = _make_run_config(sample=2)
+
+    with (
+        patch(_CFG_PATCH, return_value=cfg_mock),
+        patch(_LOAD_PATCH, return_value=_load_result(scenarios)),
+        patch(_CONV_PATCH, side_effect=transcripts),
+        patch(_SCORE_PATCH, side_effect=_score_batch_from(annotations)),
+        patch(_TAX_PATCH, return_value=_TAX_RESULT),
+    ):
+        run_id = run_cell(
+            tutor="claude-opus-4-8",
+            mode="plain",
+            run_cfg=None,
+            date="20260626",
+            results_root=str(tmp_path),
+        )
+
+    summary = json.loads(
+        (tmp_path / run_id / "summary.json").read_text(encoding="utf-8")
+    )
+    cost = summary["cost"]
+
+    # tutor aggregate: uncached 220, cache_read 80, output 150 at opus-4-8 rates
+    rates = get_pricing("claude-opus-4-8")
+    expected_list = (
+        220 * rates["input"] + 80 * rates["cache_read"] + 150 * rates["output"]
+    ) / 1_000_000
+    assert cost["tutor_list_cost_usd"] == pytest.approx(expected_list)
+    assert cost["n_conversations"] == 2
+    assert cost["tutor_cost_per_conversation_usd"] == pytest.approx(
+        expected_list / 2
+    )
+    # Scorer usage is legacy-only in these mocks -> the whole-run billed
+    # estimate is null, never a partial (understated) sum.
+    assert cost["run_billed_cost_estimate_usd"] is None
+    assert cost["pricing_version"] == pricing_version()
+    assert cost["rates"]["claude-opus-4-8"] == rates
+
+    # The terminal summary echoes the per-conversation figure.
+    from tutormoments.report import format_run_summary
+
+    text = format_run_summary(summary, tutor_model="claude-opus-4-8", mode="plain")
+    assert f"${expected_list / 2:.4f}" in text
+
 
 # ---------------------------------------------------------------------------
 # Test 2: run_cell resumes (second call skips already-done scenarios)

@@ -9,6 +9,7 @@ from tutormoments.costing import (
     cost_usd,
     list_cost,
     role_cost_usd,
+    summary_cost_block,
 )
 from tutormoments.models import get_pricing, pricing_version
 
@@ -145,6 +146,25 @@ def test_role_cost_stream_and_sync_mix_is_still_priceable():
     )
 
 
+def test_role_cost_pre_vector_contamination_is_uncosted(caplog):
+    # A resume over an old run's transcripts sums legacy counters that carry
+    # no canonical vector: the aggregate's legacy total_tokens then exceeds
+    # its canonical total (which is >= total_tokens on every provider when
+    # everything was captured). Pricing just the vector-bearing part would
+    # understate, so the cost is null.
+    usage = _tutor_usage(total=150_000, total_tokens=450_000)
+    with caplog.at_level(logging.WARNING, logger="tutormoments.costing"):
+        assert role_cost_usd(usage) is None
+    assert "pre-vector" in caplog.text
+
+
+def test_role_cost_anthropic_cache_exceeding_legacy_total_still_priced():
+    # The legitimate inequality direction: Anthropic's canonical total exceeds
+    # legacy total_tokens by the cache buckets. Must NOT trip the guard.
+    usage = _tutor_usage(cache_read=7924, total=157_924, total_tokens=150_000)
+    assert role_cost_usd(usage) is not None
+
+
 @pytest.mark.parametrize(
     ("overrides", "warning"),
     [
@@ -214,3 +234,54 @@ def test_billed_estimate_null_when_any_role_unpriceable():
 
 def test_billed_estimate_null_when_no_roles_present():
     assert billed_cost_estimate({"total": {}}) is None
+
+
+# ---------------------------------------------------------------------------
+# summary_cost_block: the summary.json `cost` block.
+# ---------------------------------------------------------------------------
+
+
+def test_summary_cost_block_shape_and_figures():
+    tokens = _tokens_block()
+    block = summary_cost_block(tokens, n_conversations=4)
+    expected_list = role_cost_usd(_tutor_usage())
+    assert block["tutor_list_cost_usd"] == pytest.approx(expected_list)
+    assert block["tutor_cost_per_conversation_usd"] == pytest.approx(
+        expected_list / 4
+    )
+    assert block["n_conversations"] == 4
+    assert block["run_billed_cost_estimate_usd"] == pytest.approx(
+        billed_cost_estimate(_tokens_block())
+    )
+    assert block["pricing_version"] == pricing_version()
+
+
+def test_summary_cost_block_snapshots_resolved_rates():
+    # Reproducibility: the block records the rates each role's model resolved
+    # to, so the figures can be recomputed after the registry moves on.
+    block = summary_cost_block(_tokens_block(), n_conversations=1)
+    assert set(block["rates"]) == {"claude-opus-4-8", "claude-opus-4-6"}
+    assert block["rates"]["claude-opus-4-8"] == get_pricing("claude-opus-4-8")
+
+
+def test_summary_cost_block_zero_conversations_nulls_per_conversation():
+    block = summary_cost_block(_tokens_block(), n_conversations=0)
+    assert block["tutor_list_cost_usd"] is not None
+    assert block["tutor_cost_per_conversation_usd"] is None
+
+
+def test_summary_cost_block_unpriceable_roles_null_figures_not_block():
+    # An unpriced scorer nulls the billed estimate; tutor figures survive.
+    tokens = _tokens_block()
+    tokens["scorer"]["model"] = "claude-sonnet-5"
+    block = summary_cost_block(tokens, n_conversations=2)
+    assert block["run_billed_cost_estimate_usd"] is None
+    assert block["tutor_list_cost_usd"] is not None
+    assert "claude-sonnet-5" not in block["rates"]
+
+    # And a fully uncostable run still writes the block (all-None figures),
+    # so readers can tell "uncosted" from "pre-cost run".
+    empty = summary_cost_block({}, n_conversations=0)
+    assert empty["tutor_list_cost_usd"] is None
+    assert empty["run_billed_cost_estimate_usd"] is None
+    assert empty["rates"] == {}
