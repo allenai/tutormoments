@@ -478,15 +478,40 @@ def _adjudicated(moment_id, *, selector, reannotator, adjudicators):
     return _row(moment_id, [selector, reannotator, *adjudicators])
 
 
-def test_latest_revision_of_a_role_wins():
+def test_latest_revision_of_a_role_wins(tmp_path):
     # The same person re-saving seconds later is one pass, not two annotators.
+    # moment_records collapses that on (annotator, role), as the ground-truth
+    # build does, so latest_by_role is handed one annotation per person per role.
+    path = _write(
+        tmp_path,
+        [
+            _row(
+                "m1",
+                [
+                    _annotation("Erin", revision=1, scaffolding_present=True),
+                    _annotation("Erin", revision=2, scaffolding_present=False),
+                ],
+            )
+        ],
+    )
+    (record,) = A.moment_records(path)
+    assert [a["revision"] for a in record["annotations"]] == [2]
+    assert A.latest_by_role(record["annotations"], "selector")["revision"] == 2
+    assert A.latest_by_role(record["annotations"], "reannotator") is None
+
+
+def test_two_people_in_one_role_are_logged_rather_than_silently_reduced(caplog):
+    # Keyed on (annotator, role), a re-save collapses but two different people
+    # in one role do not -- that is a second annotator, not a second save, and
+    # picking the higher revision would hide them behind whoever saved last.
     annotations = [
-        _annotation("Erin", revision=1, scaffolding_present=True),
-        _annotation("Erin", revision=2, scaffolding_present=False),
+        _annotation("Erin", revision=1),
+        _annotation("Paul", revision=2),
     ]
-    latest = A.latest_by_role(annotations, "selector")
-    assert latest["revision"] == 2
-    assert A.latest_by_role(annotations, "reannotator") is None
+    with caplog.at_level("WARNING"):
+        chosen = A.latest_by_role(annotations, "selector")
+    assert chosen["annotator_name"] == "Erin"
+    assert "share the selector role" in caplog.text
 
 
 def test_every_adjudication_is_a_row_including_both_halves_of_a_pair(tmp_path):

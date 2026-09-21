@@ -61,12 +61,12 @@ one.
 
 Usage::
 
-    python -m tutormoments_build.v2.evaluate
-    python -m tutormoments_build.v2.evaluate --model claude-opus-5
-    python -m tutormoments_build.v2.evaluate --prompt-version 1
-    python -m tutormoments_build.v2.evaluate --splits iteration test
-    python -m tutormoments_build.v2.evaluate --short-turns 5
-    python -m tutormoments_build.v2.evaluate --ground-truth-dir data/ground_truth
+    python -m tutormoments_build.v2.evaluate_scorer
+    python -m tutormoments_build.v2.evaluate_scorer --model claude-opus-5
+    python -m tutormoments_build.v2.evaluate_scorer --prompt-version 1
+    python -m tutormoments_build.v2.evaluate_scorer --splits iteration test
+    python -m tutormoments_build.v2.evaluate_scorer --short-turns 5
+    python -m tutormoments_build.v2.evaluate_scorer --ground-truth-dir data/ground_truth
 
 With no ``--prompt-version`` every version found under a model is scored, so a
 bare run reports each revision of the prompts against the same gold.
@@ -84,7 +84,7 @@ from tutormoments_build.v2.build_ground_truth import (
 )
 from tutormoments_build.v2.classify_excerpts import DEFAULT_OUT_DIR, DEFAULT_SPLITS
 
-logger = logging.getLogger("tutormoments_build.v2.evaluate")
+logger = logging.getLogger("tutormoments_build.v2.evaluate_scorer")
 
 # Moments with fewer than this many dialogue turns after the cut are reported
 # again as their own block: a short post-cut span is less evidence to classify
@@ -421,7 +421,7 @@ def report(model: str, prompt_version: str, split: str, rows: list[dict]) -> str
 
 def build_parser() -> argparse.ArgumentParser:
     parser = argparse.ArgumentParser(
-        prog="python -m tutormoments_build.v2.evaluate",
+        prog="python -m tutormoments_build.v2.evaluate_scorer",
         description="Score v2 predictions against the gold labels",
         formatter_class=argparse.ArgumentDefaultsHelpFormatter,
         parents=[logging_args_parent()],

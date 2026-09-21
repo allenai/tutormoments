@@ -6,14 +6,10 @@ The output is used to format transcript excerpts for action classification.
 
 **Excerpts are cut on ``*_index``, not ``*_turn``.**
 - ``start_turn``/``end_turn`` count dialogue only
-- ``start_index``/``end_index`` are positions in the rendered row
+- ``start_index``/``end_index`` are positions in the rendered row, including enrichments.
 
-Each moment is rendered at every width in ``--context-turns``. A turn count is
-a lead-up window measured in *dialogue turns*, back from the cut point and from
-nothing else: it may reach back past the moment's start, and on a long moment it
-may open *inside* the moment, after ``start_index``. Every excerpt at a given
-width therefore carries the same amount of lead-up, however the moment was
-drawn. ``full`` is no window at all -- the transcript from its first row.
+Each moment is rendered at every width in ``--context-turns``. 
+``full`` is no window at all -- the transcript from its first row.
 
 The excerpt stops at the moment's last row.
 

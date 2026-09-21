@@ -1,10 +1,10 @@
-"""Tests for tutormoments_build.v2.evaluate."""
+"""Tests for tutormoments_build.v2.evaluate_scorer."""
 
 import json
 
 import pytest
 
-E = pytest.importorskip("tutormoments_build.v2.evaluate")
+E = pytest.importorskip("tutormoments_build.v2.evaluate_scorer")
 
 
 def record(

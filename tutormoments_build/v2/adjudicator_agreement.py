@@ -90,7 +90,7 @@ from tutormoments.logging_setup import logging_args_parent, setup_logging
 from tutormoments_build.v2.build_ground_truth import (
     DEFAULT_ANNOTATOR_LABELS,
     annotator_label,
-    is_excluded,
+    latest_annotations,
     load_annotator_labels,
 )
 
@@ -190,31 +190,42 @@ def adjudicator_labels(annotation: dict) -> dict[str, bool | None]:
 def moment_records(path: str):
     """Yield the export's moment records, skipping "no key moments" transcripts.
 
-    Staff annotations are dropped here so every reader downstream sees the same
-    annotator set the ground-truth build does.
+    Annotations are read through the ground-truth build's ``latest_annotations``,
+    which drops project staff and collapses re-saves -- the same person's
+    annotation saved twice in one role, seconds apart under successive
+    ``revision`` numbers -- to the revision they meant. Keying that collapse on
+    (annotator, role), exactly as the build does, is what keeps every reader here
+    on the annotator set the ground truth was resolved from; keying it on the
+    role alone would hide a second person in a role behind the first, and
+    keying it on neither would let a re-saved adjudication stand as a second
+    adjudicator disagreeing with themselves.
     """
     with open(path, encoding="utf-8") as fh:
         for line in fh:
             record = json.loads(line)
             if "moment" not in record:  # a "no key moments" transcript record
                 continue
-            yield record | {
-                "annotations": [a for a in record["annotations"] if not is_excluded(a)]
-            }
+            yield record | {"annotations": latest_annotations(record["annotations"])}
 
 
 def latest_by_role(annotations: list[dict], role: str) -> dict | None:
     """The one annotation for ``role``, or None.
 
-    A few moments carry the same person's annotation twice, saved seconds apart
-    under successive ``revision`` numbers -- a re-save, not a second opinion. The
-    highest revision is the one they meant, and the earlier draft must not be
-    read as a second annotator disagreeing with them.
+    ``moment_records`` has already collapsed re-saves per (annotator, role), so
+    anything left over here is two *different* people holding the same role on
+    one moment. No moment in the export has that; one appearing is logged and
+    the first taken, rather than silently settled by whoever saved last.
     """
     candidates = [a for a in annotations if a.get("role") == role]
     if not candidates:
         return None
-    return max(candidates, key=lambda a: a.get("revision", 0))
+    if len(candidates) > 1:
+        logger.warning(
+            "%d annotators share the %s role on one moment; using the first",
+            len(candidates),
+            role,
+        )
+    return candidates[0]
 
 
 def doubly_adjudicated(path: str, labels: dict[str, str]) -> list[dict]:
@@ -265,9 +276,12 @@ def by_adjudicator(rows: list[dict]) -> dict[str, list[dict]]:
     in column 1 and whoever else was on that moment in column 2.
 
     **Every moment appears in two of these tables**, once from each adjudicator's
-    side. They are views of the same 162 moments, not a partition of them, so
-    their ``n`` sums to twice the pooled total and a kappa cannot be averaged
-    across them.
+    side. They are views of the same doubly adjudicated moments, not a partition
+    of them, so their ``n`` sums to twice the pooled total and a kappa cannot be
+    averaged across them. Note that the pooled total is the moment count in the
+    table title, not the per-label ``n`` in the rows: every moment reaches
+    ``throw_out``, and only the ones neither adjudicator threw out reach the
+    other five.
 
     **Column 2 is not one person.** It is whoever else adjudicated each moment,
     so the chance agreement kappa corrects for comes from the pooled marginal of

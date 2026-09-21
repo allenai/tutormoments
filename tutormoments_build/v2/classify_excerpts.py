@@ -7,54 +7,32 @@ Using prompts in ``tutormoments_build/prompts/v2/<version>/``:
   action_direction.md    scaffolding yes/no, rigor yes/no, plus a description
   over-scaffolding.md    over-scaffolding yes/no, plus a description
 
-The prompts are versioned by directory and ``--prompt-version`` picks the set,
-defaulting to the newest version present. An edited prompt asks a different
-question, so its predictions are filed apart from the ones the previous revision
-made rather than replacing them.
+The prompts are versioned by directory and ``--prompt-version`` defaults to the newest version present,
+and outputs are saved based on prompt version. 
 
 Together they predict ``scaffolding_present``, ``rigor_present``, ``over_scaffolding_present``,
-in a manner that lines up for direct comparison with gold labels.
+in a manner that allows for comparison w/ gold labels.
 
-**The over-scaffolding pass is gated on the gold labels**.
+**The over-scaffolding prompt is gated on the gold labels**.
 It is sent only where the annotators marked
 ``scaffolding_appropriate`` *and* ``scaffolding_present``.
 
-What is left is the question the prompt was written for: scaffolding was called
-for, the tutor scaffolded, did they scaffold too much?
+Both prompts are run in one batch, and both read the same excerpt: the whole
+transcript from its first row through the moment's last 
+(the ``full`` rendering created by ``excerpts.py``). 
 
-Moments outside the gate get no over-scaffolding call at all: the field is
-``null``.
-
-Both passes ride in one batch, and both read the same excerpt: the whole
-transcript from its first row through the moment's last, with no lead-up window
--- the ``full`` rendering ``excerpts.py`` writes. Nothing before the cut is
-elided, so a prompt weighing what the student has already shown, or what the
-tutor has already tried, is reading the whole session rather than a window
-guessed in advance.
-
-Model and reasoning parameters default to the ``v2`` block in the runtime
-config. ``--model`` sets the model; its parameters are read from that model's
-entry under ``v2.models``, falling back to the ``benchmark_models`` arm of the
-same name, so a model already on the tutor roster classifies at exactly the
-parameters the benchmark runs it with. Either way the parameters are stated in
-the provider's own parlance (Anthropic ``thinking``/``effort``, Gemini
-``thinking_budget``/``include_thoughts``, OpenAI ``reasoning``) and are
-validated at config-read time, so a round that cannot be submitted as
-configured fails before a batch is built rather than after it is paid for.
+``--model`` sets the model; looking up settings in default_config.yaml.
+Examples of models this script could run with:
+- claude-opus-5
+- gemini-3.5-flash
+- gpt-5.6-sol 
 
 Predictions are written per model and prompt version:
 ``<out-dir>/<model>/<prompt version>/<split>.jsonl``. An existing file is never
-replaced unless ``--overwrite`` says to, and the check runs before the batch is
-submitted rather than after it.
+replaced unless ``--overwrite`` says to. 
 
 Only the ``iteration`` split runs by default. The ``test`` split is held out
-while the prompts are still changing, and is classified with an explicit
-``--splits test`` once they are frozen.
-
-Examples of models it could run with:
-- claude-opus-5
-- gemini-3.5-flash
-- gpt-5.6-sol
+unless specified w/ ``--splits test``.
 
 Usage::
 
