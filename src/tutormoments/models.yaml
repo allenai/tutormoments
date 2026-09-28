@@ -115,8 +115,11 @@ models:
   gemini-2.5-pro:
     provider: gemini
     # <=200k-token-prompt tier; prompts >200k bill 2x input / 1.5x output.
-    # Benchmark prompts are far below the threshold (whole runs total well
-    # under 200k input), so the base tier is the correct rate.
+    # The threshold is per request, and the benchmark's largest request
+    # (longest moment context 55,681 chars + largest template + generated
+    # turns) is roughly 20k tokens -- about a tenth of it -- so the base
+    # tier is the correct rate. Re-check if a release ships much longer
+    # transcripts. See docs/cost.md.
     pricing:
       input: 1.25
       output: 10.00
@@ -158,7 +161,8 @@ models:
   gpt-5.5:
     provider: openai
     # <=272k-input tier; larger prompts bill 2x input / 1.5x output for the
-    # full session. Benchmark prompts are far below the threshold.
+    # full session. The benchmark's largest request is roughly 20k tokens
+    # (see the gemini-2.5-pro note and docs/cost.md), far below the threshold.
     pricing:
       input: 5.00
       output: 30.00

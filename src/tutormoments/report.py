@@ -206,7 +206,15 @@ _LEADERBOARD_COLS = [
     ("tutor_lat_p50", "tutor_lat_p50"),
     ("tutor_lat_p95", "tutor_lat_p95"),
     ("tokens_total", "tokens_total"),
+    # From the run's cost block (docs/cost.md): tutor list cost / conversation,
+    # at the actual cache mix, never batch-discounted. "-" for runs predating
+    # cost capture or with an unpriced model -- never 0 for those.
+    ("tutor_cost_per_conversation", "tutor_cost_per_conversation"),
 ]
+
+# Columns holding dollar figures: per-conversation tutor costs are cents, so
+# the default 3-decimal float format would round them to noise.
+_USD_COLS = {"tutor_cost_per_conversation"}
 
 
 def _extract_row(summary: dict, probes: dict | None = None) -> dict:
@@ -222,6 +230,7 @@ def _extract_row(summary: dict, probes: dict | None = None) -> dict:
     over = summary.get("overscaffold") or {}
     lat = (summary.get("latency") or {}).get("tutor") or {}
     tokens = (summary.get("tokens") or {}).get("total") or {}
+    cost = summary.get("cost") or {}
 
     over_rate = over.get("rate")
     avoids = (1.0 - over_rate) if isinstance(over_rate, (int, float)) else None
@@ -253,6 +262,9 @@ def _extract_row(summary: dict, probes: dict | None = None) -> dict:
         "tutor_lat_p50": lat.get("p50_seconds"),
         "tutor_lat_p95": lat.get("p95_seconds"),
         "tokens_total": tokens.get("total_tokens"),
+        # None (not 0) when the run predates cost capture, its tutor model is
+        # unpriced, or its usage cannot be priced exactly -- see costing.py.
+        "tutor_cost_per_conversation": cost.get("tutor_cost_per_conversation_usd"),
     }
 
 
@@ -276,6 +288,13 @@ def _fmt_csv(v) -> str:
     return str(v)
 
 
+def _fmt_usd(v, *, none: str) -> str:
+    """Format a dollar figure at 4 decimals (per-conversation costs are cents)."""
+    if v is None:
+        return none
+    return f"{v:.4f}"
+
+
 def leaderboard(runs: list, probes: dict | None = None) -> tuple:
     """Build a leaderboard Markdown table and CSV from a list of run summaries.
 
@@ -294,7 +313,7 @@ def leaderboard(runs: list, probes: dict | None = None) -> tuple:
     identity, TTFT, and latency/token diagnostics):
         tutor_model, mode, n, appropriate_scaffolding, appropriate_rigor,
         avoids_overscaffold, ttft_p50, ttft_first_p50, ttft_later_p50,
-        tutor_lat_p50, tutor_lat_p95, tokens_total
+        tutor_lat_p50, tutor_lat_p95, tokens_total, tutor_cost_per_conversation
 
     Two different latency measurements sit side by side here, deliberately:
 
@@ -329,7 +348,10 @@ def leaderboard(runs: list, probes: dict | None = None) -> tuple:
     sep = "|" + "|".join("---" for _ in col_heads) + "|"
     md_lines = [header, sep]
     for r in rows:
-        cells = [_fmt_md(r.get(k)) for k in col_keys]
+        cells = [
+            _fmt_usd(r.get(k), none="-") if k in _USD_COLS else _fmt_md(r.get(k))
+            for k in col_keys
+        ]
         md_lines.append("| " + " | ".join(cells) + " |")
     markdown = "\n".join(md_lines)
 
@@ -341,7 +363,12 @@ def leaderboard(runs: list, probes: dict | None = None) -> tuple:
     writer = _csv.writer(buf)
     writer.writerow(col_heads)
     for r in rows:
-        writer.writerow([_fmt_csv(r.get(k)) for k in col_keys])
+        writer.writerow(
+            [
+                _fmt_usd(r.get(k), none="") if k in _USD_COLS else _fmt_csv(r.get(k))
+                for k in col_keys
+            ]
+        )
     csv_str = buf.getvalue()
 
     return markdown, csv_str
@@ -451,6 +478,17 @@ def format_run_summary(
     if row.get("tokens_total") is not None:
         lines.append(f"  {'Total tokens':<26} {_fmt_md(row.get('tokens_total'))}")
 
+    # Cost figures (docs/cost.md). Lines appear only when the figure was
+    # computable; an uncosted run (pre-vector usage, unpriced model) shows
+    # nothing rather than $0.
+    cost = metrics.get("cost") or {}
+    per_conv = cost.get("tutor_cost_per_conversation_usd")
+    billed = cost.get("run_billed_cost_estimate_usd")
+    if per_conv is not None:
+        lines.append(f"  {'Tutor cost/conversation':<26} ${per_conv:.4f} (list rates)")
+    if billed is not None:
+        lines.append(f"  {'Run cost estimate':<26} ${billed:.2f} (billed, all roles)")
+
     return "\n".join(lines)
 
 
@@ -495,6 +533,9 @@ def view(runs: list) -> str:
                 "tutor_lat_p50": _safe(row["tutor_lat_p50"]),
                 "tutor_lat_p95": _safe(row["tutor_lat_p95"]),
                 "tokens_total": row["tokens_total"],
+                "tutor_cost_per_conversation": _safe(
+                    row["tutor_cost_per_conversation"], places=4
+                ),
             }
         )
 
@@ -555,6 +596,7 @@ tr:hover td { background: #f9f9fc; }
       <th class="num">tutor_lat_p50</th>
       <th class="num">tutor_lat_p95</th>
       <th class="num">tokens_total</th>
+      <th class="num">tutor_cost_per_conversation</th>
     </tr>
   </thead>
   <tbody id="lb-body"></tbody>
@@ -599,6 +641,7 @@ function buildRow(r, isTop) {
     cell(r.tutor_lat_p50, '') +
     cell(r.tutor_lat_p95, '') +
     cell(r.tokens_total, '', 0) +
+    cell(r.tutor_cost_per_conversation, '', 4) +
     '</tr>'
   );
 }

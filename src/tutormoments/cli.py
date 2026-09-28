@@ -161,6 +161,7 @@ def _import_modules():
 # These are imported at function call time, not at module load time,
 # but we re-export references so patch targets resolve correctly.
 import tutormoments.conversation as conversation
+import tutormoments.costing as costing
 import tutormoments.latency as latency
 import tutormoments.report as report
 import tutormoments.results as results
@@ -921,6 +922,15 @@ def run_cell(
         if tax_usage:
             metrics["tokens"]["taxonomy"] = tax_usage
             add_usage(metrics["tokens"]["total"], tax_usage)
+
+        # Cost block (docs/cost.md): the two dollar figures over the token
+        # block, plus the pricing version and rate snapshot that keep them
+        # interpretable after rates change. Computed after taxonomy usage
+        # lands so the billed estimate covers every role. The denominator is
+        # the conversations whose tutor usage was actually aggregated above.
+        metrics["cost"] = costing.summary_cost_block(
+            metrics["tokens"], n_conversations=len(all_trial_transcripts)
+        )
 
         results.write_summary(run_id, metrics, results_root=results_root)
         run_counts = metrics["run_counts"]

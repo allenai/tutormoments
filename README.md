@@ -114,7 +114,8 @@ tutormoments report --results-root results --out leaderboard
 
 This writes `leaderboard.md` and `leaderboard.csv`. Columns are the paper's three metrics,
 then TTFT from any serial [latency](#latency) probe in the same results root, then the run's
-own end-to-end tutor latency and token totals.
+own end-to-end tutor latency, token totals, and tutor cost per conversation (list rates,
+actual cache mix — see [docs/cost.md](docs/cost.md); runs predating cost capture show `-`).
 
 Build a self-contained HTML viewer:
 
@@ -310,7 +311,7 @@ tutormoments taxonomy headline --human ./human/classified.csv --lm ./lm/classifi
 ├── src/tutormoments/            installable benchmark runtime
 ├── tutormoments_build/           maintainer-only dataset construction + release tooling
 ├── analysis/                paper notebooks, plots, taxonomy figures
-├── docs/                    methodology docs (latency.md)
+├── docs/                    methodology docs (latency.md, cost.md)
 ├── data/                    local datasets and release dirs, gitignored
 ├── results/                 run outputs, gitignored
 └── tests/                   tutormoments/ (runtime), tutormoments_build/, analysis/
