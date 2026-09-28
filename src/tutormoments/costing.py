@@ -21,16 +21,27 @@ interpretable after rates change. An unpriced or ambiguous aggregate yields
 Cost is exact arithmetic over recorded usage: providers report the
 cached/uncached split on every response, so no cache-hit-rate estimation
 appears anywhere. Old runs (pre usage-vector capture) discarded that split
-and cannot be back-costed; their canonical buckets are all zero, which
-surfaces here as a zero-dollar cost on a nonzero legacy token count --
-report layers must treat pre-vector runs as uncosted rather than free.
+and cannot be back-costed; ``role_cost_usd`` detects their contributions
+(legacy token counts exceeding the canonical vector) and returns None
+rather than pricing the fraction of the usage that carried a vector.
+
+``summary_cost_block`` packages the figures for ``summary.json`` together
+with the registry's ``pricing_version`` and a snapshot of the resolved
+per-model rates, so a published cost stays interpretable and reproducible
+after later rate updates. See docs/cost.md.
 """
 
 import logging
 
-from tutormoments.models import get_pricing
+from tutormoments.models import get_pricing, pricing_version
 
-__all__ = ["cost_usd", "role_cost_usd", "list_cost", "billed_cost_estimate"]
+__all__ = [
+    "cost_usd",
+    "role_cost_usd",
+    "list_cost",
+    "billed_cost_estimate",
+    "summary_cost_block",
+]
 
 logger = logging.getLogger(__name__)
 
@@ -82,6 +93,22 @@ def role_cost_usd(usage: dict) -> float | None:
     usage and land in the no-provenance case -- their cost is legitimately
     null.
     """
+    # Pre-vector contamination check. At the capture boundary the canonical
+    # total is >= the legacy total_tokens on every provider (equal on
+    # OpenAI/Gemini/Together; Anthropic exceeds it by the cache buckets its
+    # legacy input_tokens excludes), so an aggregate where total_tokens wins
+    # must include contributions whose cache split was discarded before
+    # capture existed -- e.g. a resume over an old run's transcripts. Pricing
+    # only the vector-bearing part would silently understate.
+    if usage.get("total", 0) < usage.get("total_tokens", 0):
+        logger.warning(
+            "usage aggregate includes pre-vector contributions "
+            "(canonical total %s < legacy total_tokens %s), which cannot be "
+            "back-costed; cost is null",
+            usage.get("total", 0),
+            usage.get("total_tokens", 0),
+        )
+        return None
     model = usage.get("model")
     if not isinstance(model, str) or not model:
         logger.warning("usage aggregate has no model provenance; cost is null")
@@ -144,3 +171,52 @@ def billed_cost_estimate(tokens: dict) -> float | None:
         total += cost
         priced_any = True
     return total if priced_any else None
+
+
+def _resolved_rates(tokens: dict) -> dict:
+    """Snapshot the pricing entries the roles resolved to, keyed by model id.
+
+    Recorded into the summary so a published cost can be recomputed after the
+    registry's rates move on. Only single-model, priced aggregates contribute;
+    an unpriceable role already nulled its figure and has nothing to snapshot.
+    """
+    rates: dict = {}
+    for role in _SUMMARY_ROLES:
+        usage = tokens.get(role)
+        if not isinstance(usage, dict):
+            continue
+        model = usage.get("model")
+        if not isinstance(model, str) or not model or "+" in model:
+            continue
+        entry = get_pricing(model)
+        if entry:
+            rates[model] = entry
+    return rates
+
+
+def summary_cost_block(tokens: dict, n_conversations: int) -> dict:
+    """Build the run summary's ``cost`` block from its ``tokens`` block.
+
+    ``n_conversations`` is the number of conversations whose tutor usage the
+    token block aggregated (all trials pooled) -- the denominator of the
+    headline ``tutor_cost_per_conversation_usd``. Figures are None whenever
+    they cannot be computed exactly (see ``role_cost_usd``); the block itself
+    is always present so readers can tell "uncosted" from "pre-cost run".
+    """
+    tutor_list_cost = list_cost(tokens)
+    per_conversation = (
+        tutor_list_cost / n_conversations
+        if tutor_list_cost is not None and n_conversations > 0
+        else None
+    )
+    return {
+        # Figure (1) and its per-conversation headline.
+        "tutor_list_cost_usd": tutor_list_cost,
+        "tutor_cost_per_conversation_usd": per_conversation,
+        "n_conversations": n_conversations,
+        # Figure (2).
+        "run_billed_cost_estimate_usd": billed_cost_estimate(tokens),
+        # Reproducibility: which rate table produced these figures.
+        "pricing_version": pricing_version(),
+        "rates": _resolved_rates(tokens),
+    }
