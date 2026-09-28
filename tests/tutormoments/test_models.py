@@ -231,9 +231,16 @@ def test_max_output_cap():
 
 
 def test_get_pricing_shape():
-    # Pricing is schema-room for the cost-tracking workstream: present, dict,
-    # empty until populated. Empty means "not priced yet", never "free".
-    assert get_pricing("claude-opus-4-8") == {}
+    # Populated entries carry the full rate grid plus lookup provenance;
+    # empty means "not priced yet", never "free".
+    opus = get_pricing("claude-opus-4-8")
+    assert opus["input"] == 5.00
+    assert opus["output"] == 25.00
+    assert opus["cache_read"] == 0.50
+    assert opus["cache_write"] == 6.25
+    assert opus["batch_multiplier"] == 0.5
+    assert opus["as_of"] and opus["source"]
+    assert get_pricing("claude-sonnet-5") == {}
     assert get_pricing("unregistered-model") == {}
 
 
@@ -294,6 +301,44 @@ def test_validate_registry_rejects_bad_pricing():
     bad = _minimal_registry()
     bad["models"]["claude-x"]["pricing"] = "cheap"
     with pytest.raises(ValueError, match="pricing"):
+        _validate_registry(bad)
+
+
+def _priced_registry():
+    reg = _minimal_registry()
+    reg["models"]["claude-x"]["pricing"] = {
+        "input": 5.00,
+        "output": 25.00,
+        "cache_read": 0.50,
+        "cache_write": 6.25,
+        "batch_multiplier": 0.5,
+        "as_of": "2026-09-16",
+        "source": "https://example.com/pricing",
+    }
+    return reg
+
+
+def test_validate_registry_accepts_populated_pricing():
+    assert _validate_registry(_priced_registry())
+
+
+@pytest.mark.parametrize(
+    ("mutate", "match"),
+    [
+        (lambda p: p.pop("cache_read"), "missing"),
+        (lambda p: p.update(cache_hit=0.5), "unknown"),
+        (lambda p: p.update(input=-1), "non-negative"),
+        (lambda p: p.update(output=True), "non-negative"),
+        (lambda p: p.update(batch_multiplier=0), "batch_multiplier"),
+        (lambda p: p.update(batch_multiplier=2.0), "batch_multiplier"),
+        (lambda p: p.update(as_of="Sep 16"), "YYYY-MM-DD"),
+        (lambda p: p.update(source=""), "source"),
+    ],
+)
+def test_validate_registry_rejects_malformed_pricing(mutate, match):
+    bad = _priced_registry()
+    mutate(bad["models"]["claude-x"]["pricing"])
+    with pytest.raises(ValueError, match=match):
         _validate_registry(bad)
 
 

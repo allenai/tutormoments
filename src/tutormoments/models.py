@@ -15,6 +15,7 @@ shape-checked here and proven live with `tutormoments smoke`.
 Deliberately SDK-free: config loading must not drag provider SDKs in.
 """
 
+import re
 import threading
 from copy import deepcopy
 from dataclasses import dataclass
@@ -141,8 +142,60 @@ def _validate_registry(raw: dict) -> dict:
                 f"models.yaml model '{model_key}': pricing must be a mapping, "
                 f"got {pricing!r}"
             )
+        if pricing:
+            _validate_pricing(model_key, pricing)
 
     return raw
+
+
+# A populated pricing entry states exactly these keys: $/MTok list rates for
+# the four canonical usage buckets, the batch discount multiplier, and the
+# lookup provenance (rates change over time -- a rate without its as_of date
+# and source is not auditable). Empty pricing ({}) means "not priced yet".
+_PRICING_RATE_KEYS = ("input", "output", "cache_read", "cache_write")
+_PRICING_KEYS = frozenset((*_PRICING_RATE_KEYS, "batch_multiplier", "as_of", "source"))
+_AS_OF_RE = re.compile(r"\d{4}-\d{2}-\d{2}")
+
+
+def _validate_pricing(model_key: str, pricing: dict) -> None:
+    """Validate one populated pricing entry; raise ValueError naming the defect."""
+    missing = _PRICING_KEYS - set(pricing)
+    unknown = set(pricing) - _PRICING_KEYS
+    if missing or unknown:
+        raise ValueError(
+            f"models.yaml model '{model_key}': pricing must state exactly "
+            f"{sorted(_PRICING_KEYS)}; missing {sorted(missing)}, "
+            f"unknown {sorted(unknown)}"
+        )
+    for key in _PRICING_RATE_KEYS:
+        value = pricing[key]
+        if isinstance(value, bool) or not isinstance(value, (int, float)) or value < 0:
+            raise ValueError(
+                f"models.yaml model '{model_key}': pricing.{key} must be a "
+                f"non-negative $/MTok number, got {value!r}"
+            )
+    multiplier = pricing["batch_multiplier"]
+    if (
+        isinstance(multiplier, bool)
+        or not isinstance(multiplier, (int, float))
+        or not 0 < multiplier <= 1
+    ):
+        raise ValueError(
+            f"models.yaml model '{model_key}': pricing.batch_multiplier must "
+            f"be a number in (0, 1], got {multiplier!r}"
+        )
+    as_of = pricing["as_of"]
+    if not isinstance(as_of, str) or not _AS_OF_RE.fullmatch(as_of):
+        raise ValueError(
+            f"models.yaml model '{model_key}': pricing.as_of must be a "
+            f"YYYY-MM-DD string, got {as_of!r}"
+        )
+    source = pricing["source"]
+    if not isinstance(source, str) or not source:
+        raise ValueError(
+            f"models.yaml model '{model_key}': pricing.source must be a "
+            f"non-empty documentation URL, got {source!r}"
+        )
 
 
 def _find_model_entry(model: str) -> tuple[str, dict] | None:
@@ -201,6 +254,12 @@ def get_pricing(model: str) -> dict:
     if found is None:
         return {}
     return dict(found[1].get("pricing") or {})
+
+
+def pricing_version() -> str | None:
+    """The registry's pricing-table version, recorded into run summaries."""
+    version = _load_registry().get("pricing_version")
+    return version if isinstance(version, str) and version else None
 
 
 def resolve_thinking(model: str, thinking: dict | None) -> WireThinking:
