@@ -1122,6 +1122,89 @@ def test_together_sync_and_stream_report_identical_vectors(monkeypatch):
             assert stream_usage[key] == value, key
 
 
+def _together_create_kwargs(monkeypatch, thinking, *, stream=False, max_tokens=0):
+    """Run one Together generate() and return the kwargs sent to the SDK."""
+    monkeypatch.setenv("TOGETHER_API_KEY", "sk-test")
+    usage_obj = SimpleNamespace(prompt_tokens=5, completion_tokens=3, total_tokens=8)
+    with patch("openai.OpenAI") as MockOpenAI:
+        client_obj = MagicMock()
+        if stream:
+            delta = SimpleNamespace(content="hi")
+            client_obj.chat.completions.create.return_value = iter(
+                [
+                    SimpleNamespace(choices=[SimpleNamespace(delta=delta)], usage=None),
+                    SimpleNamespace(choices=[], usage=usage_obj),
+                ]
+            )
+        else:
+            client_obj.chat.completions.create.return_value = SimpleNamespace(
+                choices=[SimpleNamespace(message=SimpleNamespace(content="hi"))],
+                usage=usage_obj,
+            )
+        MockOpenAI.return_value = client_obj
+        ModelClient("deepseek-ai/DeepSeek-V4-Pro-0813").generate(
+            "Q",
+            json_mode=False,
+            thinking=thinking,
+            stream=stream,
+            max_tokens=max_tokens,
+        )
+    return client_obj.chat.completions.create.call_args.kwargs
+
+
+@pytest.mark.parametrize("stream", [False, True])
+def test_together_sends_reasoning_effort(monkeypatch, stream):
+    kwargs = _together_create_kwargs(
+        monkeypatch, {"reasoning_effort": "max"}, stream=stream
+    )
+    assert kwargs["reasoning_effort"] == "max"
+    assert "extra_body" not in kwargs
+
+
+def test_together_without_knobs_sends_nothing(monkeypatch):
+    kwargs = _together_create_kwargs(monkeypatch, {})
+    assert "reasoning_effort" not in kwargs
+
+
+@pytest.mark.parametrize("stream", [False, True])
+def test_together_imposes_no_output_cap(monkeypatch, stream):
+    """max_tokens=0 (the benchmark's "no cap") omits the param: Together
+    bounds only input + output by the context window, and any cap we invent
+    is one a thinking model can exhaust before emitting visible text."""
+    kwargs = _together_create_kwargs(
+        monkeypatch, {"reasoning_effort": "max"}, stream=stream
+    )
+    assert "max_tokens" not in kwargs
+
+
+def test_together_explicit_max_tokens_is_not_clamped(monkeypatch):
+    # Above the 16384 clamp this path used to apply.
+    kwargs = _together_create_kwargs(monkeypatch, {}, max_tokens=50000)
+    assert kwargs["max_tokens"] == 50000
+
+
+def test_together_honours_registry_output_cap(monkeypatch):
+    # A per-model registry cap still binds: it fills in for "no cap" and
+    # clamps explicit requests above it.
+    monkeypatch.setattr("tutormoments.client.max_output_cap", lambda model: 32000)
+    assert _together_create_kwargs(monkeypatch, {})["max_tokens"] == 32000
+    assert (
+        _together_create_kwargs(monkeypatch, {}, max_tokens=50000)["max_tokens"]
+        == 32000
+    )
+    assert _together_create_kwargs(monkeypatch, {}, max_tokens=100)["max_tokens"] == 100
+
+
+def test_resolve_max_tokens_together_is_uncapped(monkeypatch):
+    from tutormoments.client import resolve_max_tokens
+
+    monkeypatch.setenv("TOGETHER_API_KEY", "sk-test")
+    with patch("openai.OpenAI"):
+        c = ModelClient("deepseek-ai/DeepSeek-V4-Pro-0813")
+    assert resolve_max_tokens(c, 0) is None
+    assert resolve_max_tokens(c, 50000) == 50000
+
+
 def test_anthropic_sync_cache_buckets_stay_disjoint_from_input(monkeypatch):
     """input_tokens already excludes the cache buckets, so input_uncached maps
     to it directly -- re-adding cache tokens at the base rate is the

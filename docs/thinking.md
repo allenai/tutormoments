@@ -48,7 +48,7 @@ tokens are spent. The authoritative validation is
 | anthropic | `thinking` (required; a thinking block or `null` = send no thinking param), `effort` (adaptive only) | `thinking={...}` plus `output_config.effort` (extra_body on sync, params on batch) |
 | gemini | exactly one of `thinking_budget` / `thinking_level`, optional `include_thoughts` | `generation_config.thinking_config` |
 | openai | `reasoning` (required) | `reasoning_effort` |
-| together | none (open-weight internal reasoners) | nothing sent |
+| together | `reasoning_effort` for hybrid reasoners; none for open-weight internal reasoners | `reasoning_effort`; nothing sent when none |
 
 Validation is shape-level: key ownership, mutual exclusion (Gemini's budget
 vs. level; the API 400s if both are sent), and structural rules (Anthropic
@@ -63,6 +63,22 @@ Provider notes:
   Sonnet 5 and later. Prefer the explicit `thinking: {type: disabled}` for
   "off": the condition then survives a model swap, and smoke can assert it
   (an omitted param has no verifiable expectation and judges as "na").
+- Together hybrid reasoners (DeepSeek-V4-Pro-0813) think by default and
+  return reasoning in a separate field, reported as `reasoning_tokens`, so
+  smoke asserts a stated `reasoning_effort` against it. Together documents
+  `reasoning_effort` as accepting `high` and `max` (other values
+  auto-mapped); the arm uses `max`, the documented top tier. Older
+  open-weight reasoners (DeepSeek-V4-Pro, Kimi) expose no knob, so they take
+  `{}` and judge as "na".
+- Observed on DeepSeek-V4-Pro-0813 (2026-09-28), contrary to Together's
+  reasoning guide: `reasoning: {enabled: false}` does not turn thinking off
+  (reasoning tokens are still produced), which is why the config does not
+  accept that key; only the undocumented `chat_template_kwargs: {thinking:
+  false}` did. In a small probe (one prompt, 3 calls each) `max` produced
+  fewer reasoning tokens than `high` (606-1419 vs 2306-2746), comparable
+  to sending no effort (430-2014), so the `max` label is Together's tier
+  name, not a measured "most thinking". Recheck before comparing effort
+  tiers across runs.
 - Anthropic `enabled` mode keeps the `max_tokens >= budget + 64` headroom
   rule; the client enforces it.
 - Gemini `thinking_budget: -1` is model-paced; `0` is off (rejected by

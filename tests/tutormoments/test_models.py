@@ -94,14 +94,25 @@ WIRE_MATRIX = [
 ]
 
 
-@pytest.mark.parametrize("model,thinking,expected", WIRE_MATRIX)
-def test_wire_matrix(model, thinking, expected):
-    wire = resolve_thinking(model, thinking)
-    anth_thinking, anth_effort, gem_config, oai_effort = expected
-    assert wire.anthropic_thinking == anth_thinking
-    assert wire.anthropic_effort == anth_effort
-    assert wire.gemini_thinking_config == gem_config
-    assert wire.openai_reasoning_effort == oai_effort
+@pytest.mark.parametrize(
+    "thinking,effort", [({}, None), ({"reasoning_effort": "max"}, "max")]
+)
+def test_together_wire(thinking, effort):
+    wire = resolve_thinking("deepseek-ai/DeepSeek-V4-Pro-0813", thinking)
+    assert wire.provider == "together"
+    assert wire.together_reasoning_effort == effort
+    assert wire.openai_reasoning_effort is None
+
+
+def test_together_rejects_malformed_effort_and_ignored_switch():
+    with pytest.raises(ThinkingConfigError, match="non-empty"):
+        resolve_thinking("deepseek-ai/DeepSeek-V4-Pro-0813", {"reasoning_effort": ""})
+    # Together ignores reasoning.enabled on DeepSeek-V4-Pro-0813 (thinking.md),
+    # so config must not accept a switch that would not be honoured.
+    with pytest.raises(ThinkingConfigError, match="unknown key"):
+        resolve_thinking(
+            "deepseek-ai/DeepSeek-V4-Pro-0813", {"reasoning": {"enabled": False}}
+        )
 
 
 # ---------------------------------------------------------------------------
@@ -256,6 +267,12 @@ def test_describe_renders_wire_form():
     )
     assert (
         resolve_thinking("deepseek-ai/DeepSeek-V4-Pro", {}).describe() == "(none sent)"
+    )
+    assert (
+        resolve_thinking(
+            "deepseek-ai/DeepSeek-V4-Pro-0813", {"reasoning_effort": "max"}
+        ).describe()
+        == "reasoning_effort=max"
     )
 
 

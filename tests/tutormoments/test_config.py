@@ -51,7 +51,7 @@ def test_packaged_default_config_parses_and_has_expected_roster():
         "gemini-3.5-flash",
         "gpt-5.4-mini-2026-03-17",
         "gpt-5.5-2026-04-23",
-        "deepseek-v4-pro",
+        "deepseek-v4-pro-0813",
     }
     assert cfg["benchmark_models"]["claude-opus-4-8"] == {
         "model": "claude-opus-4-8",
@@ -64,9 +64,10 @@ def test_packaged_default_config_parses_and_has_expected_roster():
         "reasoning": "high",
         "condition": "high",
     }
-    assert cfg["benchmark_models"]["deepseek-v4-pro"] == {
-        "model": "deepseek-ai/DeepSeek-V4-Pro",
-        "condition": "dynamic",
+    assert cfg["benchmark_models"]["deepseek-v4-pro-0813"] == {
+        "model": "deepseek-ai/DeepSeek-V4-Pro-0813",
+        "reasoning_effort": "max",
+        "condition": "max",
     }
     assert cfg["student"] == {
         "model": "claude-opus-4-6",
@@ -129,11 +130,11 @@ def test_resolve_arm_known():
 
 
 def test_resolve_arm_together():
-    arm = cfgmod.resolve_arm("deepseek-v4-pro")
+    arm = cfgmod.resolve_arm("deepseek-v4-pro-0813")
     assert arm.provider == "together"
-    assert arm.model == "deepseek-ai/DeepSeek-V4-Pro"
-    assert arm.thinking == {}
-    assert arm.condition == "dynamic"
+    assert arm.model == "deepseek-ai/DeepSeek-V4-Pro-0813"
+    assert arm.thinking == {"reasoning_effort": "max"}
+    assert arm.condition == "max"
 
 
 def test_resolve_arm_gemini():
