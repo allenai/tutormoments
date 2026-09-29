@@ -190,6 +190,23 @@ def test_build_run_config_overrides():
     assert arm.condition == "high"
 
 
+def test_build_run_config_max_student_concurrency_defaults_to_no_cap():
+    cfgmod._reset_config_cache()
+    rc = cfgmod.build_run_config(tutors=["claude-opus-4-8"])
+    assert rc.max_student_concurrency is None
+
+
+def test_build_run_config_max_student_concurrency_override():
+    rc = cfgmod.build_run_config(tutors=["claude-opus-4-8"], max_student_concurrency=12)
+    assert rc.max_student_concurrency == 12
+
+
+@pytest.mark.parametrize("bad", [0, -1, 2.5, "8", True])
+def test_build_run_config_rejects_bad_max_student_concurrency(bad):
+    with pytest.raises(ValueError, match="max_student_concurrency"):
+        cfgmod.build_run_config(tutors=["claude-opus-4-8"], max_student_concurrency=bad)
+
+
 def test_register_and_lookup_tutor():
     from tutormoments import register_tutor
 

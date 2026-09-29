@@ -475,6 +475,49 @@ def test_run_conversation_latencies_collected(monkeypatch):
     assert result.student_latencies == [0.5]
 
 
+def test_run_conversation_student_gate_wraps_only_student_calls(monkeypatch):
+    """student_gate is held around each hosted student call and never around
+    a tutor call; recorded latency is the response's own, excluding the wait."""
+    from tutormoments.conversation import run_conversation
+
+    class _Gate:
+        def __init__(self):
+            self.held = False
+            self.entries = 0
+
+        def __enter__(self):
+            self.held = True
+            self.entries += 1
+
+        def __exit__(self, *exc):
+            self.held = False
+
+    gate = _Gate()
+    held_during = {"tutor": [], "student": []}
+
+    def _tutor(*_a, **_kw):
+        held_during["tutor"].append(gate.held)
+        return tutor_resps.pop(0)
+
+    def _student(*_a, **_kw):
+        held_during["student"].append(gate.held)
+        return student_resps.pop(0)
+
+    tutor_resps = [_resp("T1", latency=1.0), _resp("T2", latency=1.0), _resp("[END]")]
+    student_resps = [_resp("S1", latency=0.5), _resp("S2", latency=0.7)]
+    tutor_client, student_client = _patch_all(monkeypatch, [], [])
+    tutor_client.generate.side_effect = _tutor
+    student_client.generate.side_effect = _student
+
+    result = run_conversation(
+        _make_scenario(cut_turn=5), "fake-tutor", max_turns=10, student_gate=gate
+    )
+
+    assert held_during == {"tutor": [False, False, False], "student": [True, True]}
+    assert gate.entries == 2 and not gate.held
+    assert result.student_latencies == [0.5, 0.7]
+
+
 def test_run_conversation_none_latency_not_appended(monkeypatch):
     """None latency is not appended to the list."""
     from tutormoments.conversation import run_conversation
