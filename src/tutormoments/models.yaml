@@ -34,7 +34,7 @@
 
 # Bumped whenever any pricing entry changes; run summaries record it so a
 # published cost stays interpretable after later rate updates.
-pricing_version: "2026-09-28"
+pricing_version: "2026-09-29"
 
 models:
   # --- Anthropic ---
@@ -170,6 +170,31 @@ models:
       cache_write: 0
       batch_multiplier: 0.5
       as_of: "2026-09-16"
+      source: https://developers.openai.com/api/docs/pricing
+  # GPT-6 generation meters cache writes at 1.25x input. Undated ids: the
+  # Models API lists no dated snapshots for these (checked 2026-09-29).
+  # <=272k-input tier; larger prompts bill 2x input/cache (1.5x output on
+  # astra) for the full request -- far above this benchmark's ~20k largest
+  # request (see docs/cost.md).
+  gpt-6-astra:
+    provider: openai
+    pricing:
+      input: 10.00
+      output: 50.00
+      cache_read: 1.00
+      cache_write: 12.50
+      batch_multiplier: 0.5
+      as_of: "2026-09-29"
+      source: https://developers.openai.com/api/docs/pricing
+  gpt-6-luna:
+    provider: openai
+    pricing:
+      input: 0.10
+      output: 0.50
+      cache_read: 0.01
+      cache_write: 0.125
+      batch_multiplier: 0.5
+      as_of: "2026-09-29"
       source: https://developers.openai.com/api/docs/pricing
   o1:
     provider: openai

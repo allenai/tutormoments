@@ -51,6 +51,9 @@ EXPECTED_ARM_WIRE = {
     ),
     "gpt-5.4-mini-2026-03-17": ("gpt-5.4-mini-2026-03-17", None, None, None, "high"),
     "gpt-5.5-2026-04-23": ("gpt-5.5-2026-04-23", None, None, None, "high"),
+    "gpt-5.5-2026-04-23-none": ("gpt-5.5-2026-04-23", None, None, None, "none"),
+    "gpt-6-astra": ("gpt-6-astra", None, None, None, "high"),
+    "gpt-6-luna-none": ("gpt-6-luna", None, None, None, "none"),
     "deepseek-v4-pro-0813": (
         "deepseek-ai/DeepSeek-V4-Pro-0813",
         None,
