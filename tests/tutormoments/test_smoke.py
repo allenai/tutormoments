@@ -294,6 +294,26 @@ def test_together_evidence_not_asserted():
     assert report.results[0].thinking_evidence == "n/a"
 
 
+@pytest.mark.parametrize("reasoning_tokens,status", [(412, PASS), (0, FAIL)])
+def test_together_reasoning_effort_is_asserted(reasoning_tokens, status):
+    # Hybrid reasoners report reasoning_tokens, so a stated reasoning_effort
+    # is judged against it like OpenAI's.
+    model = "deepseek-ai/DeepSeek-V4-Pro-0813"
+    check = _sync_check(model, {"reasoning_effort": "max"})
+    client = _FakeClient(
+        model,
+        response=SimpleNamespace(
+            text="answer",
+            usage=_usage(
+                provider="together", reasoning=0, reasoning_tokens=reasoning_tokens
+            ),
+        ),
+    )
+    report = run_smoke(_plan(sync=[check]), client_factory=_factory({model: client}))
+    assert report.results[0].status == status
+    assert report.results[0].thinking_evidence == str(reasoning_tokens)
+
+
 def test_one_check_exception_does_not_abort_others():
     bad = _sync_check("claude-opus-4-8", label="arm:bad")
     good = _sync_check(

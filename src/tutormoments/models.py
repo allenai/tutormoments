@@ -53,7 +53,7 @@ NATIVE_THINKING_KEYS = {
     "anthropic": {"thinking", "effort"},
     "gemini": {"thinking_budget", "thinking_level", "include_thoughts"},
     "openai": {"reasoning"},
-    "together": set(),
+    "together": {"reasoning_effort"},
 }
 
 
@@ -80,6 +80,8 @@ class WireThinking:
     gemini_thinking_config: dict | None = None
     # reasoning_effort value | None (omit).
     openai_reasoning_effort: str | None = None
+    # Together hybrid reasoners: reasoning_effort value | None (omit).
+    together_reasoning_effort: str | None = None
 
     def describe(self) -> str:
         """Human-readable wire form, for logs and the smoke report."""
@@ -92,6 +94,8 @@ class WireThinking:
             return f"thinking_config={self.gemini_thinking_config}"
         if self.openai_reasoning_effort is not None:
             return f"reasoning_effort={self.openai_reasoning_effort}"
+        if self.together_reasoning_effort is not None:
+            return f"reasoning_effort={self.together_reasoning_effort}"
         return "(none sent)"
 
 
@@ -278,7 +282,8 @@ def resolve_thinking(model: str, thinking: dict | None) -> WireThinking:
       ``reasoning_effort``).
     - Anthropic: ``thinking`` (a provider thinking block, or null to omit the
       param) plus optional ``effort``.
-    - Together/open-weight reasoners: no exposed knobs.
+    - Together: ``reasoning_effort`` for hybrid reasoners (e.g.
+      DeepSeek-V4-Pro-0813); ``{}`` for open-weight reasoners with no knob.
 
     thinking=None means "no stated condition": nothing is sent and nothing is
     checked. That path exists for non-benchmark direct calls only; every
@@ -302,8 +307,7 @@ def resolve_thinking(model: str, thinking: dict | None) -> WireThinking:
     if provider == "anthropic":
         return _resolve_anthropic(params)
     if provider == "together":
-        _check_native_keys(provider, params, NATIVE_THINKING_KEYS["together"])
-        return WireThinking(provider=provider)
+        return _resolve_together(params)
     raise ValueError(f"Unsupported provider: {provider}")
 
 
@@ -358,6 +362,19 @@ def _resolve_openai(params: dict) -> WireThinking:
     if not isinstance(reasoning, str) or not reasoning:
         raise ThinkingConfigError("openai reasoning must be a non-empty string.")
     return WireThinking(provider="openai", openai_reasoning_effort=reasoning)
+
+
+def _resolve_together(params: dict) -> WireThinking:
+    _check_native_keys("together", params, NATIVE_THINKING_KEYS["together"])
+    effort = params.get("reasoning_effort")
+    if effort is None:
+        # Open-weight reasoners with no exposed knob (e.g. DeepSeek-V4-Pro).
+        return WireThinking(provider="together")
+    if not isinstance(effort, str) or not effort:
+        raise ThinkingConfigError(
+            "together reasoning_effort must be a non-empty string."
+        )
+    return WireThinking(provider="together", together_reasoning_effort=effort)
 
 
 def _resolve_anthropic(params: dict) -> WireThinking:

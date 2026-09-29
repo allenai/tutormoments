@@ -34,7 +34,7 @@
 
 # Bumped whenever any pricing entry changes; run summaries record it so a
 # published cost stays interpretable after later rate updates.
-pricing_version: "2026-09-16"
+pricing_version: "2026-09-28"
 
 models:
   # --- Anthropic ---
@@ -182,6 +182,8 @@ models:
     pricing: {}
 
   # --- Together (open-weight) ---
+  # No longer served serverless on Together (dedicated endpoints only); kept
+  # so cost reporting over existing V4-Pro results stays priced.
   deepseek-ai/DeepSeek-V4-Pro:
     provider: together
     # batch_multiplier is 1.0: Together's pricing page lists no batch rate
@@ -193,4 +195,20 @@ models:
       cache_write: 0
       batch_multiplier: 1.0
       as_of: "2026-09-16"
+      source: https://www.together.ai/pricing
+
+  # Dated V4-Pro snapshot that replaced DeepSeek-V4-Pro on Together's
+  # serverless tier. Listed explicitly: the prefix match would otherwise
+  # silently price it from the DeepSeek-V4-Pro entry above.
+  deepseek-ai/DeepSeek-V4-Pro-0813:
+    provider: together
+    # batch_multiplier is 1.0: Together's pricing page lists no batch rate
+    # for this model.
+    pricing:
+      input: 1.32
+      output: 3.96
+      cache_read: 0.13
+      cache_write: 0
+      batch_multiplier: 1.0
+      as_of: "2026-09-28"
       source: https://www.together.ai/pricing

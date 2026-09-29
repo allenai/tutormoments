@@ -354,6 +354,7 @@ class ModelClient:
                         json_mode,
                         max_tokens,
                         timeout,
+                        wire,
                         cacheable_prefix=cacheable_prefix,
                         stream=stream,
                     )
@@ -532,15 +533,21 @@ class ModelClient:
         json_mode,
         max_tokens,
         timeout,
+        wire: WireThinking,
         cacheable_prefix: str | None = None,
         stream: bool = False,
     ):
         """Together (open-weight) call via OpenAI-compatible chat completions.
 
-        Together uses `max_tokens` (not `max_completion_tokens`) and does not
-        accept `reasoning_effort`. Open-weight reasoners (DeepSeek-V4, Kimi)
-        produce their own chain-of-thought internally; there's no depth knob
-        to pass. There is no cache_control-style API, so the cacheable head is
+        Together uses `max_tokens` (not `max_completion_tokens`) and imposes
+        no output cap of its own -- only input + output <= context -- so
+        max_tokens=None (the benchmark's "no cap") omits the param unless the
+        registry states a per-model max_output_cap. Hybrid reasoners
+        (DeepSeek-V4-Pro-0813) take `reasoning_effort` and return their chain
+        of thought in a separate reasoning field that the content-only text
+        capture skips.
+        Older open-weight reasoners (DeepSeek-V4-Pro, Kimi) expose no knob
+        and think inline (see _InlineThinkGate). There is no cache_control-style API, so the cacheable head is
         just concatenated into the prompt (same as the Gemini path); Together
         still reports server-side cache hits via cached_tokens (observed live
         on DeepSeek-V4-Pro), whether or not a billing discount applies.
@@ -549,9 +556,17 @@ class ModelClient:
         kwargs = {
             "model": self.model,
             "messages": [{"role": "user", "content": content}],
-            "max_tokens": min(max_tokens, MAX_OUTPUT_TOKENS["together"]),
             "timeout": timeout,
         }
+        cap = max_output_cap(self.model)
+        if max_tokens and cap is not None:
+            max_tokens = min(max_tokens, cap)
+        elif not max_tokens:
+            max_tokens = cap
+        if max_tokens:
+            kwargs["max_tokens"] = max_tokens
+        if wire.together_reasoning_effort:
+            kwargs["reasoning_effort"] = wire.together_reasoning_effort
         if json_mode:
             kwargs["response_format"] = {"type": "json_object"}
 
@@ -810,7 +825,7 @@ def _reset_client_cache() -> None:
     _CLIENT_CACHE.clear()
 
 
-def resolve_max_tokens(client: "ModelClient", max_tokens: int) -> int:
+def resolve_max_tokens(client: "ModelClient", max_tokens: int) -> int | None:
     """Resolve ``max_tokens <= 0`` to the model's maximum output.
 
     Zero means "no limit we impose" -- the benchmark must not cap tutor
@@ -821,13 +836,16 @@ def resolve_max_tokens(client: "ModelClient", max_tokens: int) -> int:
 
     Takes the client rather than a model string so it reuses the provider the
     client already resolved at construction, instead of re-parsing the name.
+
+    Returns None for a provider with no output cap of its own (Together):
+    the caller then omits the param rather than inventing a limit.
     """
     if max_tokens <= 0:
         max_tokens = MAX_OUTPUT_TOKENS.get(client.provider, 8192)
     model = getattr(client, "model", "") or ""
     cap = max_output_cap(model)
     if cap is not None:
-        return min(max_tokens, cap)
+        return cap if max_tokens is None else min(max_tokens, cap)
     return max_tokens
 
 
@@ -836,7 +854,9 @@ MAX_OUTPUT_TOKENS = {
     "gemini": 65536,
     "openai": 128000,
     "anthropic": 128000,
-    "together": 16384,  # open-weight reasoners (DeepSeek/Kimi) need room to think
+    # None = no provider output cap: Together bounds only input + output by
+    # the context window, so the param is omitted (see _generate_together).
+    "together": None,
 }
 
 

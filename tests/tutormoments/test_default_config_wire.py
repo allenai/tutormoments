@@ -51,24 +51,28 @@ EXPECTED_ARM_WIRE = {
     ),
     "gpt-5.4-mini-2026-03-17": ("gpt-5.4-mini-2026-03-17", None, None, None, "high"),
     "gpt-5.5-2026-04-23": ("gpt-5.5-2026-04-23", None, None, None, "high"),
-    "deepseek-v4-pro": (
-        "deepseek-ai/DeepSeek-V4-Pro",
+    "deepseek-v4-pro-0813": (
+        "deepseek-ai/DeepSeek-V4-Pro-0813",
         None,
         None,
         None,
         None,
+        "max",
     ),
 }
 
 
 def _assert_wire(model, level, expected):
-    exp_model, anth, effort, gem, oai = expected
+    # The Together effort is an optional trailing entry (None when omitted).
+    exp_model, anth, effort, gem, oai, *together = expected
+    tog_effort = together[0] if together else None
     assert model == exp_model
     wire = resolve_thinking(model, level)
     assert wire.anthropic_thinking == anth
     assert wire.anthropic_effort == effort
     assert wire.gemini_thinking_config == gem
     assert wire.openai_reasoning_effort == oai
+    assert wire.together_reasoning_effort == tog_effort
 
 
 def test_default_roster_covers_expected_arms():

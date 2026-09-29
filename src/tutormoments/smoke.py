@@ -235,6 +235,8 @@ def _thinking_expectation(wire) -> str:
         return "optional"  # adaptive: the model decides
     if wire.openai_reasoning_effort is not None:
         return "off" if wire.openai_reasoning_effort == "none" else "required"
+    if wire.together_reasoning_effort is not None:
+        return "required"  # Together offers no working off switch (thinking.md)
     return "na"  # nothing sent: provider default / internal reasoners
 
 
@@ -243,13 +245,13 @@ def _thinking_evidence(usage: dict) -> "int | None":
     reasoning = usage.get("reasoning", 0) or 0
     if reasoning:
         return int(reasoning)
-    # Anthropic: thinking blocks; OpenAI: the informational reasoning_tokens
-    # subset of completion_tokens. Either key's presence means the provider
-    # reported the dimension, so zero IS the observation.
+    # Anthropic: thinking blocks; OpenAI/Together: the informational
+    # reasoning_tokens subset of completion_tokens. Either key's presence
+    # means the provider reported the dimension, so zero IS the observation.
     for key in ("thinking_blocks", "reasoning_tokens"):
         if key in usage:
             return int(usage.get(key) or 0)
-    # Together never reports a reasoning dimension at all.
+    # Usage recorded without a reasoning dimension at all.
     if usage.get("provider") == "together":
         return None
     return int(reasoning)

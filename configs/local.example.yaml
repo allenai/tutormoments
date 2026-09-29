@@ -27,7 +27,7 @@ benchmark_models:
   gemini-3.5-flash:        { model: gemini-3.5-flash, include_thoughts: true, thinking_budget: -1, condition: dynamic }
   gpt-5.4-mini-2026-03-17: { model: gpt-5.4-mini-2026-03-17, reasoning: high, condition: high }
   gpt-5.5-2026-04-23:      { model: gpt-5.5-2026-04-23, reasoning: high, condition: high }
-  deepseek-v4-pro:         { model: deepseek-ai/DeepSeek-V4-Pro, condition: dynamic }
+  deepseek-v4-pro-0813:    { model: deepseek-ai/DeepSeek-V4-Pro-0813, reasoning_effort: max, condition: max }
 
 # Role blocks state provider-native thinking parameters the same way arms do.
 # "Off" is stated explicitly ({type: disabled}) rather than by omitting the
