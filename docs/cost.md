@@ -66,7 +66,13 @@ none back. For flagged models, the client puts the static head in its own text p
 explicit breakpoint and sends `prompt_cache_options: {mode: explicit}`. The head is then
 written once per conversation and read on later turns, and the changing tail bills at the
 plain input rate. The model reads the same text either way: the text parts of one message
-render as their concatenation. `tutormoments smoke` checks the read-back live. GPT-6 tutor
+render as their concatenation. It also reads the same tokens. A breakpoint forces a token
+break, and the tokenizer merges a turn's closing punctuation with the tail's leading
+newlines (`?\n\n` is one o200k token), so the breakpoint sits at the start of the head's last
+line rather than at its end; that last context turn bills as uncached tail. Checked with
+o200k over all 520 released moments, a breakpoint at the head's end changed the token
+sequence in 511 of them, and the start-of-last-line breakpoint in none.
+`tutormoments smoke` checks the read-back live. GPT-6 tutor
 costs recorded before this change reflect implicit caching (an estimated 2.5× the input
 cost) and are not comparable with later runs.
 

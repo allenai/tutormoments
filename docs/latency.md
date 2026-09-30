@@ -319,9 +319,17 @@ faster first token has to spend elsewhere.
 
 ### Caching fidelity — the biggest caveat
 
-**Only the Anthropic path sends a real cache breakpoint.** Gemini
-([client.py](../src/tutormoments/client.py)) and Together concatenate the cacheable prefix
-into the prompt instead, so neither caches *this conversation's* transcript.
+**Only the Anthropic path and OpenAI's explicit-cache models send a real cache breakpoint.**
+Gemini ([client.py](../src/tutormoments/client.py)) and Together concatenate the cacheable
+prefix into the prompt instead, so neither caches *this conversation's* transcript.
+
+The OpenAI models flagged `explicit_prompt_cache` in
+[`models.yaml`](../src/tutormoments/models.yaml) (GPT-6) have sent one since the fix in
+[`docs/cost.md`](cost.md). Before it, their implicit cache broke only at the end of the
+growing message, so almost nothing was read back. GPT-6 latency, warm/cold splits, and
+cache-hit labels from before and after that change measure different cache behaviour, so
+don't compare them. Earlier OpenAI models (GPT-5.5) are unchanged and still cache
+implicitly at fixed 2,048-token intervals.
 
 That does not mean they report no cache hits. Together reports `cached_tokens` from its own
 automatic prefix caching, and measured on `deepseek-ai/DeepSeek-V4-Pro` it returns a **0.786

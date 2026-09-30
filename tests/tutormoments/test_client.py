@@ -12,6 +12,7 @@ from tutormoments.client import (
     _build_image_blocks_anthropic,
     _build_image_blocks_gemini,
     _build_image_blocks_openai,
+    _cache_breakpoint_offset,
     _mime_from_path,
     _openai_user_content,
     _presigned_url,
@@ -1115,17 +1116,45 @@ def test_explicit_cache_model_marks_head_breakpoint(monkeypatch, stream):
     growing message, so nothing is ever read back; the head must end a part
     of its own carrying an explicit breakpoint, in explicit-only mode."""
     kwargs = _openai_create_kwargs(
-        monkeypatch, "gpt-6-luna", cacheable_prefix="HEAD", stream=stream
+        monkeypatch, "gpt-6-luna", cacheable_prefix="SYS\nLAST", stream=stream
     )
     assert kwargs["messages"] == [
         {
             "role": "user",
             "content": [
-                {"type": "text", "text": "HEAD", "prompt_cache_breakpoint": _BP},
-                {"type": "text", "text": "TAIL"},
+                {"type": "text", "text": "SYS\n", "prompt_cache_breakpoint": _BP},
+                {"type": "text", "text": "LASTTAIL"},
             ],
         }
     ]
+    assert kwargs["prompt_cache_options"] == {"mode": "explicit"}
+
+
+@pytest.mark.parametrize(
+    "head,offset",
+    [
+        # The breakpoint forces a token break, and o200k merges a turn's
+        # closing punctuation with the tail's leading newlines ("?\n\n"), so
+        # it sits before the head's last line, never at the head's end.
+        (
+            "SYS\n\nTurn 1. TUTOR: Hi.\nTurn 2. STUDENT: 4?",
+            len("SYS\n\nTurn 1. TUTOR: Hi.\n"),
+        ),
+        # Trailing newlines are skipped: the break never splits a newline run.
+        ("SYS\nA\nB\n\n", len("SYS\nA\n")),
+        # No newline to break after: no breakpoint.
+        ("one line", 0),
+        ("one line\n", 0),
+    ],
+)
+def test_cache_breakpoint_offset_is_start_of_head_last_line(head, offset):
+    assert _cache_breakpoint_offset(head) == offset
+
+
+def test_explicit_cache_model_single_line_head_caches_nothing(monkeypatch):
+    # No safe break point in the head -> sent like a call with no head.
+    kwargs = _openai_create_kwargs(monkeypatch, "gpt-6-luna", cacheable_prefix="HEAD")
+    assert kwargs["messages"] == [{"role": "user", "content": "HEADTAIL"}]
     assert kwargs["prompt_cache_options"] == {"mode": "explicit"}
 
 
@@ -1166,12 +1195,12 @@ def _without_breakpoints(parts):
 @pytest.mark.parametrize(
     "head,prompt",
     [
-        # Head ends mid-way through a text chunk: that chunk is split.
+        # Breakpoint falls mid-way through a text chunk: that chunk is split.
         ("intro\n[SCREEN image 1]\nmore head ", "tail\n[SCREEN image 2]\nend"),
-        # Head ends exactly at a chunk boundary (just after a marker line).
+        # Breakpoint falls inside the chunk that ends at image 1's marker.
         ("intro\n[SCREEN image 1]", "\ntail\n[SCREEN image 2]\nend"),
         # Marker for image 2 never appears: it is appended after the tail.
-        ("head only ", "tail\n[SCREEN image 1]\nend"),
+        ("sys\nhead only ", "tail\n[SCREEN image 1]\nend"),
     ],
 )
 def test_explicit_breakpoint_with_images_keeps_content_order(head, prompt):
@@ -1184,9 +1213,10 @@ def test_explicit_breakpoint_with_images_keeps_content_order(head, prompt):
     assert _without_breakpoints(marked) == plain
     flagged = [p for p in marked if "prompt_cache_breakpoint" in p]
     assert len(flagged) == 1
-    # The marked part ends exactly where the head ends.
+    # The marked part ends at the start of the head's last line.
     before = marked[: marked.index(flagged[0]) + 1]
-    assert "".join(p["text"] for p in before if p["type"] == "text") == head
+    cached = "".join(p["text"] for p in before if p["type"] == "text")
+    assert cached == head[: _cache_breakpoint_offset(head)]
 
 
 def test_together_sync_and_stream_report_identical_vectors(monkeypatch):

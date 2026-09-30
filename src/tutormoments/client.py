@@ -495,7 +495,8 @@ class ModelClient:
         The cacheable head always leads the prompt. Earlier models cache it
         implicitly at 2,048-token intervals. Models flagged
         explicit_prompt_cache (GPT-5.6 and later) cache only at message ends
-        by default, and our single message grows every turn, so the head goes
+        by default, and our single message grows every turn, so the head
+        (up to the start of its last line; see _cache_breakpoint_offset) goes
         in its own text part carrying an explicit breakpoint and the request
         runs in explicit-only mode: the head is written once and read on
         later turns, and the changing tail is never written. A call with no
@@ -1219,23 +1220,42 @@ def _openai_user_content(
     """Build the OpenAI user-message content: cacheable head, then prompt.
 
     Without explicit_cache this is the head + prompt concatenation (a plain
-    string, or text/image parts when images are present). With it, the head
-    ends a text part of its own marked with an explicit cache breakpoint.
-    Text parts of one message render as their concatenation (verified live
-    on gpt-6-luna: identical prompt_tokens either way), so the model reads
-    the same text; only where the cache boundary sits changes.
+    string, or text/image parts when images are present). With it, the
+    cached prefix (see _cache_breakpoint_offset) ends a text part of its own
+    marked with an explicit cache breakpoint. Text parts of one message
+    render as their concatenation (verified live on gpt-6-luna: identical
+    prompt_tokens either way), so the model reads the same text; only where
+    the cache boundary sits changes.
     """
     head = cacheable_prefix or ""
     full = head + prompt
+    cut = _cache_breakpoint_offset(head) if explicit_cache else 0
     if image_blocks:
         parts = _interleave_text_and_images(full, image_blocks, _openai_text_part)
-    elif explicit_cache and head:
+    elif cut:
         parts = [_openai_text_part(full)]
     else:
         return full
-    if explicit_cache and head:
-        parts = _mark_cache_breakpoint(parts, len(head))
+    if cut:
+        parts = _mark_cache_breakpoint(parts, cut)
     return parts
+
+
+def _cache_breakpoint_offset(head: str) -> int:
+    """Where the explicit breakpoint goes: the start of the head's last line.
+
+    A breakpoint forces a token boundary. The head ends with the last context
+    turn's text and the tail starts with a newline, and the tokenizer merges
+    closing punctuation with the newlines after it (`?\\n\\n` is one token),
+    so a breakpoint at the end of the head would change the token sequence
+    the model reads versus the plain concatenation. Just after a newline,
+    before a line's first character, is not a merge point, so the model reads
+    the same tokens either way; the head's last line is simply billed as
+    uncached tail. Trailing blank lines are skipped so the breakpoint never
+    splits a run of newlines. 0 (no newline to break after) means no
+    breakpoint.
+    """
+    return head.rstrip("\r\n").rfind("\n") + 1
 
 
 def _mark_cache_breakpoint(parts: list[dict], offset: int) -> list[dict]:
