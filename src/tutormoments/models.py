@@ -1,7 +1,8 @@
 """Provider routing, per-model facts, and thinking-parameter translation.
 
 The packaged ``models.yaml`` stores stable per-model facts: provider, pricing,
-and output caps. It says nothing about reasoning conditions -- those are
+output caps, and whether OpenAI prompt caching needs explicit breakpoints.
+It says nothing about reasoning conditions -- those are
 stated explicitly, in provider parlance, wherever a model is configured
 (``benchmark_models:`` arms and the role blocks), so the run config is
 auditable without consulting a mapping.
@@ -140,6 +141,15 @@ def _validate_registry(raw: dict) -> dict:
                 f"models.yaml model '{model_key}': max_output_cap must be a "
                 f"positive integer, got {cap!r}"
             )
+        explicit_cache = entry.get("explicit_prompt_cache")
+        if explicit_cache is not None and (
+            not isinstance(explicit_cache, bool) or provider != "openai"
+        ):
+            raise ValueError(
+                f"models.yaml model '{model_key}': explicit_prompt_cache must "
+                f"be a boolean on an openai model, got {explicit_cache!r} on "
+                f"provider {provider!r}"
+            )
         pricing = entry.get("pricing")
         if pricing is not None and not isinstance(pricing, dict):
             raise ValueError(
@@ -250,6 +260,19 @@ def max_output_cap(model: str) -> int | None:
     if found is None:
         return None
     return found[1].get("max_output_cap")
+
+
+def explicit_prompt_cache(model: str) -> bool:
+    """True when OpenAI caching must be steered with explicit breakpoints.
+
+    GPT-5.6-and-later models put their implicit breakpoint at the end of the
+    latest message, so a prompt whose single message grows every turn is
+    written to cache on every call and never read back (see models.yaml).
+    """
+    found = _find_model_entry(model)
+    if found is None:
+        return False
+    return bool(found[1].get("explicit_prompt_cache", False))
 
 
 def get_pricing(model: str) -> dict:

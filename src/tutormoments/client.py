@@ -18,6 +18,7 @@ from google.genai import types
 # import it from here.
 from tutormoments.models import (
     WireThinking,
+    explicit_prompt_cache,
     infer_provider,
     max_output_cap,
     resolve_thinking,
@@ -489,21 +490,30 @@ class ModelClient:
         cacheable_prefix: str | None = None,
         stream: bool = False,
     ):
-        """OpenAI API call via openai SDK."""
-        if images:
-            image_blocks = _build_image_blocks_openai(
-                images,
-                use_url=_should_use_presigned_url(),
-            )
-            # Prepend cacheable head so auto-cache sees the same prefix on repeats.
-            head_text = cacheable_prefix or ""
-            content = _interleave_text_and_images(
-                head_text + prompt,
-                image_blocks,
-                lambda s: {"type": "text", "text": s},
-            )
-        else:
-            content = (cacheable_prefix or "") + prompt
+        """OpenAI API call via openai SDK.
+
+        The cacheable head always leads the prompt. Earlier models cache it
+        implicitly at 2,048-token intervals. Models flagged
+        explicit_prompt_cache (GPT-5.6 and later) cache only at message ends
+        by default, and our single message grows every turn, so the head goes
+        in its own text part carrying an explicit breakpoint and the request
+        runs in explicit-only mode: the head is written once and read on
+        later turns, and the changing tail is never written. A call with no
+        cacheable head is not cached at all -- nothing in it is declared
+        reusable, so a write would be pure 1.25x overhead.
+        """
+        image_blocks = (
+            _build_image_blocks_openai(images, use_url=_should_use_presigned_url())
+            if images
+            else None
+        )
+        explicit_cache = explicit_prompt_cache(self.model)
+        content = _openai_user_content(
+            prompt,
+            cacheable_prefix,
+            image_blocks,
+            explicit_cache=explicit_cache,
+        )
 
         kwargs = {
             "model": self.model,
@@ -511,6 +521,8 @@ class ModelClient:
             "max_completion_tokens": max_tokens,
             "timeout": timeout,
         }
+        if explicit_cache:
+            kwargs["prompt_cache_options"] = {"mode": "explicit"}
         if json_mode:
             kwargs["response_format"] = {"type": "json_object"}
         if wire.openai_reasoning_effort:
@@ -999,7 +1011,11 @@ def _openai_style_usage(usage_obj, *, provider: str, model: str, endpoint: str) 
     additionally meter cache writes (billed at 1.25x input) under
     prompt_tokens_details.cache_write_tokens -- also a subset of
     prompt_tokens, disjoint from cached_tokens (verified live on
-    gpt-5.6-luna: prompt 1120 = 1117 written + 3 uncached). usage_obj may be
+    gpt-5.6-luna: prompt 1120 = 1117 written + 3 uncached). Those models cache
+    at message ends, so the benchmark's single growing message reads nothing
+    back unless the client places an explicit breakpoint (see
+    _generate_openai): without one, gpt-6 tutor calls metered ~98% of prompt
+    tokens as writes and ~2% as reads. usage_obj may be
     None (Together streams sometimes never deliver the usage chunk): every
     bucket records 0 rather than a guess.
     """
@@ -1187,6 +1203,73 @@ def _interleave_text_and_images(
             parts.append(block)
 
     return parts if parts else [text_block(prompt)]
+
+
+def _openai_text_part(text: str) -> dict:
+    return {"type": "text", "text": text}
+
+
+def _openai_user_content(
+    prompt: str,
+    cacheable_prefix: str | None,
+    image_blocks: list[dict] | None,
+    *,
+    explicit_cache: bool,
+):
+    """Build the OpenAI user-message content: cacheable head, then prompt.
+
+    Without explicit_cache this is the head + prompt concatenation (a plain
+    string, or text/image parts when images are present). With it, the head
+    ends a text part of its own marked with an explicit cache breakpoint.
+    Text parts of one message render as their concatenation (verified live
+    on gpt-6-luna: identical prompt_tokens either way), so the model reads
+    the same text; only where the cache boundary sits changes.
+    """
+    head = cacheable_prefix or ""
+    full = head + prompt
+    if image_blocks:
+        parts = _interleave_text_and_images(full, image_blocks, _openai_text_part)
+    elif explicit_cache and head:
+        parts = [_openai_text_part(full)]
+    else:
+        return full
+    if explicit_cache and head:
+        parts = _mark_cache_breakpoint(parts, len(head))
+    return parts
+
+
+def _mark_cache_breakpoint(parts: list[dict], offset: int) -> list[dict]:
+    """Put an explicit cache breakpoint at character `offset` of the text.
+
+    `parts` are OpenAI content parts whose text parts, in order, concatenate
+    to the full prompt (images occupy no text positions). The text part
+    spanning `offset` is split there if needed, and the part ending at
+    `offset` is marked.
+    """
+    out: list[dict] = []
+    pos = 0
+    marked = False
+    for part in parts:
+        if marked or part.get("type") != "text":
+            out.append(part)
+            continue
+        text = part["text"]
+        end = pos + len(text)
+        if end < offset:
+            out.append(part)
+            pos = end
+            continue
+        cut = offset - pos
+        out.append(
+            {
+                **_openai_text_part(text[:cut]),
+                "prompt_cache_breakpoint": {"mode": "explicit"},
+            }
+        )
+        if text[cut:]:
+            out.append(_openai_text_part(text[cut:]))
+        marked = True
+    return out
 
 
 # ===================================================================
