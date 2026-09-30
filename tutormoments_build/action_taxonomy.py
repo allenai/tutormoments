@@ -18,8 +18,9 @@ facets for two sources --
   action_taxonomy.manifest.json  inputs, classifier, counts, usage, hashes
 
 This is a regenerated, clearly labelled version, not a recovery of the
-paper's classified pools: the paper's pools (514 human moments, ~100 per LM
-cell) cannot be reproduced from the release. The frozen
+paper's classified pools (100 moments per LM cell). The paper's LM cells are
+recoverable from benchmark_520 by filtering `source_round` to s42, s43 and
+topup. The frozen
 analysis/working-paper-20260630/v1_action_taxonomy_distribution.csv and the
 locked kl_divergence_table.tex stay the paper's canonical numbers.
 
@@ -568,10 +569,12 @@ over moments. `moment_id` joins AI rows to `moments.id`; human rows join to
 
 These labels were **regenerated in October 2026** from this dataset at
 revision `{rev}`; they are not the classification run behind the paper. The
-paper classified a smaller sample (514 human moments, ~100 moments per AI
-cell) that cannot be reconstructed from the release, so this config does not
-exactly reproduce the paper's action-distribution figure or its KL-divergence
-table. The paper's canonical numbers are
+paper classified a smaller sample — 100 moments per AI cell — so this config
+does not exactly reproduce the paper's action-distribution figure or its
+KL-divergence table. The paper's AI cells are recoverable from
+`benchmark_520` by filtering `source_round` to `s42`, `s43` and `topup`
+(100 moments per cell, 50 scaffolding / 50 rigor). The paper's canonical
+numbers are
 `analysis/working-paper-20260630/v1_action_taxonomy_distribution.csv` and
 `kl_divergence_table.tex` in the code repository. `{MANIFEST_FILENAME}`
 records the input revision and file hashes, the classifier configuration and

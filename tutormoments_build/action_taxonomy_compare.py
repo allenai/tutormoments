@@ -52,8 +52,6 @@ PAPER_MODELS = {
 }
 HUMAN_LABEL = "Human tutors"
 
-# Assumed per-situation moment count behind the paper's KL table (~100
-# balanced moments per cell); used only for the sample-size sensitivity view.
 PAPER_N_PER_SITUATION = 50
 
 
@@ -197,9 +195,9 @@ def build_report(
         "",
         "## Why the numbers differ",
         "",
-        "- **Different pools.** The paper classified 514 human moments and ~100 "
-        "moments per LM cell (selection rule unknown). This release covers the "
-        "full release: every human scaffolding moment with a kept facet "
+        "- **Different pools.** The paper classified 514 human moments and 100 "
+        "moments per LM cell due to data availability at the time. This release "
+        "covers the full release: every human scaffolding moment with a kept facet "
         f"({new_dist[HUMAN_LABEL][1]:,}) and every benchmark_520 replay "
         "(~520 per cell).",
         "- **A fresh LLM pass.** Same model, prompt and scheme, but a new "
@@ -211,8 +209,7 @@ def build_report(
         "toward uniform; with ~260 (this release) much less, so KL rises even "
         "if the underlying distributions are unchanged. The KL section below "
         f"also shows the new values smoothed as if n = {PAPER_N_PER_SITUATION} "
-        "per situation (an assumption: the paper's per-situation n is not "
-        "recorded).",
+        "per situation.",
         "- Distributions are macro means over moments (kept facets only), "
         "as in the paper.",
         "",
@@ -306,7 +303,9 @@ def build_report(
         "so for LMs the rise is mostly the smoothing. The human gap is not: the "
         "regenerated human pool separates S from R well beyond the paper's "
         "value at any n, and the human distribution itself shifts (see above). "
-        "The paper's human sample is unknown, so this cannot be attributed yet.",
+        "The paper's human sample was the balanced_520 benchmark subset (514 of "
+        "those 520 moments, ~257 per situation), so the gap is a change of "
+        "population rather than of sample size.",
         "",
     ]
     return "\n".join(lines)
