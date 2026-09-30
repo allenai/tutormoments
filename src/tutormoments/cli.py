@@ -11,8 +11,9 @@ Provides:
     -- expand (tutors x modes) into cell dicts with lane assignment by provider.
 
   run_sweep(cells, run_cfg, *, date, results_root, _run_cell_fn)
-    -- schedule cells: lanes parallel (ThreadPoolExecutor), within-lane sequential.
-    Returns list of all run_ids.
+    -- schedule cells: each lane (provider) replays one cell at a time; scoring
+    overlaps across cells, and lanes run in parallel. Returns run_ids in
+    expansion order.
 
   main() / argparse "run" subcommand:
     tutormoments run --tutors X [--modes ...] [--dataset HF_ID | --data_path DIR]
@@ -34,6 +35,7 @@ import math
 import os
 import subprocess
 import sys
+import threading
 from collections import OrderedDict
 from concurrent.futures import ThreadPoolExecutor, as_completed
 from importlib.metadata import PackageNotFoundError, version
@@ -89,7 +91,20 @@ def run_sweep(
     results_root: str = "results",
     _run_cell_fn=None,
 ) -> list[str]:
-    """Schedule cells: lanes run in parallel; cells within a lane run sequentially.
+    """Schedule cells: replay is serialized per lane; scoring overlaps freely.
+
+    A lane is the tutor's provider. Every cell runs start to finish on its own
+    thread, but a lane starts its next cell only once the current one has
+    finished replay (run_cell's on_replay_done) -- the only phase that calls
+    the tutor's provider. The cell's scoring (three Anthropic batch passes,
+    mostly queue wait) then overlaps with the rest of the sweep, instead of
+    holding the lane for hours. Lanes run in parallel.
+
+    When run_cfg sets max_student_concurrency, one BoundedSemaphore caps
+    in-flight student calls across every cell (they share one account).
+
+    Every cell runs even if another fails; once all have finished, each
+    failure is logged and the first one in expansion order is re-raised.
 
     Args:
         cells:           Output of expand_cells().
@@ -99,48 +114,86 @@ def run_sweep(
         _run_cell_fn:    Injectable for testing (default: run_cell from this module).
 
     Returns:
-        List of run_ids (one per cell), in lane-then-within-lane order.
+        List of run_ids (one per cell), in expansion order.
     """
     if _run_cell_fn is None:
         _run_cell_fn = run_cell
+    if not cells:
+        return []
 
-    # Group cells by lane, preserving expansion order
+    cap = getattr(run_cfg, "max_student_concurrency", None)
+    student_gate = threading.BoundedSemaphore(cap) if cap else None
+
+    # Group cell indices by lane, preserving expansion order
     by_lane: OrderedDict = OrderedDict()
-    for cell in cells:
-        by_lane.setdefault(cell["lane"], []).append(cell)
+    for idx, cell in enumerate(cells):
+        by_lane.setdefault(cell["lane"], []).append(idx)
 
-    n_lanes = len(by_lane)
-    all_run_ids: list[str] = []
+    futures: dict = {}  # cell index -> Future; each lane driver writes its own keys
 
-    def _run_lane(lane: str, lane_cells: list[dict]) -> list[str]:
-        """Run one lane's cells sequentially. Returns run_ids in order."""
-        lane_run_ids = []
-        for idx, cell in enumerate(lane_cells, 1):
+    def _run_one(idx: int, lane: str, pos: int, n_lane: int, replay_done) -> str:
+        """Run one cell; replay_done is set once its lane can move on."""
+        cell = cells[idx]
+
+        def _free_lane():
+            if not replay_done.is_set():
+                logger.info("Replay done, freeing lane %s", lane)
+                replay_done.set()
+
+        try:
             with log_context(f"{cell['tutor']}/{cell['mode']}"):
-                logger.info(
-                    "Starting cell %d/%d on lane %s", idx, len(lane_cells), lane
-                )
-                rid = _run_cell_fn(
-                    cell["tutor"],
-                    cell["mode"],
-                    run_cfg,
-                    date=date,
-                    results_root=results_root,
-                )
+                logger.info("Starting cell %d/%d on lane %s", pos, n_lane, lane)
+                try:
+                    rid = _run_cell_fn(
+                        cell["tutor"],
+                        cell["mode"],
+                        run_cfg,
+                        date=date,
+                        results_root=results_root,
+                        on_replay_done=_free_lane,
+                        student_gate=student_gate,
+                    )
+                except Exception as e:
+                    logger.error("Cell failed: %s", e)
+                    raise
                 logger.info("Finished cell -> %s", rid)
-            lane_run_ids.append(rid)
-        return lane_run_ids
+            return rid
+        finally:
+            # A cell that fails before (or during) replay must not stall its lane.
+            replay_done.set()
 
-    # Lanes in parallel
-    with ThreadPoolExecutor(max_workers=n_lanes) as pool:
-        futs = {
-            pool.submit(_run_lane, lane, lane_cells): lane
-            for lane, lane_cells in by_lane.items()
-        }
-        for fut in as_completed(futs):
-            all_run_ids.extend(fut.result())
+    def _drive_lane(lane: str, idxs: list[int]) -> None:
+        """Start the lane's cells in order, each once the previous one's replay is done."""
+        for pos, idx in enumerate(idxs, 1):
+            replay_done = threading.Event()
+            futures[idx] = cell_pool.submit(
+                _run_one, idx, lane, pos, len(idxs), replay_done
+            )
+            replay_done.wait()
 
-    return all_run_ids
+    with ThreadPoolExecutor(max_workers=len(cells)) as cell_pool:
+        with ThreadPoolExecutor(max_workers=len(by_lane)) as lane_pool:
+            drivers = [
+                lane_pool.submit(_drive_lane, lane, idxs)
+                for lane, idxs in by_lane.items()
+            ]
+            for driver in drivers:
+                driver.result()
+        # Leaving cell_pool waits for every cell's scoring to finish.
+
+    run_ids: list[str] = []
+    errors: list = []
+    for idx, cell in enumerate(cells):
+        exc = futures[idx].exception()
+        if exc is None:
+            run_ids.append(futures[idx].result())
+        else:
+            errors.append((cell, exc))
+    if errors:
+        for cell, exc in errors:
+            logger.error("Cell %s/%s failed: %s", cell["tutor"], cell["mode"], exc)
+        raise errors[0][1]
+    return run_ids
 
 
 # ---------------------------------------------------------------------------
@@ -383,17 +436,20 @@ def run_cell(
     *,
     date: str,
     results_root: str = "results",
+    on_replay_done=None,
+    student_gate=None,
 ) -> str:
     """Run a single (tutor, mode) cell end-to-end.
 
     Sequence:
       1. build_run_config -> load_moments -> (slice sample)
       2. make_run_id + write_config
-      3. For each scenario (skip if is_done):
-           run_conversation -> score -> write_transcript + write_score
-           On any exception: log SKIP <id>: <err> and continue
-      4. aggregate over completed annotations -> write_summary
-      5. Return run_id
+      3. Replay every trial: run_conversation -> write_transcript per scenario
+         (skip if is_done; on any exception log SKIP <id>: <err> and continue)
+      4. on_replay_done() -- the cell no longer needs the tutor's provider
+      5. Score every trial: pooled score_batch -> write_score
+      6. aggregate over completed annotations -> write_summary
+      7. Return run_id
 
     Args:
         tutor: Tutor model id (e.g. "claude-opus-4-8").
@@ -401,6 +457,11 @@ def run_cell(
         run_cfg: Pre-built RunConfig or None (if None, built from config defaults).
         date: Date string for run_id (e.g. "20260626"). Caller supplies; not auto.
         results_root: Root directory for results (default "results").
+        on_replay_done: Optional no-arg callable, invoked exactly once after
+            the last trial's replay and before the first scoring batch.
+            run_sweep uses it to free the cell's provider lane.
+        student_gate: Optional context manager (e.g. a BoundedSemaphore shared
+            across cells) entered around every hosted student call.
 
     Returns:
         run_id string (e.g. "claude-opus-4-8_plain_balanced_520_20260626").
@@ -471,6 +532,8 @@ def run_cell(
             # Informational only: replay concurrency does not affect results, so
             # it is deliberately kept out of reproducibility.config_hash below.
             "replay_concurrency": getattr(cfg, "replay_concurrency", None),
+            # Same: the student cap only changes timing (hashed out too).
+            "max_student_concurrency": getattr(cfg, "max_student_concurrency", None),
             "student": student_json,
             "scorer": scorer_json,
             "resolved_tutors": resolved_tutors_json,
@@ -526,18 +589,17 @@ def run_cell(
         # Latency / token helpers
         # ---------------------------------------------------------------------------
 
-        def _run_trial(trial_idx: int) -> tuple:
-            """Run all scenarios once (one trial): conversations, then pooled scoring.
+        def _replay_trial(trial_idx: int) -> dict:
+            """Phase 1 of one trial: run (or resume) each moment's conversation.
 
-            Phase 1 runs (or resumes) each moment's conversation; phase 2 scores
-            every un-scored moment through ONE pooled scoring pipeline
-            (scoring.score_batch), so the trial pays ~3 batch queue-waits total
-            instead of 3 per moment. Per-moment score files keep resume
-            granularity unchanged.
+            Split from scoring (_score_trial) so a cell can replay every trial
+            before any scoring starts, and free its provider lane in between.
+            Trials are independent, so replay-all-then-score-all produces the
+            same files and metrics as the old per-trial interleaving.
 
             Returns:
-                (metrics_dict, transcripts_list)
-                where transcripts_list are the Transcript objects for this trial.
+                State dict for _score_trial: counts, failed_scenarios, the
+                completed_* lists (resumed moments), and to_score.
             """
             completed_scenarios = []
             completed_annotations = []
@@ -673,6 +735,7 @@ def run_cell(
                     student_id=cfg.student.model,
                     student_mode=cfg.student.mode or "oracle",
                     max_turns=cfg.max_turns,
+                    student_gate=student_gate,
                 )
 
             if pending:
@@ -681,7 +744,7 @@ def run_cell(
                 with ThreadPoolExecutor(
                     max_workers=workers,
                     # Workers must adopt this run's log file + [tutor/mode] tag:
-                    # the run.log handler filters by registered thread ids, and
+                    # the run.log handler passes only threads that joined it, and
                     # contextvars don't cross thread boundaries.
                     initializer=bind_worker_logging,
                     initargs=(run_log, cell_tag),
@@ -742,6 +805,43 @@ def run_cell(
                     continue
 
                 to_score.append((scenario, payload, resume_sid))
+
+            # Fail fast: with nothing resumed and nothing replayed, this cell
+            # can't produce a summary, so don't replay the remaining trials
+            # (e.g. a bad tutor key would retry every moment in every trial).
+            if not completed_scenarios and not to_score:
+                raise RuntimeError(
+                    f"No scenarios completed for {tutor}/{mode} trial {trial_idx}; "
+                    f"{counts['failed']} of {counts['attempted']} attempted scenarios failed."
+                )
+
+            return {
+                "counts": counts,
+                "failed_scenarios": failed_scenarios,
+                "completed_scenarios": completed_scenarios,
+                "completed_annotations": completed_annotations,
+                "completed_transcripts": completed_transcripts,
+                "to_score": to_score,
+            }
+
+        def _score_trial(trial_idx: int, state: dict) -> tuple:
+            """Phase 2 of one trial: pooled scoring, then per-trial aggregation.
+
+            Scores every un-scored moment through ONE pooled scoring pipeline
+            (scoring.score_batch), so the trial pays ~3 batch queue-waits total
+            instead of 3 per moment. Per-moment score files keep resume
+            granularity unchanged.
+
+            Returns:
+                (metrics, transcripts, counts, scenarios, annotations) for the
+                trial's completed moments.
+            """
+            counts = state["counts"]
+            failed_scenarios = state["failed_scenarios"]
+            completed_scenarios = state["completed_scenarios"]
+            completed_annotations = state["completed_annotations"]
+            completed_transcripts = state["completed_transcripts"]
+            to_score = state["to_score"]
 
             # ---- Phase 2: Classification -- pooled scoring (one 3-pass batch pipeline) ----
             if to_score:
@@ -817,8 +917,15 @@ def run_cell(
                 completed_annotations,
             )
 
-        # Run all trials
-        trial_results = [_run_trial(t) for t in range(1, n_trials + 1)]
+        # Replay every trial, then score every trial. Nothing after replay
+        # calls the tutor's provider, so the caller can hand the provider lane
+        # to the next cell while this one waits on its scoring batches.
+        trial_states = [_replay_trial(t) for t in range(1, n_trials + 1)]
+        if on_replay_done is not None:
+            on_replay_done()
+        trial_results = [
+            _score_trial(t, state) for t, state in enumerate(trial_states, 1)
+        ]
         trial_metrics = [m for m, _, _, _, _ in trial_results]
         trial_counts = [c for _, _, c, _, _ in trial_results]
         all_trial_transcripts = [t for _, ts, _, _, _ in trial_results for t in ts]
@@ -1051,6 +1158,16 @@ def _build_parser() -> argparse.ArgumentParser:
         help="Concurrent per-moment replays within a cell (default: from config, "
         "typically 4). Result-preserving; lower it on smaller API tiers that "
         "hit rate limits.",
+    )
+    run_p.add_argument(
+        "--max-student-concurrency",
+        type=int,
+        default=None,
+        dest="max_student_concurrency",
+        metavar="N",
+        help="Cap on in-flight student calls across all cells of the sweep, "
+        "which share one student account (default: from config, typically no "
+        "cap). Set it when raising --concurrency.",
     )
     # -- latency subcommand ---------------------------------------------------
     lat_p = subs.add_parser(
@@ -1406,6 +1523,7 @@ def main(argv=None) -> None:
             trials=args.trials,
             max_turns=args.max_turns,
             replay_concurrency=args.replay_concurrency,
+            max_student_concurrency=args.max_student_concurrency,
             config_path=args.config,
         )
         date = datetime.date.today().strftime("%Y%m%d")

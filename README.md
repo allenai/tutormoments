@@ -51,6 +51,8 @@ Useful run options:
 | `--sample N` | Use the first `N` moments from the dataset. |
 | `--trials N` | Run each tutor/mode cell multiple times and summarize mean/spread. |
 | `--max-turns N` | Maximum generated tutor/student turns per conversation. |
+| `--concurrency N` | Conversations replayed at once within a cell (default 4). Timing only. |
+| `--max-student-concurrency N` | Cap on in-flight student calls across all cells, which share one student account (default: no cap). Set it when raising `--concurrency`. |
 | `--log-level LEVEL` | Log verbosity: `DEBUG`, `INFO` (default), `WARNING`, `ERROR`. |
 | `--log-file FILE` | Optional combined log for the whole invocation (per-run logs are always written). |
 
@@ -66,6 +68,16 @@ Each run writes under `results/`. Re-running skips moments whose transcript and
 score are already present. Partial failures are recorded in `summary.json`; a
 run where zero moments complete raises an error and does not produce a
 leaderboard-ready empty summary.
+
+A multi-tutor run schedules each (tutor, mode) cell on a lane named after the
+tutor's provider. A lane replays one cell at a time; as soon as a cell's
+replay finishes, the next cell on the lane starts, while the first waits on
+its scoring batches. Scoring, which is mostly batch-queue wait, overlaps
+across all cells, and lanes run in parallel. One `run` command therefore
+finishes about as fast as one process per model would, without the
+processes competing blindly for the shared student account. Scheduling only
+changes timing, not results; if one cell fails, the rest still run and the
+failure is raised at the end.
 
 Run output layout:
 
@@ -360,9 +372,9 @@ enable:
   write a `build.log` into their output directory (skipped on `--dry-run`).
 
 Log files append, so a resumed run continues the same log. In a multi-tutor
-sweep, parallel lanes each write only to their own run's log, and every
+sweep, concurrent cells each write only to their own run's log, and every
 console line is tagged with its cell (e.g. `[gpt-5-4/plain]`) so interleaved
-lanes stay readable. Logs narrate the two phases of each run: Replay
+cells stay readable. Logs narrate the two phases of each run: Replay
 (generating tutor/student continuations) and Classification (the 3-pass
 batch scorer).
 
