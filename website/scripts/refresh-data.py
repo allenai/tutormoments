@@ -11,6 +11,7 @@ Reads (same sources as the repo's analysis/working-paper-20260630 scripts):
   results/benchmark/<model>_v10_<prompt>_tutor_oracle_student*/exchanges/*.json
                                                                    -> latency.json (latency_s)
   results/<model>_<prompt>_latency_<date>/latency.json             -> latency.json (ttft_s)
+  results/<run_id>/summary.json (full runs), else the probe above  -> cost.json
   data/taxonomy/{human,lm}/classified.csv (via tutormoments.taxonomy)  -> action_distribution.json
 
 Writes to static/data/. Sections of the site hide automatically when their JSON
@@ -26,6 +27,13 @@ can be trusted, how many hit samples support a percentile) that live in
 `tutormoments.latency` and must not be reimplemented here -- an earlier version
 of this script did reimplement them and got them wrong. Without that import the
 script still refreshes everything else and says what it skipped.
+
+The same goes for cost.json: the uncached per-response cost is priced by
+`tutormoments.costing` from a model's full benchmark run -- or, where that run
+predates usage capture, by `tutormoments.latency.probe_cost_figures` from a
+probe -- at the checkout's *current* registry rates (tokens are the
+measurement, prices a lookup), so a price change shows up on the next refresh
+without re-running anything.
 """
 
 from __future__ import annotations
@@ -214,6 +222,16 @@ def probe_ttft(repo: Path, probe_root: Path, prompt: str) -> tuple[dict, dict]:
         measured[site_id] = env.get("measured_at")
         subsamples.add((block.get("subsample") or {}).get("subsample_id"))
 
+    provenance = {
+        "mode": prompt,
+        "subsample_id": _single_subsample(subsamples),
+        "measured_at": measured,
+    }
+    return figures, provenance
+
+
+def _single_subsample(subsamples: set) -> str | None:
+    """The one subsample id the figures share, or None (and say so) if mixed."""
     if len(subsamples) > 1:
         print(
             f"probe runs mix {len(subsamples)} latency subsamples "
@@ -222,12 +240,142 @@ def probe_ttft(repo: Path, probe_root: Path, prompt: str) -> tuple[dict, dict]:
             "together -- re-measure the roster against one subsample",
             file=sys.stderr,
         )
+    return next(iter(subsamples)) if len(subsamples) == 1 else None
+
+
+def _cost_row(figs: dict, source: dict) -> dict:
+    """One cost.json row from `tutormoments.costing.uncached_cost_figures`."""
+    rates = figs["rates"][figs["model"]]
+    return {
+        "uncached_cost_per_response_usd": round(figs["uncached_cost_per_call_usd"], 8),
+        "prompt_tokens_per_response": round(figs["prompt_tokens_per_call"]),
+        "output_tokens_per_response": round(figs["output_tokens_per_call"]),
+        "n_calls": figs["n_calls"],
+        "rates": {
+            "input_per_mtok": rates["input"],
+            "output_per_mtok": rates["output"],
+            "as_of": rates["as_of"],
+        },
+        "source": source,
+    }
+
+
+def measured_cost(repo: Path, results_root: Path, prompt: str) -> tuple[dict, dict]:
+    """Uncached tutor cost per response per site model id.
+
+    Returns ``({site_id: row}, provenance)``. Two sources, in order, both
+    priced at the checkout's current registry rates:
+
+    1. **A full benchmark run** (`tutormoments.costing.costed_runs`): every
+       run made since usage-vector capture carries its tutor tokens and call
+       count, so a model's cost comes free with the run that scores it, over
+       all its moments rather than a subsample. Token counts do not depend on
+       replay concurrency, so -- unlike latency -- a run is a clean source.
+    2. **The latency probe** (`tutormoments.latency.probe_cost_figures`), for
+       models whose runs predate capture and so cannot be priced.
+
+    A model with neither contributes no row -- "not measured", never 0. Each
+    row's ``source`` says which one it came from.
+    """
+    lat_mod = load_latency_module(repo)
+    if lat_mod is None:
+        return {}, {}
+    from tutormoments import costing  # noqa: PLC0415 -- importable once lat_mod is
+
+    figures, versions = {}, set()
+    for (tutor_model, mode), figs in costing.costed_runs(str(results_root)).items():
+        if mode != prompt:
+            continue
+        source = {
+            "kind": "run",
+            "run_id": figs["run_id"],
+            "n_conversations": figs["n_conversations"],
+        }
+        figures[tutor_model.replace("/", "_")] = _cost_row(figs, source)
+        versions.add(figs["pricing_version"])
+
+    subsamples = set()
+    for (tutor_model, mode), block in lat_mod.probe_runs(str(results_root)).items():
+        site_id = tutor_model.replace("/", "_")
+        if mode != prompt or site_id in figures:
+            continue
+        figs = lat_mod.probe_cost_figures(block)
+        if not figs or figs["uncached_cost_per_call_usd"] is None:
+            continue
+        sub_id = (block.get("subsample") or {}).get("subsample_id")
+        source = {
+            "kind": "probe",
+            "measured_at": (block.get("measurement_environment") or {}).get(
+                "measured_at"
+            ),
+            "subsample_id": sub_id,
+        }
+        figures[site_id] = _cost_row(figs, source)
+        subsamples.add(sub_id)
+        versions.add(figs["pricing_version"])
+
+    # Probe-sourced rows must still share one subsample (run rows each cover
+    # a whole dataset and need no such check).
+    _single_subsample(subsamples)
     provenance = {
         "mode": prompt,
-        "subsample_id": subsamples.pop() if len(subsamples) == 1 else None,
-        "measured_at": measured,
+        "pricing_version": versions.pop() if len(versions) == 1 else None,
     }
     return figures, provenance
+
+
+def cost_rows(rows: list, figures: dict) -> tuple[list, list]:
+    """Join cost figures onto the latency chart's rows.
+
+    Returns ``(models, omitted_names)``. The roster and the y-axis score
+    come from the latency rows, so the two charts plot the same models at the
+    same heights; a probe for a model the site does not list is ignored, and
+    a listed model without a measured cost is named in ``omitted`` rather
+    than plotted at 0. A run of an arm the site does not list is ignored the
+    same way.
+    """
+    models, omitted = [], []
+    for row in rows:
+        fig = figures.get(row["id"])
+        if fig is None:
+            omitted.append(row["name"])
+            continue
+        models.append(
+            {"id": row["id"], "name": row["name"], "score": row["score"], **fig}
+        )
+    return models, omitted
+
+
+def write_cost(repo: Path, results_root: Path, rows: list) -> None:
+    """Write cost.json for the latency chart's rows, or leave it alone."""
+    figures, provenance = measured_cost(repo, results_root, "scaffolding_rigor")
+    models, omitted = cost_rows(rows, figures)
+    if not models:
+        print(
+            "no costable benchmark or probe runs for the site's models — "
+            "skipping cost.json",
+            file=sys.stderr,
+        )
+        return
+    write_json(
+        "cost.json",
+        {
+            "source": (
+                "score as in latency.json. Cost is the uncached list cost per "
+                "tutor response: every prompt token at the model's input rate, "
+                "output and reasoning tokens at its output rate, divided by the "
+                "number of tutor calls. Measured from the model's full "
+                "benchmark run, or from the `tutormoments latency` probe where "
+                "that run predates usage capture (see each row's source). A "
+                "ceiling -- provider prompt caching can cut the input share "
+                "substantially. See docs/cost.md."
+            ),
+            "cost": provenance,
+            "omitted": omitted,
+            "models": models,
+        },
+    )
+    print(f"  cost measured for {len(models)} model(s); omitted: {omitted or 'none'}")
 
 
 def apply_ttft(rows: list, figures: dict) -> int:
@@ -285,6 +433,7 @@ def refresh_ttft_only(repo: Path, probe_root: Path) -> None:
     }
     write_json("latency.json", payload)
     print(f"  ttft_s updated for {n} model(s) from probe runs in {probe_root}")
+    write_cost(repo, probe_root, payload["models"])
 
 
 def build_benchmark_json(repo: Path, probe_root: Path) -> None:
@@ -348,6 +497,7 @@ def build_benchmark_json(repo: Path, probe_root: Path) -> None:
                 "models": lat_models,
             },
         )
+        write_cost(repo, probe_root, lat_models)
 
 
 def build_action_distribution(csv_path: Path, source: str) -> None:
@@ -426,9 +576,9 @@ def main() -> None:
         "--probe-root",
         type=Path,
         default=None,
-        help="results root holding `tutormoments latency` probe runs "
-        "(default: <checkout>/results, where the probe writes unless given "
-        "--results-root)",
+        help="results root holding `tutormoments latency` probe runs and, for "
+        "cost.json, `tutormoments run` benchmark runs (default: "
+        "<checkout>/results, where both write unless given --results-root)",
     )
     ap.add_argument(
         "--action-csv",

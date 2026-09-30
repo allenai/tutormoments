@@ -110,6 +110,16 @@ join them in ([`probe_runs`](../src/tutormoments/latency.py)):
   the tooltip. That script imports this module rather
   than restating its rules; an earlier version restated them and gated on cache hit *rate*,
   which is the one thing this code deliberately refuses to do.
+- **The website's cost chart** — the probe also records usage. Every sample carries its
+  call's own usage vector (`usage`, next to the timings), and `latency.json` has a `cost`
+  block per role: calls counted, mean prompt and output tokens per call, and the uncached
+  list cost per call. The probe is only the *fallback* source for `static/data/cost.json`:
+  token counts do not depend on concurrency, so a model's own benchmark run supplies its
+  cost whenever that run recorded usage vectors, and the script reads a probe (through
+  [`probe_cost_figures`](../src/tutormoments/latency.py)) only for models whose runs
+  predate that capture. Nobody needs to probe a model just to cost it. What the figure is,
+  and why it is uncached, is in [docs/cost.md](cost.md). Probes from before this capture
+  (every probe up to 2026-09) carry no usage and read back as "not measured", never as 0.
 
 Two rules keep the join from quietly comparing unlike things:
 

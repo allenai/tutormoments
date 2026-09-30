@@ -560,6 +560,37 @@ def test_run_conversation_no_timing_leaves_list_empty(monkeypatch):
     assert result.tutor_latencies == [1.0], "latency still recorded"
 
 
+def test_run_conversation_timings_carry_each_calls_own_usage(monkeypatch):
+    """Per-call usage rides on the timing entry; the sum is the transcript's.
+
+    tutor_usage alone loses the per-call split, so any per-response cost
+    would have to assume a call count -- this records it.
+    """
+    from tutormoments.conversation import run_conversation
+
+    scenario = _make_scenario(cut_turn=5)
+    u1 = {"input_uncached": 900, "output": 40, "total": 940, "model": "m"}
+    u2 = {
+        "input_uncached": 10,
+        "cache_read": 900,
+        "output": 60,
+        "total": 970,
+        "model": "m",
+    }
+    tutor_resp = [
+        _resp("T1", usage=u1, timing=_timing()),
+        _resp("[END]", usage=u2, timing=_timing()),
+    ]
+    _patch_all(monkeypatch, tutor_resp, [_resp("S1", timing=_timing())])
+
+    result = run_conversation(scenario, "fake-tutor", max_turns=6)
+
+    assert [t["usage"] for t in result.tutor_timings] == [u1, u2]
+    assert result.tutor_usage["total"] == 940 + 970
+    # A copy, not the response's own dict: later accumulation must not alias.
+    assert result.tutor_timings[0]["usage"] is not u1
+
+
 def test_run_conversation_requests_streaming(monkeypatch):
     """The conversation path must stream, or there is no TTFT to record."""
     from tutormoments import conversation as conv_mod

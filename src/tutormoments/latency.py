@@ -31,12 +31,14 @@ import os
 from pathlib import Path
 
 from tutormoments import conversation, results
+from tutormoments.costing import uncached_cost_figures
 from tutormoments.moments import (
     PROBE_IDS_FILENAME,
     packaged_probe_ids,
     read_probe_ids,
     subsample_id,
 )
+from tutormoments.usage import sum_usage
 
 logger = logging.getLogger(__name__)
 
@@ -175,6 +177,41 @@ def aggregate_timings(timings: list[dict]) -> dict:
         # headline metric for this benchmark.
         "output_tps_mean": round(sum(tps) / len(tps), 2) if tps else None,
     }
+
+
+def aggregate_cost(samples: list[dict]) -> dict | None:
+    """Per-call token means and uncached list cost over probe samples.
+
+    Each sample carries its own call's usage vector (see
+    ``conversation._record_timing``), so ``n_calls`` is an exact count of
+    calls rather than conversations times an assumed turn count -- an
+    ``[END]`` or ``[PROBLEM_CHANGE]`` ends a conversation early, and one call
+    can emit several turns.
+
+    Figures as ``costing.uncached_cost_figures``, at the registry's current
+    rates. Returns None ("not measured", never 0) when there are no samples
+    or any sample lacks a usage vector -- probes written before per-call
+    usage capture, or a registered tutor, which reports none. A partial sum
+    would understate.
+    """
+    if not samples:
+        return None
+    usages = [s.get("usage") for s in samples]
+    if not all(isinstance(u, dict) and u.get("model") for u in usages):
+        return None
+    return uncached_cost_figures(sum_usage(*usages), len(samples))
+
+
+def probe_cost_figures(block: dict) -> dict | None:
+    """The tutor's uncached cost figures from one probe's ``latency.json``.
+
+    Recomputed from ``samples`` at the registry's current rates rather than
+    read off the stored ``cost`` block, which snapshots the rates at probe
+    time: a price change should move the published figure without a
+    re-probe. None for a probe that predates per-call usage capture --
+    readers must show that as "not measured", never as 0.
+    """
+    return aggregate_cost(block.get("samples") or [])
 
 
 def warm_figure_is_publishable(block: dict) -> bool:
@@ -497,6 +534,13 @@ def run_probe(
         "mode": mode,
         "tutor": aggregate_timings(tutor_timings),
         "student": aggregate_timings(student_timings),
+        # A snapshot at probe-time rates; readers reprice from `samples`
+        # (probe_cost_figures). Student samples are not persisted, so its
+        # figure exists only here.
+        "cost": {
+            "tutor": aggregate_cost(tutor_timings),
+            "student": aggregate_cost(student_timings),
+        },
         "subsample": provenance,
         "failed_moments": failed,
         "measurement_environment": measurement_environment(
@@ -574,6 +618,14 @@ def format_probe_summary(block: dict) -> str:
         f"  {'Subsample':<26} "
         f"{sub.get('subsample_source', '-')} ({sub.get('subsample_id', '-')})",
     ]
+    cost = (block.get("cost") or {}).get("tutor") or {}
+    per_call = cost.get("uncached_cost_per_call_usd")
+    if per_call is not None:
+        lines.append(
+            f"  {'Uncached $/1k responses':<26} {per_call * 1000:.3f}"
+            f"  ({cost['prompt_tokens_per_call']:.0f} in /"
+            f" {cost['output_tokens_per_call']:.0f} out tokens per call)"
+        )
     if not sub.get("subsample_complete", True):
         lines.append(
             f"  {'WARNING':<26} {len(sub.get('missing_ids') or [])} frozen id(s) "

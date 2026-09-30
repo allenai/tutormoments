@@ -43,6 +43,35 @@ into the leaderboard column, tutors would be ranked partly by how much the *harn
 judging them. If the tutor figure were quoted as the cost of replication, it would
 understate a run by the scorer's entire bill.
 
+**Uncached tutor cost per response** is the figure the public website plots. It is the
+tutor's list cost with *every* prompt token priced at the full input rate, as if nothing
+were cached, and output plus reasoning tokens at the output rate, divided by the number of
+tutor calls. It exists because the as-run tutor figure above describes our harness as much
+as the model: the cache mix a run produces depends on our client's cache breakpoints, each
+provider's caching mechanics, routing, and TTLs, and on the 2026-09-29 runs it moved the
+per-response cost by up to about 3× in either direction (GPT-5.5 ran 2.7× below its
+uncached cost; GPT-6 Astra, before its explicit breakpoint, ran above it). A tutoring
+provider building conversations turn by turn pays the uncached cost at every session
+start and every cache expiry, and real students pause longer than cache TTLs (Anthropic's
+default is 5 minutes). So the figure is a **ceiling**: provider caching can cut the input
+share substantially, and the site says so.
+
+Two choices in its definition:
+
+- **Per response, not per conversation.** A conversation's length is a benchmark artefact
+  (`max_turns`), and `[END]` or `[PROBLEM_CHANGE]` ends one early. The denominator is the
+  counted tutor calls — one call can emit several turns, so turns are not calls either.
+- **Tokens measured, prices looked up.** The published figure reprices the recorded tokens
+  at the registry's rates when the site data is refreshed, so a price change shows up
+  without a re-measurement. The `as_of` date is shown with it.
+
+It comes from the model's own benchmark run where that run carries usage vectors, and
+from the latency probe only where it does not (see
+[Where the figures appear](#where-the-figures-appear)). Token counts, unlike latency, do
+not depend on replay concurrency, so a full run is a clean source, and a larger one than
+the probe. Because every prompt bucket is priced at the same rate, the figure does not
+depend on the recorded cache split at all.
+
 ## How usage is recorded
 
 Cost here is exact arithmetic over recorded usage, with no estimation anywhere. That is
@@ -138,7 +167,8 @@ longer source transcripts would need this re-checked before its costs are truste
 ## From tokens to dollars
 
 [`costing.py`](../src/tutormoments/costing.py) turns the run summary's `tokens` block into
-the two figures. It is a small set of pure functions:
+the two run figures, and a probe's per-call usage into the uncached one. It is a small set
+of pure functions:
 
 - `cost_usd(usage, rates, batch=)` prices one usage vector against one rate grid. Each
   bucket is priced exactly once, at its own rate. The cache buckets are disjoint from
@@ -163,6 +193,12 @@ the two figures. It is a small set of pure functions:
   is worse than reporting no number.
 - `summary_cost_block(tokens, n_conversations)` packages both figures, the pricing
   version, and the rate snapshot for `summary.json`.
+- `uncached_cost_usd(usage, rates)` prices one vector with `input_uncached`, `cache_read`
+  and `cache_write` all at the `input` rate — their sum is the full prompt, counted once,
+  because the buckets are disjoint — and output plus reasoning at `output`.
+  `role_uncached_cost_usd(usage)` is its provenance-driven wrapper, with the same `null`
+  rules as `role_cost_usd` except the batch one: a list-price figure takes no discount, so
+  the endpoint does not matter.
 
 ## Where the figures appear
 
@@ -186,9 +222,53 @@ on.
 
 `tutormoments report` adds a `tutor_cost_per_conversation` column to the leaderboard
 (markdown, CSV, and the HTML viewer), formatted to four decimal places because
-per-conversation costs are cents. The end-of-run terminal summary prints both figures. The
-public website does not publish cost for now; whether it should is a separate decision,
-deliberately out of scope here.
+per-conversation costs are cents. The end-of-run terminal summary prints both figures.
+
+The public website publishes the uncached per-response figure only, on its cost-vs-
+performance chart, in scaffolding_rigor mode. `website/scripts/refresh-data.py` takes it
+from one of two sources per model, both repriced at the registry's rates at refresh time
+so the chart follows price changes without re-running anything (`cost.json` records the
+`pricing_version` and each model's `as_of`, and each row names its `source`):
+
+1. **The model's benchmark run** ([`costed_runs`](../src/tutormoments/costing.py)). A run's
+   `summary.json` already holds the summed tutor usage (`tokens.tutor`) and the tutor call
+   count (`latency.tutor.n`), built from the same completed transcripts, so cost comes free
+   with the run that scores the model. Eligible runs replayed the whole dataset (no
+   `--sample`) with no failed moments, and their usage must price exactly. A run over
+   transcripts from before usage capture fails the pre-vector check (see below). Among
+   eligible runs for one arm and mode, the newest run id wins.
+2. **The latency probe**, for models whose only runs predate usage capture. Every probe
+   sample now carries its call's usage vector, and `latency.json` gains a `cost` block per
+   role:
+
+   ```json
+   "cost": {
+     "tutor": {
+       "n_calls": 336,
+       "model": "gpt-5.4-mini-2026-03-17",
+       "prompt_tokens_per_call": 6479.2,
+       "output_tokens_per_call": 434.1,
+       "uncached_cost_per_call_usd": 0.0068,
+       "pricing_version": "2026-09-29",
+       "rates": {"gpt-5.4-mini-2026-03-17": {"input": 0.75, "...": "..."}}
+     },
+     "student": {"...": "..."}
+   }
+   ```
+
+   That block is a snapshot at probe-time rates. The website reads the figure through
+   `latency.probe_cost_figures`, which reprices the samples. A probe written before
+   per-call capture (every probe up to 2026-09) has no usage in its samples.
+
+A model with neither source is left off the chart and named in the footnote, never
+plotted at 0. `output_tokens_per_call` includes reasoning on every provider. OpenAI and
+Together already count reasoning inside `output`, and their `reasoning` bucket stays 0, so
+no separate reasoning figure is reported: it would not be comparable across providers.
+
+The two sources agree. On the 2026-09-29 full runs of four arms (GPT-6 Astra, GPT-6 Luna,
+GPT-5.5 without reasoning, DeepSeek-V4-Pro-0813), the uncached per-response cost over just
+the 112 probe moments came within 1% of the full 520 in scaffolding_rigor mode (+0.02% to
++0.99%). Plain mode matched as well, with one exception: DeepSeek-V4-Pro-0813 at +8.3%.
 
 ## Old runs cannot be back-costed
 

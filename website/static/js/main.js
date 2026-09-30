@@ -1,5 +1,5 @@
 /* TutorMoments-Preview site
-   Renders the leaderboard table and the two findings charts from static/data/*.json.
+   Renders the leaderboard table and the findings charts from static/data/*.json.
    Charts are hand-rolled SVG; per-model colors and marker shapes match the paper's
    figures (Okabe-Ito palette; see analysis/working-paper-20260630 in allenai/tutormoments)
    so a model reads the same on the site and in the paper. */
@@ -266,6 +266,133 @@
     }
   }
 
+  /* ---------- cost vs performance scatter ----------
+     x is the uncached list cost per tutor response: every prompt token at
+     the model's input rate, output and reasoning at its output rate, over
+     the counted tutor calls, priced at the registry rates in force when the
+     data was refreshed. Measured from the model's full benchmark run, or
+     from the latency probe where that run predates usage capture; each
+     row's `source` says which, and the tooltip shows it. Uncached because the as-run cost moves with the cache mix
+     our harness happened to get, which describes the harness, not the
+     model. Shown per 1,000 responses: single responses are fractions of a
+     cent. Log scale: costs across models span orders of magnitude. See
+     docs/cost.md in allenai/tutormoments. */
+
+  function fmtUSD(v) {
+    if (v >= 100) return "$" + v.toFixed(0);
+    if (v >= 1) return "$" + v.toFixed(2);
+    return "$" + v.toPrecision(2);
+  }
+
+  // 1-2-5 log ticks: the largest at or below lo through the smallest at or
+  // above hi, so the axis starts and ends on a labelled value.
+  function logTicks(lo, hi) {
+    var all = [];
+    for (var e = Math.floor(Math.log10(lo)) - 1; e <= Math.ceil(Math.log10(hi)); e++) {
+      [1, 2, 5].forEach(function (f) { all.push(f * Math.pow(10, e)); });
+    }
+    var first = all.filter(function (v) { return v <= lo * 1.0001; }).pop();
+    var last = all.filter(function (v) { return v >= hi * 0.9999; })[0];
+    return all.filter(function (v) { return v >= first && v <= last; });
+  }
+
+  function renderCost(data) {
+    var block = document.getElementById("cost-block");
+    var mount = document.getElementById("cost-chart");
+    var models = data.models.filter(function (d) {
+      return typeof d.uncached_cost_per_response_usd === "number" && d.uncached_cost_per_response_usd > 0;
+    });
+    if (!models.length) return; // block stays hidden
+
+    var per1k = function (d) { return d.uncached_cost_per_response_usd * 1000; };
+
+    var W = 920, H = 480;
+    var m = { top: 24, right: 120, bottom: 58, left: 74 };
+    var iw = W - m.left - m.right, ih = H - m.top - m.bottom;
+
+    var costs = models.map(per1k);
+    // A little padding so no marker sits on the axis ends.
+    var ticks = logTicks(Math.min.apply(null, costs) / 1.2, Math.max.apply(null, costs) * 1.2);
+    var cMin = ticks[0], cMax = ticks[ticks.length - 1];
+
+    var yMin = 0.5, yMax = 0.9;
+    var lMin = Math.log10(cMin), lMax = Math.log10(cMax);
+    var x = function (v) { return m.left + ((Math.log10(v) - lMin) / (lMax - lMin)) * iw; };
+    var y = function (v) { return m.top + (1 - (v - yMin) / (yMax - yMin)) * ih; };
+
+    var svg = el("svg", { viewBox: "0 0 " + W + " " + H, role: "img",
+      "aria-label": "Scatter plot of tutoring performance against uncached cost per 1,000 tutor responses, log scale, for "
+        + models.length + " language models" });
+
+    var yi;
+    ticks.forEach(function (t, i) {
+      if (i > 0) {
+        el("line", { x1: x(t), y1: m.top, x2: x(t), y2: m.top + ih, stroke: GRID, "stroke-width": 1 }, svg);
+      }
+      el("text", { x: x(t), y: m.top + ih + 22, "text-anchor": "middle", "font-size": 12, fill: INK_MUTED }, svg)
+        .textContent = fmtUSD(t).replace(/\.00$/, "");
+    });
+    for (yi = 0.5; yi <= 0.901; yi += 0.1) {
+      el("line", { x1: m.left, y1: y(yi), x2: m.left + iw, y2: y(yi), stroke: GRID, "stroke-width": 1 }, svg);
+      el("text", { x: m.left - 10, y: y(yi) + 4, "text-anchor": "end", "font-size": 12, fill: INK_MUTED }, svg)
+        .textContent = yi.toFixed(1);
+    }
+    el("line", { x1: m.left, y1: m.top + ih, x2: m.left + iw, y2: m.top + ih, stroke: INK_MUTED, "stroke-width": 1 }, svg);
+
+    el("text", { x: m.left + iw / 2, y: H - 12, "text-anchor": "middle", "font-size": 13, fill: INK }, svg)
+      .textContent = "Uncached cost per 1,000 tutor responses (US$, log scale)";
+    var yl = el("text", { x: 18, y: m.top + ih / 2, "text-anchor": "middle", "font-size": 13, fill: INK,
+      transform: "rotate(-90 18 " + (m.top + ih / 2) + ")" }, svg);
+    yl.textContent = "Appropriate scaffolding & rigor (mean)";
+
+    // Per-model label placement, tuned once the measured positions are known.
+    var labelLeft = {};
+    var labelBelow = {};
+    models.forEach(function (d) {
+      var s = MODEL_STYLE[d.id] || { color: INK, marker: "square" };
+      var cx = x(per1k(d)), cy = y(d.score);
+      markerNode(s.marker, cx, cy, 8, s.color, svg);
+
+      var left = labelLeft[d.id] || cx > m.left + iw - 20; // keep the rightmost label inside
+      var lx = left ? cx - 14 : cx + 14;
+      var ly = labelBelow[d.id] ? cy + 22 : cy + 4;
+      if (labelBelow[d.id]) lx = cx;
+      el("text", {
+        x: lx, y: ly, "font-size": 12.5, "font-weight": 600, fill: INK,
+        "text-anchor": labelBelow[d.id] ? "middle" : (left ? "end" : "start")
+      }, svg).textContent = d.name;
+
+      var hit = el("circle", { cx: cx, cy: cy, r: 17, fill: "transparent", cursor: "pointer" }, svg);
+      attachHover(hit, function () {
+        var html = '<div class="tt-title">' + d.name + "</div>" +
+          ttRow("Score", d.score.toFixed(3)) +
+          ttRow("Cost per 1,000 responses", fmtUSD(per1k(d)));
+        if (typeof d.prompt_tokens_per_response === "number" && typeof d.output_tokens_per_response === "number") {
+          html += ttRow("Tokens per response, in / out",
+            d.prompt_tokens_per_response.toLocaleString() + " / " + d.output_tokens_per_response.toLocaleString());
+        }
+        if (d.rates) {
+          html += ttRow("List price per MTok, in / out",
+            "$" + d.rates.input_per_mtok + " / $" + d.rates.output_per_mtok + " (" + d.rates.as_of + ")");
+        }
+        if (d.source && typeof d.n_calls === "number") {
+          html += ttRow("Measured over", d.n_calls.toLocaleString() + " responses, " +
+            (d.source.kind === "run" ? "benchmark run" : "latency probe"));
+        }
+        return html;
+      });
+    });
+
+    mount.appendChild(svg);
+
+    var notes = [];
+    var omitted = (data.omitted || []).length;
+    if (omitted) notes.push(omitted + " model(s) omitted: no benchmark or probe run with recorded token usage.");
+    notes.push("Uncached list prices, a ceiling: provider prompt caching can cut the input share substantially.");
+    document.getElementById("cost-footnote").textContent = notes.join(" ");
+    block.hidden = false;
+  }
+
   /* ---------- action distribution strip plot (paper Fig. 4) ---------- */
 
   function fmtPct(v) {
@@ -451,6 +578,10 @@
 
   fetchJSON("./static/data/latency.json").then(renderLatency)
     .catch(function (e) { console.error("latency chart:", e); });
+
+  // Generated by scripts/refresh-data.py; the section stays hidden until it exists.
+  fetchJSON("./static/data/cost.json").then(renderCost)
+    .catch(function () { /* data pending — leave #cost-block hidden */ });
 
   // Generated by scripts/refresh-data.py; the section stays hidden until it exists.
   fetchJSON("./static/data/action_distribution.json").then(renderActions)
