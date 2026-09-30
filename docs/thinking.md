@@ -84,8 +84,15 @@ Provider notes:
 - Gemini `thinking_budget: -1` is model-paced; `0` is off (rejected by
   always-thinking models such as 2.5 Pro). `include_thoughts` defaults to
   true except with budget 0. The 3.x line replaced `thinking_budget` with
-  `thinking_level`; every published 3.x run so far has used the budget `-1`
-  shape.
+  `thinking_level`; the 3.5 Flash arm keeps the budget `-1` shape it was
+  published with, and later 3.x arms state `thinking_level`.
+- Gemini `thinking_level` vocabularies differ by model and there is no off
+  level: 3.6 Flash accepts `minimal`/`low`/`medium`/`high`; 3.7 and 3.8
+  Flash accept only `low`/`medium`/`high` (`minimal` is a 400). Google
+  describes `minimal` as using as few thinking tokens as possible, not as
+  off: on 3.6 Flash (2026-09-30) a smoke ping produced zero thinking tokens,
+  so smoke treats `minimal` like budget `-1` (zero thinking is a WARN, not a
+  FAIL). Any other level is expected to produce thinking.
 - The OpenAI o-series exposes only a depth knob (`reasoning`), never an off
   switch.
 

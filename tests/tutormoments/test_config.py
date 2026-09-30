@@ -49,6 +49,8 @@ def test_packaged_default_config_parses_and_has_expected_roster():
         "claude-sonnet-5",
         "gemini-2.5-pro",
         "gemini-3.5-flash",
+        "gemini-3.8-flash",
+        "gemini-3.6-flash",
         "gpt-5.4-mini-2026-03-17",
         "gpt-5.5-2026-04-23",
         "gpt-5.5-2026-04-23-none",

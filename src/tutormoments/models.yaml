@@ -42,7 +42,7 @@
 
 # Bumped whenever any pricing entry changes; run summaries record it so a
 # published cost stays interpretable after later rate updates.
-pricing_version: "2026-09-29"
+pricing_version: "2026-09-30"
 
 models:
   # --- Anthropic ---
@@ -148,6 +148,30 @@ models:
       cache_write: 0
       batch_multiplier: 0.5
       as_of: "2026-09-16"
+      source: https://ai.google.dev/gemini-api/docs/pricing
+  # 3.6 and 3.8 Flash: promotional rates valid through 2026-12-31. Google's
+  # pricing page states they double on 2027-01-01 (input 1.50, output 7.50,
+  # cache_read 0.15); reprice these entries before costing runs made after
+  # that date.
+  gemini-3.6-flash:
+    provider: gemini
+    pricing:
+      input: 0.75
+      output: 3.75
+      cache_read: 0.075
+      cache_write: 0
+      batch_multiplier: 0.5
+      as_of: "2026-09-30"
+      source: https://ai.google.dev/gemini-api/docs/pricing
+  gemini-3.8-flash:
+    provider: gemini
+    pricing:
+      input: 0.75
+      output: 3.75
+      cache_read: 0.075
+      cache_write: 0
+      batch_multiplier: 0.5
+      as_of: "2026-09-30"
       source: https://ai.google.dev/gemini-api/docs/pricing
 
   # --- OpenAI ---
