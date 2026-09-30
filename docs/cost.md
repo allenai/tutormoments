@@ -54,6 +54,28 @@ live test, OpenAI's automatic cache returned zero cached tokens on an immediate 
 then 5,058 of 5,061 on a probe a few minutes later. Per-call recording handles both cases
 correctly; any assumed rate would handle neither.
 
+Recording the cache mix faithfully doesn't make it a fair one, so where a provider lets the
+client choose cache boundaries, the client places them where the benchmark actually reuses
+prompts. OpenAI's GPT-5.6-and-later models (flagged `explicit_prompt_cache` in
+[`models.yaml`](../src/tutormoments/models.yaml)) put their implicit cache breakpoint at the
+end of the latest message. Earlier models instead cache at fixed 2,048-token intervals. The
+benchmark sends one user message that grows every turn and ends with the role instruction,
+so under implicit caching no request is ever a cached prefix of the next. In the
+2026-09-29 GPT-6 runs this wrote ~98% of every tutor prompt at 1.25× input and read almost
+none back. For flagged models, the client puts the static head in its own text part with an
+explicit breakpoint and sends `prompt_cache_options: {mode: explicit}`. The head is then
+written once per conversation and read on later turns, and the changing tail bills at the
+plain input rate. The model reads the same text either way: the text parts of one message
+render as their concatenation. It also reads the same tokens. A breakpoint forces a token
+break, and the tokenizer merges a turn's closing punctuation with the tail's leading
+newlines (`?\n\n` is one o200k token), so the breakpoint sits at the start of the head's last
+line rather than at its end; that last context turn bills as uncached tail. Checked with
+o200k over all 520 released moments, a breakpoint at the head's end changed the token
+sequence in 511 of them, and the start-of-last-line breakpoint in none.
+`tutormoments smoke` checks the read-back live. GPT-6 tutor
+costs recorded before this change reflect implicit caching (an estimated 2.5× the input
+cost) and are not comparable with later runs.
+
 Each provider reports usage in its own vocabulary, so every LLM call is normalized at the
 client boundary ([`normalize_usage`](../src/tutormoments/client.py)) into one canonical
 vector:
@@ -62,7 +84,7 @@ vector:
 |---|---|
 | `input_uncached` | full input rate |
 | `cache_read` | cache-read rate (roughly 0.1× input) |
-| `cache_write` | cache-write rate (Anthropic meters writes at 1.25× input; 0 where no write premium exists) |
+| `cache_write` | cache-write rate (Anthropic and GPT-5.6-and-later OpenAI models meter writes at 1.25× input; 0 where no write premium exists) |
 | `output` | output rate |
 | `reasoning` | output rate — tracked separately so the information is kept, but no provider prices reasoning tokens differently, so they fold into output when priced |
 | `total` | derived: the sum of the five buckets, giving one consistent definition of "total tokens" |

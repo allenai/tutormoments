@@ -11,6 +11,7 @@ import pytest
 from tutormoments.models import (
     ThinkingConfigError,
     _validate_registry,
+    explicit_prompt_cache,
     get_pricing,
     infer_provider,
     max_output_cap,
@@ -241,6 +242,16 @@ def test_max_output_cap():
     assert max_output_cap("not-registered") is None
 
 
+def test_explicit_prompt_cache_flags_only_message_end_cachers():
+    # GPT-6 caches at message ends (needs explicit breakpoints); GPT-5.5
+    # caches at fixed intervals and rejects them.
+    assert explicit_prompt_cache("gpt-6-astra") is True
+    assert explicit_prompt_cache("gpt-6-luna") is True
+    assert explicit_prompt_cache("gpt-5.5-2026-04-23") is False
+    assert explicit_prompt_cache("claude-opus-4-8") is False
+    assert explicit_prompt_cache("not-registered") is False
+
+
 def test_get_pricing_shape():
     # Populated entries carry the full rate grid plus lookup provenance;
     # empty means "not priced yet", never "free".
@@ -311,6 +322,18 @@ def test_validate_registry_rejects_bad_output_cap():
     bad = _minimal_registry()
     bad["models"]["claude-x"]["max_output_cap"] = -1
     with pytest.raises(ValueError, match="max_output_cap"):
+        _validate_registry(bad)
+
+
+@pytest.mark.parametrize(
+    "provider,value",
+    [("openai", "yes"), ("anthropic", True)],
+)
+def test_validate_registry_rejects_bad_explicit_prompt_cache(provider, value):
+    bad = _minimal_registry()
+    bad["models"]["claude-x"]["provider"] = provider
+    bad["models"]["claude-x"]["explicit_prompt_cache"] = value
+    with pytest.raises(ValueError, match="explicit_prompt_cache"):
         _validate_registry(bad)
 
 
