@@ -15,8 +15,7 @@ layout.
 - `analysis/` — paper notebooks and plots (incl. the taxonomy figures). The
   taxonomy *data generation* lives in the runtime (`tutormoments.taxonomy`); these
   notebooks render its tables.
-- `docs/` — methodology docs for runtime features, kept out of the README to
-  stop it growing without bound (`latency.md`, `cost.md`, `thinking.md`).
+- `docs/` — methodology docs for runtime features (`latency.md`, `cost.md`, `thinking.md`).
 - `tests/` — `tutormoments/` (runtime), `tutormoments_build/`, `analysis/`.
 
 Import rule: build and analysis code may import `tutormoments`; the runtime never
@@ -24,25 +23,17 @@ imports them.
 
 ## Invariants
 
-- This is research code: reproducibility comes first. Doing it right beats
-  doing it fast.
+- This is research code: reproducibility is important.
 - Benchmark-defining code lives in `tutormoments_build/` — `moments_build.py`,
   `moments.schema.json`, and the frozen `balanced_520_ids.json` used in the 
   June 2026 Preview paper. These determine what the benchmark *is*. 
   Changes there can change published results; treat them with care.
 - `src/tutormoments/latency_probe_ids.json` is frozen the same way
   `balanced_520_ids.json` is: committed and never regenerated — re-picking it
-  breaks comparability with every prior latency measurement. It lives in the
-  runtime package (not `tutormoments_build/`) because it is an *output* the
-  runtime reads at measurement time, whereas `balanced_520_ids.json` is an
-  *input* telling the builder which moments to include. Neither file has (or
-  should get) a regeneration command; both stay auditable via tests that
-  recompute them against the released dataset. The *selection rule* stays
-  build-side in `tutormoments_build/latency_subsample.py`.
+  breaks comparability with every prior latency measurement.
 - The `src/tutormoments` runtime consumes released datasets only. It never constructs, filters, or regenerates benchmark data (including student traits — those are frozen in the release).
-- `data/` and `results/` are gitignored and must stay that way. Never commit
-  datasets, transcripts, or run outputs. The datasets are de-identified, but still take care to never commit anything containing student data.
-- All LLM prompts live under consolidated `prompts/{my prompt}.md` directories as standalone markdown files, never inline in Python source. Templates are loaded from disk and filled at call time.
+- `data/` and `results/` are gitignored and must stay that way to allow researchers to generate their own results.
+- All LLM prompts live under consolidated `prompts/{my prompt}.md` directories as standalone markdown files, never inline in Python source. This ensures that they are human readable. Templates are loaded from disk and filled at call time.
 - Every LLM call path records token usage (input/output/total tokens) — this
   is the project's cost-tracking mechanism.
 - The benchmark imposes **no output token cap**: `run_conversation` passes
