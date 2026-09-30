@@ -246,6 +246,25 @@ def test_dynamic_without_evidence_warns_then_fails_strict():
     assert report.results[0].status == FAIL
 
 
+@pytest.mark.parametrize(
+    "level,expected", [("minimal", WARN), ("MINIMAL", WARN), ("high", FAIL)]
+)
+def test_gemini_thinking_level_without_evidence(level, expected):
+    # minimal may legitimately produce zero thinking (like budget -1: WARN);
+    # any other level is a request for thinking, so zero is a FAIL.
+    check = _sync_check("gemini-3.6-flash", {"thinking_level": level})
+    client = _FakeClient(
+        "gemini-3.6-flash",
+        response=SimpleNamespace(
+            text="answer", usage=_usage(provider="gemini", reasoning=0)
+        ),
+    )
+    report = run_smoke(
+        _plan(sync=[check]), client_factory=_factory({"gemini-3.6-flash": client})
+    )
+    assert report.results[0].status == expected
+
+
 def test_openai_reasoning_tokens_are_evidence():
     # OpenAI reports thinking as usage.completion_tokens_details.reasoning_tokens,
     # surfaced by the client as the informational reasoning_tokens key (the

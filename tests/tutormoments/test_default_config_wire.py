@@ -49,6 +49,20 @@ EXPECTED_ARM_WIRE = {
         {"include_thoughts": True, "thinking_budget": -1},
         None,
     ),
+    "gemini-3.8-flash": (
+        "gemini-3.8-flash",
+        None,
+        None,
+        {"include_thoughts": True, "thinking_level": "high"},
+        None,
+    ),
+    "gemini-3.6-flash": (
+        "gemini-3.6-flash",
+        None,
+        None,
+        {"include_thoughts": True, "thinking_level": "minimal"},
+        None,
+    ),
     "gpt-5.4-mini-2026-03-17": ("gpt-5.4-mini-2026-03-17", None, None, None, "high"),
     "gpt-5.5-2026-04-23": ("gpt-5.5-2026-04-23", None, None, None, "high"),
     "deepseek-v4-pro-0813": (

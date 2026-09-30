@@ -225,7 +225,11 @@ def _thinking_expectation(wire) -> str:
             return "off"
         if budget == -1:
             return "optional"
-        return "required"  # positive budget or thinking_level string
+        # minimal asks for as little thinking as possible and may use none
+        # (observed on gemini-3.6-flash); it is not an off switch either.
+        if str(cfgd.get("thinking_level", "")).lower() == "minimal":
+            return "optional"
+        return "required"  # positive budget or low/medium/high level
     if wire.anthropic_thinking is not None:
         kind = wire.anthropic_thinking.get("type")
         if kind == "disabled":

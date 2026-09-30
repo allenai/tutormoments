@@ -24,9 +24,14 @@ benchmark_models:
   claude-sonnet-4-6:       { model: claude-sonnet-4-6, thinking: { type: adaptive }, effort: high, condition: high }
   # Sonnet 5: first Sonnet model with an xhigh effort option.
   claude-sonnet-5:         { model: claude-sonnet-5, thinking: { type: adaptive }, effort: xhigh, condition: xhigh }
-  # Gemini arms run model-paced thinking (thinking_budget -1).
+  # Gemini 2.5 Pro / 3.5 Flash run model-paced thinking (thinking_budget -1).
   gemini-2.5-pro:          { model: gemini-2.5-pro, include_thoughts: true, thinking_budget: -1, condition: dynamic }
   gemini-3.5-flash:        { model: gemini-3.5-flash, include_thoughts: true, thinking_budget: -1, condition: dynamic }
+  # Later 3.x Flash arms use thinking_level (Google's replacement for
+  # thinking_budget). 3.8 Flash accepts low/medium/high (no minimal); 3.6
+  # Flash is the newest Flash that still accepts minimal. See docs/thinking.md.
+  gemini-3.8-flash:        { model: gemini-3.8-flash, include_thoughts: true, thinking_level: high, condition: high }
+  gemini-3.6-flash:        { model: gemini-3.6-flash, include_thoughts: true, thinking_level: minimal, condition: minimal }
   gpt-5.4-mini-2026-03-17: { model: gpt-5.4-mini-2026-03-17, reasoning: high, condition: high }
   gpt-5.5-2026-04-23:      { model: gpt-5.5-2026-04-23, reasoning: high, condition: high }
   # DeepSeek-V4-Pro-0813 (thinking on by default) at Together's documented
