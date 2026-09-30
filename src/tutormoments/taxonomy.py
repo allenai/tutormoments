@@ -897,12 +897,15 @@ def classify_pool(
     total_batches = (len(pending) + batch_size - 1) // batch_size
     if max_batches is not None:
         stop_after = max_batches
-    elif n_done == 0:
-        stop_after = min(first_run_probe, total_batches)
+    elif n_done == 0 and first_run_probe < total_batches:
+        # Only a probe that actually stops short is announced; integrated
+        # runs disable it (first_run_probe=10**9) and classify every batch.
+        stop_after = first_run_probe
         logger.info(
-            "First run with no prior progress -> stopping after %d batches "
-            "as a sanity probe. Re-run to continue.",
+            "First run with no prior progress -> stopping after %d of %d "
+            "batches as a sanity probe. Re-run to continue.",
             stop_after,
+            total_batches,
         )
     else:
         stop_after = total_batches
