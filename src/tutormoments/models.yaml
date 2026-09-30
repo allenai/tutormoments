@@ -9,6 +9,14 @@
 #     fall back to the prefix table in models.py).
 #   max_output_cap: per-model output token ceiling (requests above it are
 #     rejected by the API); omit when the provider default rules.
+#   explicit_prompt_cache: true for OpenAI GPT-5.6-and-later models, whose
+#     implicit cache breakpoint sits at the end of the latest message. The
+#     benchmark sends one user message that grows every turn, so implicit
+#     caching writes the whole prompt (1.25x input) and never reads it back.
+#     Flagged models get prompt_cache_options.mode=explicit plus a breakpoint
+#     after the static head instead; earlier OpenAI models cache at fixed
+#     2,048-token intervals and don't accept explicit breakpoints. Omit
+#     elsewhere. See docs/cost.md.
 #   pricing: per-MTok token costs; empty means "not priced yet", never
 #     "free". A populated entry states list rates in $/MTok for the four
 #     canonical usage buckets -- input (uncached), output (reasoning tokens
@@ -194,6 +202,34 @@ models:
       cache_write: 0
       batch_multiplier: 0.5
       as_of: "2026-09-16"
+      source: https://developers.openai.com/api/docs/pricing
+  # GPT-6 generation meters cache writes at 1.25x input and caches at
+  # message ends, hence explicit_prompt_cache. Undated ids: the
+  # Models API lists no dated snapshots for these (checked 2026-09-29).
+  # <=272k-input tier; larger prompts bill 2x input/cache (1.5x output on
+  # astra) for the full request -- far above this benchmark's ~20k largest
+  # request (see docs/cost.md).
+  gpt-6-astra:
+    provider: openai
+    explicit_prompt_cache: true
+    pricing:
+      input: 10.00
+      output: 50.00
+      cache_read: 1.00
+      cache_write: 12.50
+      batch_multiplier: 0.5
+      as_of: "2026-09-29"
+      source: https://developers.openai.com/api/docs/pricing
+  gpt-6-luna:
+    provider: openai
+    explicit_prompt_cache: true
+    pricing:
+      input: 0.10
+      output: 0.50
+      cache_read: 0.01
+      cache_write: 0.125
+      batch_multiplier: 0.5
+      as_of: "2026-09-29"
       source: https://developers.openai.com/api/docs/pricing
   o1:
     provider: openai

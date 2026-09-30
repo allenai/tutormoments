@@ -15,6 +15,7 @@ from tutormoments.smoke import (
     PASS,
     WARN,
     BatchCheck,
+    CacheCheck,
     SmokePlan,
     SyncCheck,
     build_smoke_plan,
@@ -462,6 +463,91 @@ def test_report_renders_ascii_and_json():
     payload = json.loads(report.to_json())
     assert payload["config_source"] == "tutormoments:default_config.yaml"
     assert payload["results"][0]["status"] == PASS
+
+
+# ---------------------------------------------------------------------------
+# Prompt-cache read-back check (explicit_prompt_cache models)
+# ---------------------------------------------------------------------------
+
+
+def test_build_plan_adds_cache_check_for_explicit_cache_arms(tmp_path):
+    from tutormoments.config import _reset_config_cache
+
+    cfg = tmp_path / "config.yaml"
+    cfg.write_text(
+        """
+providers:
+  openai: { env: OPENAI_API_KEY }
+benchmark_models:
+  luna:   { model: gpt-6-luna, reasoning: none, condition: none }
+  gpt55:  { model: gpt-5.5-2026-04-23, reasoning: none, condition: none }
+defaults: { trials: 1, max_turns: 5 }
+retry:    { max_retries: 5, base_delay: 5 }
+batch:    { timeout: 86400 }
+""",
+        encoding="utf-8",
+    )
+    _reset_config_cache()
+    try:
+        plan = build_smoke_plan(config_path=str(cfg), roles=["tutor"])
+        assert [c.label for c in plan.cache_checks] == ["cache:arm:luna"]
+        assert plan.cache_checks[0].thinking == {"reasoning": "none"}
+        no_sync = build_smoke_plan(
+            config_path=str(cfg), roles=["tutor"], include_sync=False
+        )
+        assert no_sync.cache_checks == []
+    finally:
+        _reset_config_cache()
+
+
+class _SequenceClient(_FakeClient):
+    def __init__(self, model, responses):
+        super().__init__(model)
+        self._responses = list(responses)
+
+    def generate(self, prompt, **kwargs):
+        self.calls.append({"prompt": prompt, **kwargs})
+        return self._responses.pop(0)
+
+
+def _cache_usage(read, written):
+    return SimpleNamespace(
+        text="answer",
+        usage=_usage(provider="openai", cache_read=read, cache_write=written),
+    )
+
+
+@pytest.mark.parametrize(
+    "second,status",
+    [
+        ((1500, 0), PASS),  # head read back, nothing rewritten
+        ((0, 1520), FAIL),  # implicit-style: whole prompt rewritten
+        ((1500, 20), FAIL),  # tail written too: not explicit-only
+    ],
+)
+def test_cache_check_requires_head_read_back(second, status):
+    model = "gpt-6-luna"
+    check = CacheCheck(
+        label="cache:arm:luna",
+        model=model,
+        provider="openai",
+        thinking={"reasoning": "none"},
+    )
+    client = _SequenceClient(model, [_cache_usage(0, 1500), _cache_usage(*second)])
+    report = run_smoke(
+        SmokePlan(sync_checks=[], batch_checks=[], skipped=[], cache_checks=[check]),
+        client_factory=_factory({model: client}),
+    )
+    (row,) = report.results
+    assert row.status == status
+    assert f"call 2 read {second[0]}, wrote {second[1]}" in row.detail
+    # Both calls mirror a tutor turn: same static head, streamed.
+    assert len(client.calls) == 2
+    from tutormoments.resources import resource_text
+
+    head = resource_text("prompts/smoke/cache_head.md")
+    assert [c["cacheable_prefix"] for c in client.calls] == [head, head]
+    assert all(c["stream"] for c in client.calls)
 
 
 def test_cli_smoke_exit_codes(monkeypatch, capsys):

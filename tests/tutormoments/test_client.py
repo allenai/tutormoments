@@ -12,7 +12,9 @@ from tutormoments.client import (
     _build_image_blocks_anthropic,
     _build_image_blocks_gemini,
     _build_image_blocks_openai,
+    _cache_breakpoint_offset,
     _mime_from_path,
+    _openai_user_content,
     _presigned_url,
     _should_use_presigned_url,
     _strip_json_fences,
@@ -1069,6 +1071,152 @@ def test_openai_sync_captures_cache_write_tokens(monkeypatch):
     assert usage["output"] == 5
     assert usage["total"] == 1125
     assert usage["input_tokens"] == 1120  # legacy key untouched
+
+
+# ---------------------------------------------------------------------------
+# Explicit prompt-cache breakpoints (GPT-5.6-and-later OpenAI models)
+# ---------------------------------------------------------------------------
+
+_BP = {"mode": "explicit"}
+
+
+def _openai_create_kwargs(monkeypatch, model, *, cacheable_prefix, stream=False):
+    """Run one OpenAI generate() and return the kwargs sent to the SDK."""
+    monkeypatch.setenv("OPENAI_API_KEY", "sk-test")
+    usage_obj = SimpleNamespace(prompt_tokens=5, completion_tokens=3, total_tokens=8)
+    with patch("openai.OpenAI") as MockOpenAI:
+        client_obj = MagicMock()
+        if stream:
+            delta = SimpleNamespace(content="hi")
+            client_obj.chat.completions.create.return_value = iter(
+                [
+                    SimpleNamespace(choices=[SimpleNamespace(delta=delta)], usage=None),
+                    SimpleNamespace(choices=[], usage=usage_obj),
+                ]
+            )
+        else:
+            client_obj.chat.completions.create.return_value = SimpleNamespace(
+                choices=[SimpleNamespace(message=SimpleNamespace(content="hi"))],
+                usage=usage_obj,
+            )
+        MockOpenAI.return_value = client_obj
+        ModelClient(model).generate(
+            "TAIL",
+            json_mode=False,
+            thinking={"reasoning": "none"},
+            cacheable_prefix=cacheable_prefix,
+            stream=stream,
+        )
+    return client_obj.chat.completions.create.call_args.kwargs
+
+
+@pytest.mark.parametrize("stream", [False, True])
+def test_explicit_cache_model_marks_head_breakpoint(monkeypatch, stream):
+    """Implicit caching on these models breakpoints only the end of the
+    growing message, so nothing is ever read back; the head must end a part
+    of its own carrying an explicit breakpoint, in explicit-only mode."""
+    kwargs = _openai_create_kwargs(
+        monkeypatch, "gpt-6-luna", cacheable_prefix="SYS\nLAST", stream=stream
+    )
+    assert kwargs["messages"] == [
+        {
+            "role": "user",
+            "content": [
+                {"type": "text", "text": "SYS\n", "prompt_cache_breakpoint": _BP},
+                {"type": "text", "text": "LASTTAIL"},
+            ],
+        }
+    ]
+    assert kwargs["prompt_cache_options"] == {"mode": "explicit"}
+
+
+@pytest.mark.parametrize(
+    "head,offset",
+    [
+        # The breakpoint forces a token break, and o200k merges a turn's
+        # closing punctuation with the tail's leading newlines ("?\n\n"), so
+        # it sits before the head's last line, never at the head's end.
+        (
+            "SYS\n\nTurn 1. TUTOR: Hi.\nTurn 2. STUDENT: 4?",
+            len("SYS\n\nTurn 1. TUTOR: Hi.\n"),
+        ),
+        # Trailing newlines are skipped: the break never splits a newline run.
+        ("SYS\nA\nB\n\n", len("SYS\nA\n")),
+        # No newline to break after: no breakpoint.
+        ("one line", 0),
+        ("one line\n", 0),
+    ],
+)
+def test_cache_breakpoint_offset_is_start_of_head_last_line(head, offset):
+    assert _cache_breakpoint_offset(head) == offset
+
+
+def test_explicit_cache_model_single_line_head_caches_nothing(monkeypatch):
+    # No safe break point in the head -> sent like a call with no head.
+    kwargs = _openai_create_kwargs(monkeypatch, "gpt-6-luna", cacheable_prefix="HEAD")
+    assert kwargs["messages"] == [{"role": "user", "content": "HEADTAIL"}]
+    assert kwargs["prompt_cache_options"] == {"mode": "explicit"}
+
+
+def test_explicit_cache_model_without_head_caches_nothing(monkeypatch):
+    # Nothing declared reusable -> explicit mode with no breakpoint, so no
+    # 1.25x write is metered for a prompt that will never be read back.
+    kwargs = _openai_create_kwargs(monkeypatch, "gpt-6-astra", cacheable_prefix=None)
+    assert kwargs["messages"] == [{"role": "user", "content": "TAIL"}]
+    assert kwargs["prompt_cache_options"] == {"mode": "explicit"}
+
+
+def test_earlier_openai_model_keeps_concatenated_prompt(monkeypatch):
+    # GPT-5.5 caches at fixed intervals and has no explicit-breakpoint API:
+    # its request shape must stay exactly as before.
+    kwargs = _openai_create_kwargs(
+        monkeypatch, "gpt-5.5-2026-04-23", cacheable_prefix="HEAD"
+    )
+    assert kwargs["messages"] == [{"role": "user", "content": "HEADTAIL"}]
+    assert "prompt_cache_options" not in kwargs
+
+
+_IMG1 = {"type": "image_url", "image_url": {"url": "img1"}}
+_IMG2 = {"type": "image_url", "image_url": {"url": "img2"}}
+
+
+def _without_breakpoints(parts):
+    """Drop breakpoint marks and re-merge adjacent text parts."""
+    merged = []
+    for part in parts:
+        part = {k: v for k, v in part.items() if k != "prompt_cache_breakpoint"}
+        if part["type"] == "text" and merged and merged[-1]["type"] == "text":
+            merged[-1] = {"type": "text", "text": merged[-1]["text"] + part["text"]}
+        else:
+            merged.append(part)
+    return merged
+
+
+@pytest.mark.parametrize(
+    "head,prompt",
+    [
+        # Breakpoint falls mid-way through a text chunk: that chunk is split.
+        ("intro\n[SCREEN image 1]\nmore head ", "tail\n[SCREEN image 2]\nend"),
+        # Breakpoint falls inside the chunk that ends at image 1's marker.
+        ("intro\n[SCREEN image 1]", "\ntail\n[SCREEN image 2]\nend"),
+        # Marker for image 2 never appears: it is appended after the tail.
+        ("sys\nhead only ", "tail\n[SCREEN image 1]\nend"),
+    ],
+)
+def test_explicit_breakpoint_with_images_keeps_content_order(head, prompt):
+    """The breakpoint may split a text part but must not move any image or
+    text: the unmarked content equals the plain interleave."""
+    blocks = [_IMG1, _IMG2]
+    plain = _openai_user_content(prompt, head, blocks, explicit_cache=False)
+    marked = _openai_user_content(prompt, head, blocks, explicit_cache=True)
+
+    assert _without_breakpoints(marked) == plain
+    flagged = [p for p in marked if "prompt_cache_breakpoint" in p]
+    assert len(flagged) == 1
+    # The marked part ends at the start of the head's last line.
+    before = marked[: marked.index(flagged[0]) + 1]
+    cached = "".join(p["text"] for p in before if p["type"] == "text")
+    assert cached == head[: _cache_breakpoint_offset(head)]
 
 
 def test_together_sync_and_stream_report_identical_vectors(monkeypatch):
