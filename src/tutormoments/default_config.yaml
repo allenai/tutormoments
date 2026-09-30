@@ -29,6 +29,14 @@ benchmark_models:
   gemini-3.5-flash:        { model: gemini-3.5-flash, include_thoughts: true, thinking_budget: -1, condition: dynamic }
   gpt-5.4-mini-2026-03-17: { model: gpt-5.4-mini-2026-03-17, reasoning: high, condition: high }
   gpt-5.5-2026-04-23:      { model: gpt-5.5-2026-04-23, reasoning: high, condition: high }
+  # Same model with reasoning off (reasoning_effort=none); smoke asserts zero
+  # reasoning tokens for this condition.
+  gpt-5.5-2026-04-23-none: { model: gpt-5.5-2026-04-23, reasoning: none, condition: none }
+  # GPT-6 range: top-tier Astra at high, cheapest/fastest Luna with reasoning
+  # off. Undated ids -- OpenAI publishes no dated snapshots for GPT-6 yet, so
+  # the alias may move; config.json records the run date.
+  gpt-6-astra:             { model: gpt-6-astra, reasoning: high, condition: high }
+  gpt-6-luna-none:         { model: gpt-6-luna, reasoning: none, condition: none }
   # DeepSeek-V4-Pro-0813 (thinking on by default) at Together's documented
   # top effort tier. Replaces the DeepSeek-V4-Pro arm, which Together no
   # longer serves serverless. See docs/thinking.md for observed behaviour.

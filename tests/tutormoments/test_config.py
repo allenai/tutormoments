@@ -51,6 +51,9 @@ def test_packaged_default_config_parses_and_has_expected_roster():
         "gemini-3.5-flash",
         "gpt-5.4-mini-2026-03-17",
         "gpt-5.5-2026-04-23",
+        "gpt-5.5-2026-04-23-none",
+        "gpt-6-astra",
+        "gpt-6-luna-none",
         "deepseek-v4-pro-0813",
     }
     assert cfg["benchmark_models"]["claude-opus-4-8"] == {
@@ -63,6 +66,11 @@ def test_packaged_default_config_parses_and_has_expected_roster():
         "model": "gpt-5.5-2026-04-23",
         "reasoning": "high",
         "condition": "high",
+    }
+    assert cfg["benchmark_models"]["gpt-5.5-2026-04-23-none"] == {
+        "model": "gpt-5.5-2026-04-23",
+        "reasoning": "none",
+        "condition": "none",
     }
     assert cfg["benchmark_models"]["deepseek-v4-pro-0813"] == {
         "model": "deepseek-ai/DeepSeek-V4-Pro-0813",
