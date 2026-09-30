@@ -384,6 +384,39 @@ def test_classifier_resume_skips_completed_batches(tmp_path):
     assert second.calls == []
 
 
+@pytest.mark.parametrize(
+    "probe,expected_calls,announced",
+    [(2, 2, True), (3, 3, False), (10**9, 3, False)],
+)
+def test_first_run_probe_announced_only_when_it_stops_short(
+    tmp_path, caplog, probe, expected_calls, announced
+):
+    """The sanity-probe log line appears only when the probe actually stops
+    before the last batch; integrated runs (probe disabled) classify every
+    batch and must not claim they stopped early."""
+    facets = [_mk_facet(f"Statement {i}.", moment_id=f"m{i}") for i in range(3)]
+    client = _FakeClient()
+    with caplog.at_level("INFO", logger="tutormoments.taxonomy"):
+        tx.classify_pool(
+            facets,
+            tmp_path,
+            client=client,
+            model="fake-model",
+            thinking={},
+            batch_size=1,
+            first_run_probe=probe,
+        )
+    assert len(client.calls) == expected_calls
+    probe_msgs = [r.message for r in caplog.records if "sanity probe" in r.message]
+    if announced:
+        assert probe_msgs == [
+            "First run with no prior progress -> stopping after 2 of 3 "
+            "batches as a sanity probe. Re-run to continue."
+        ]
+    else:
+        assert probe_msgs == []
+
+
 def test_classifier_requires_taxonomy_config(tmp_path, monkeypatch):
     """A config without a taxonomy block raises; the classifier must never
     silently substitute its own LM settings (there is no module fallback)."""
