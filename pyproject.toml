@@ -62,6 +62,7 @@ tutormoments = [
 ]
 tutormoments_build = [
     "moments.schema.json",
+    "action_taxonomy.schema.json",
     "prompts/classify/labeller/*.txt",
     "prompts/classify/situation_labeller/*.md",
     "prompts/trait_generator/*.txt",
