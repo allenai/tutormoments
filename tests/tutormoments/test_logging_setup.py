@@ -309,8 +309,13 @@ def test_per_run_log_file_ignores_recycled_worker_thread_id(tmp_path):
             # Ident reuse after a thread exits is up to the OS, so pin the
             # dead worker's ident on the record to make the collision certain.
             record = log.makeRecord(
-                log.name, logging.WARNING, __file__, 0,
-                "record from recycled thread id", (), None,
+                log.name,
+                logging.WARNING,
+                __file__,
+                0,
+                "record from recycled thread id",
+                (),
+                None,
             )
             record.thread = dead_ident[0]
             log.handle(record)
