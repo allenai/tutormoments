@@ -1064,6 +1064,36 @@ def test_trials_3_calls_conversation_n_times(tmp_path):
     assert score_mock.call_count == n_trials
 
 
+def test_run_cell_fails_fast_when_first_trial_replay_all_fails(tmp_path):
+    """trials=3 with every replay failing (e.g. a bad tutor key): raise after
+    trial 1's replay instead of retrying every moment in trials 2 and 3."""
+    from tutormoments.cli import run_cell
+
+    scenarios = list(FIXTURE_SCENARIOS)
+    cfg_mock = _make_run_config_trials(n_trials=3, sample=len(scenarios))
+    conv_mock = MagicMock(side_effect=RuntimeError("401 invalid api key"))
+    score_mock = MagicMock()
+
+    with (
+        patch(_CFG_PATCH, return_value=cfg_mock),
+        patch(_LOAD_PATCH, return_value=_load_result(scenarios)),
+        patch(_CONV_PATCH, new=conv_mock),
+        patch(_SCORE_PATCH, new=score_mock),
+        patch(_TAX_PATCH, return_value=_TAX_RESULT),
+    ):
+        with pytest.raises(RuntimeError, match="No scenarios completed.*trial 1"):
+            run_cell(
+                tutor="claude-opus-4-8",
+                mode="plain",
+                run_cfg=None,
+                date="20260626",
+                results_root=str(tmp_path),
+            )
+
+    assert conv_mock.call_count == len(scenarios)
+    score_mock.assert_not_called()
+
+
 @pytest.mark.parametrize("n_trials", [1, 2])
 def test_run_cell_on_replay_done_fires_once_between_replay_and_scoring(
     tmp_path, n_trials

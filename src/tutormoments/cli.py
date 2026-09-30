@@ -744,7 +744,7 @@ def run_cell(
                 with ThreadPoolExecutor(
                     max_workers=workers,
                     # Workers must adopt this run's log file + [tutor/mode] tag:
-                    # the run.log handler filters by registered thread ids, and
+                    # the run.log handler passes only threads that joined it, and
                     # contextvars don't cross thread boundaries.
                     initializer=bind_worker_logging,
                     initargs=(run_log, cell_tag),
@@ -805,6 +805,15 @@ def run_cell(
                     continue
 
                 to_score.append((scenario, payload, resume_sid))
+
+            # Fail fast: with nothing resumed and nothing replayed, this cell
+            # can't produce a summary, so don't replay the remaining trials
+            # (e.g. a bad tutor key would retry every moment in every trial).
+            if not completed_scenarios and not to_score:
+                raise RuntimeError(
+                    f"No scenarios completed for {tutor}/{mode} trial {trial_idx}; "
+                    f"{counts['failed']} of {counts['attempted']} attempted scenarios failed."
+                )
 
             return {
                 "counts": counts,
