@@ -31,6 +31,7 @@ ROSTER = [
     "gpt-5.4-mini-2026-03-17",
     "gpt-5.5-2026-04-23",
     "gpt-6-astra",
+    "gpt-6-sol",
     "gpt-6-luna",
     "deepseek-ai/DeepSeek-V4-Pro",
     "deepseek-ai/DeepSeek-V4-Pro-0813",
