@@ -4,6 +4,9 @@ Subcommands:
   dataset build-ground-truth  raw human annotations -> per-conversation GT JSON
   dataset build               GT + transcripts + ids -> release dir with moments.jsonl
   dataset validate            check a release dir's moments.jsonl against its manifest
+  dataset build-action-taxonomy
+                              released dataset @ revision -> facet-level A-M
+                              classifications (action_taxonomy.jsonl + manifest)
 
 These create or package the benchmark; the runtime `tutormoments` CLI only
 consumes released datasets.
@@ -223,7 +226,73 @@ def _build_parser() -> argparse.ArgumentParser:
         help="Also write a consolidated <out-dir>.jsonl after building",
     )
 
+    # -- dataset build-action-taxonomy ------------------------------------------
+    at_p = dataset_subs.add_parser(
+        "build-action-taxonomy",
+        help="Classify the released human + benchmark_520 tutor actions (A-M) "
+        "into an action_taxonomy release config",
+        parents=[log_parent],
+    )
+    at_p.add_argument(
+        "--revision",
+        required=True,
+        metavar="SHA",
+        help="Hugging Face dataset commit SHA to read inputs from (no floating HEAD)",
+    )
+    at_p.add_argument(
+        "--out",
+        default="data/action_taxonomy_release",
+        metavar="DIR",
+        help="Output dir: classify/ sidecars + upload/ release files "
+        "(default: data/action_taxonomy_release)",
+    )
+    at_p.add_argument(
+        "--dry-run",
+        action="store_true",
+        dest="dry_run",
+        help="Build the pools and print counts + estimated cost; no API calls or writes",
+    )
+    at_p.add_argument(
+        "--max-batches",
+        type=int,
+        default=None,
+        dest="max_batches",
+        metavar="N",
+        help="Cap classifier batches per pool this run (a small paid probe)",
+    )
+    at_p.add_argument(
+        "--created",
+        default="",
+        metavar="DATE",
+        help="ISO date string for manifest (default: empty)",
+    )
+    at_p.add_argument(
+        "--version",
+        default="0",
+        metavar="VERSION",
+        help="Release version string for manifest (default: 0)",
+    )
+
     return parser
+
+
+def _cmd_build_action_taxonomy(args, command_line: str) -> None:
+    """Dispatch to action_taxonomy; --dry-run writes nothing, not even a log."""
+    from contextlib import nullcontext
+
+    from tutormoments_build.action_taxonomy import _cli_build_action_taxonomy
+
+    log_ctx = (
+        nullcontext()
+        if args.dry_run
+        else per_run_log_file(
+            os.path.join(args.out, "build.log"),
+            current_thread_only=False,
+            header=command_line,
+        )
+    )
+    with log_ctx:
+        _cli_build_action_taxonomy(args)
 
 
 def _cmd_build_ground_truth(args, command_line: str) -> None:
@@ -297,10 +366,12 @@ def main(argv=None) -> None:
         _cli_validate(args)
     elif args.dataset_command == "build-ground-truth":
         _cmd_build_ground_truth(args, command_line)
+    elif args.dataset_command == "build-action-taxonomy":
+        _cmd_build_action_taxonomy(args, command_line)
     else:
         raise SystemExit(
             "Choose a dataset subcommand: build, build-from-run, "
-            "build-ground-truth, or validate"
+            "build-ground-truth, build-action-taxonomy, or validate"
         )
 
 

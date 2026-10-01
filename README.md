@@ -368,8 +368,9 @@ enable:
 - `tutormoments run` writes `results/<run_id>/run.log` per cell, next to
   `config.json` and `summary.json`. The run directory is the complete record
   of the run: what ran, what was resumed, and which moments failed.
-- `tutormoments-build dataset build` / `build-from-run` / `build-ground-truth`
-  write a `build.log` into their output directory (skipped on `--dry-run`).
+- `tutormoments-build dataset build` / `build-from-run` / `build-ground-truth` /
+  `build-action-taxonomy` write a `build.log` into their output directory
+  (skipped on `--dry-run`).
 
 Log files append, so a resumed run continues the same log. In a multi-tutor
 sweep, concurrent cells each write only to their own run's log, and every
@@ -462,6 +463,18 @@ tutormoments-build dataset build-from-run \
   --ids tutormoments_build/balanced_520_ids.json \
   --out data/balanced_520_release \
   --created 2026-07-01
+
+# Released dataset at a pinned Hub commit -> facet-level A-M action classifications
+# for the human tutors and benchmark_520 (writes <out>/upload/: action_taxonomy.jsonl,
+# its schema and manifest, and the updated dataset card). --dry-run prints counts and
+# an estimated cost with no API calls; classification resumes if interrupted.
+tutormoments-build dataset build-action-taxonomy \
+  --revision <40-char dataset commit SHA> \
+  --out data/action_taxonomy_release \
+  --created 2026-10-01
+
+# Compare that build with the paper's frozen distribution CSV and KL table
+python -m tutormoments_build.action_taxonomy_compare --release data/action_taxonomy_release
 ```
 
 `tutormoments_build/balanced_520_ids.json` is the canonical, frozen selection of
