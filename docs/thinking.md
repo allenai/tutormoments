@@ -63,6 +63,12 @@ Provider notes:
   Sonnet 5 and later. Prefer the explicit `thinking: {type: disabled}` for
   "off": the condition then survives a model swap, and smoke can assert it
   (an omitted param has no verifiable expectation and judges as "na").
+- Anthropic Opus 5.5, Fable 5.1 and Sonnet 5.5 have no off switch:
+  `{type: disabled}` is a 400, so their arms state `adaptive` and vary
+  `effort` (`low`..`max`; `low` is the floor). Opus 5.5 defaults to
+  `medium`, not `high`, so its effort must be stated. Sonnet 5.5 also
+  accepts `{type: between_tools}` (thinking only between tool calls); the
+  benchmark makes no tool calls, and the config does not accept that type.
 - Together hybrid reasoners (DeepSeek-V4-Pro-0813) think by default and
   return reasoning in a separate field, reported as `reasoning_tokens`, so
   smoke asserts a stated `reasoning_effort` against it. Together documents

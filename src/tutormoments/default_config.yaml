@@ -24,6 +24,13 @@ benchmark_models:
   claude-sonnet-4-6:       { model: claude-sonnet-4-6, thinking: { type: adaptive }, effort: high, condition: high }
   # Sonnet 5: first Sonnet model with an xhigh effort option.
   claude-sonnet-5:         { model: claude-sonnet-5, thinking: { type: adaptive }, effort: xhigh, condition: xhigh }
+  # Claude 5.x range. Thinking can't be disabled on any of the three
+  # ({type: disabled} is a 400), so effort is the only knob. Opus 5.5
+  # defaults to medium, so effort is always stated. Sonnet 5.5's effort
+  # levels are recalibrated from Sonnet 5; low is its lowest level.
+  claude-opus-5-5:         { model: claude-opus-5-5, thinking: { type: adaptive }, effort: high, condition: high }
+  claude-fable-5-1:        { model: claude-fable-5-1, thinking: { type: adaptive }, effort: high, condition: high }
+  claude-sonnet-5-5:       { model: claude-sonnet-5-5, thinking: { type: adaptive }, effort: low, condition: low }
   # Gemini 2.5 Pro / 3.5 Flash run model-paced thinking (thinking_budget -1).
   gemini-2.5-pro:          { model: gemini-2.5-pro, include_thoughts: true, thinking_budget: -1, condition: dynamic }
   gemini-3.5-flash:        { model: gemini-3.5-flash, include_thoughts: true, thinking_budget: -1, condition: dynamic }
