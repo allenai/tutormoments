@@ -12,7 +12,7 @@
   <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
   <link href="https://fonts.googleapis.com/css2?family=Space+Grotesk:wght@500;700&family=Manrope:wght@400..800&family=Roboto+Mono:wght@400;500&display=swap" rel="stylesheet">
   <!-- bump ?v= when the stylesheet or script changes so browsers drop their cached copy -->
-  <link rel="stylesheet" href="./static/css/site.css?v=7">
+  <link rel="stylesheet" href="./static/css/site.css?v=8">
 </head>
 <body>
 
@@ -74,7 +74,8 @@
         accessible) and moments that called for a <strong>push for rigor</strong> (asking the student to do harder thinking).
         Each score is the share of moments where the model did what the moment called for. The working paper
         reports seven models; the other ten were run since, on the same moments with the same simulated student
-        and scorer. <em>Reasoning</em> gives each model's reasoning setting in its provider's own terms. The <em>plain</em>
+        and scorer. <em>Reasoning</em> lists the reasoning parameters each model was called with, exactly as
+        the benchmark config sends them to its provider. The <em>plain</em>
         prompt just tells the model to tutor well; the <em>evaluation-aware</em> prompt spells out the
         scaffolding-vs-rigor trade-off.
       </p>
@@ -241,6 +242,6 @@
 
 <div class="chart-tooltip" id="chart-tooltip" role="status"></div>
 
-<script src="./static/js/main.js?v=9"></script>
+<script src="./static/js/main.js?v=10"></script>
 </body>
 </html>

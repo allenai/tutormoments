@@ -61,13 +61,15 @@ This regenerates `static/data/{leaderboard,latency,action_distribution,cost}.jso
 
 Where each model's scores come from:
 
-- **Paper models** (the seven in `PAPER_REASONING`, which also holds their reasoning settings
-  from the paper's Appendix D.4) keep the paper's Table 8 numbers: read from
+- **Paper models** (the seven in `PAPER_THINKING`, which also holds the provider-native
+  reasoning parameters they ran with, from the first runtime config) keep the paper's Table 8
+  numbers: read from
   `results/benchmark/_full_combined` when the checkout has it, carried forward from the
   committed `leaderboard.json` otherwise. A later run of the same arm does not replace them.
 - **Every other model** is scored from its newest full `tutormoments run` under the results
   root, one per prompt (`results/<run_id>/summary.json`; no `--sample`, no failed moments).
-  Its reasoning label is read off that run's `config.json`, and each row's `source` names the
+  Its reasoning parameters are read off that run's `config.json` (the resolved arm), exactly
+  as the config states them (`include_thoughts` aside), and each row's `source` names the
   two run ids. A model with only one prompt done keeps its committed row.
 
 Anything the checkout cannot rebuild is carried forward from the committed JSON rather than

@@ -244,7 +244,7 @@ def test_build_keeps_the_paper_rows_it_cannot_rebuild(refresh, site):
 
     lb = _read(site["out"], "leaderboard.json")["models"][0]
     assert lb["eval_aware"] == PAPER_OPUS["eval_aware"]
-    assert lb["reasoning"] == "effort xhigh", "the paper's Appendix D.4 setting"
+    assert lb["reasoning"] == "thinking: adaptive, effort: xhigh", "as configured"
     assert lb["source"] == "paper"
     lat = _read(site["out"], "latency.json")
     row = lat["models"][0]
@@ -293,7 +293,7 @@ def test_build_scores_a_later_model_from_its_full_runs(refresh, site):
     rows = {m["id"]: m for m in _read(site["out"], "leaderboard.json")["models"]}
     sol = rows["gpt-6-sol-none"]
     assert sol["name"] == "GPT-6 Sol"
-    assert sol["reasoning"] == "reasoning effort none"
+    assert sol["reasoning"] == "reasoning: none"
     assert sol["plain"] == {"scaffolding": 0.85, "rigor": 0.2, "avoids_over": 0.575}
     assert sol["eval_aware"] == {
         "scaffolding": 0.95,
@@ -356,18 +356,22 @@ def test_full_runs_takes_the_newest_complete_unsampled_run(refresh, tmp_path):
 @pytest.mark.parametrize(
     "thinking, label",
     [
-        ({"effort": "high", "thinking": {"type": "adaptive"}}, "effort high"),
+        (
+            {"effort": "high", "thinking": {"type": "adaptive"}},
+            "thinking: adaptive, effort: high",
+        ),
+        ({"thinking": {"type": "disabled"}}, "thinking: disabled"),
         (
             {"thinking_level": "minimal", "include_thoughts": True},
-            "thinking level minimal",
+            "thinking_level: minimal",
         ),
-        ({"thinking_budget": -1, "include_thoughts": True}, "thinking budget -1"),
-        ({"reasoning_effort": "max"}, "reasoning effort max"),
-        ({"reasoning": "none"}, "reasoning effort none"),
-        ({}, None),
+        ({"thinking_budget": -1, "include_thoughts": True}, "thinking_budget: -1"),
+        ({"reasoning_effort": "max"}, "reasoning_effort: max"),
+        ({"reasoning": "none"}, "reasoning: none"),
+        ({}, "none sent (model default)"),
     ],
 )
-def test_reasoning_label_uses_the_providers_own_terms(refresh, thinking, label):
+def test_reasoning_label_states_the_configured_parameters(refresh, thinking, label):
     assert refresh.reasoning_label(thinking) == label
 
 

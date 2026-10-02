@@ -178,7 +178,9 @@
     html += "</tr></thead><tbody>";
 
     data.models.forEach(function (d) {
-      html += "<tr><td>" + d.name + '</td><td class="reasoning">' + (d.reasoning || "") + "</td>";
+      // One provider parameter per line, as the config lists them.
+      html += "<tr><td>" + d.name + '</td><td class="reasoning">' +
+        (d.reasoning || "").split(", ").join("<br>") + "</td>";
       prompts.forEach(function (p) {
         metrics.forEach(function (m, i) {
           var v = d[p][m];

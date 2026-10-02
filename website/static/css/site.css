@@ -228,8 +228,8 @@ a:hover { color: var(--pink); text-decoration-color: var(--pink); }
 .table-card td.best { color: var(--pink); font-weight: 700; }
 .table-card th.reasoning, .table-card td.reasoning { text-align: left; }
 .table-card tbody td.reasoning {
-  font-family: var(--font-body);
-  font-size: 0.85rem;
+  font-size: 0.8rem;
+  line-height: 1.4;
   color: var(--ink-soft);
 }
 .table-divider { border-left: 1px solid var(--line); }

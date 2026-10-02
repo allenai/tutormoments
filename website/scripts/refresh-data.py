@@ -79,31 +79,29 @@ MODELS = [
     ("gpt-6-luna-none", "GPT-6 Luna"),
 ]
 
-# The working paper's models and their reasoning settings, as its Appendix D.4
-# states them. Their scores stay the paper's (Table 8): read from
+# The working paper's models and the provider-native reasoning parameters
+# they ran with, as the benchmark config states them. The paper's runs predate
+# `benchmark_models:`, so these are the tutor roster of the first runtime
+# config ("the 7 that ran", 97055d9) in today's key names -- the values the
+# current default_config.yaml still carries for the six arms it keeps.
+# DeepSeek V4 Pro sent no reasoning parameter (`{}`): it reasoned at the
+# model's default. Their scores stay the paper's (Table 8): read from
 # results/benchmark/_full_combined where present, carried forward from the
 # committed leaderboard.json otherwise -- a later run of the same arm does not
 # replace a published number. Every other model is scored from its full
-# benchmark run, its reasoning setting read off that run's config.json.
-PAPER_REASONING = {
-    "claude-opus-4-8": "effort xhigh",
-    "claude-sonnet-4-6": "effort high",
-    "deepseek-ai_DeepSeek-V4-Pro": "reasoning effort high",
-    "gemini-2.5-pro": "thinking budget -1",
-    "gemini-3.5-flash": "thinking budget -1",
-    "gpt-5.5-2026-04-23": "reasoning effort high",
-    "gpt-5.4-mini-2026-03-17": "reasoning effort high",
+# benchmark run, its parameters read off that run's config.json.
+PAPER_THINKING = {
+    "claude-opus-4-8": {"thinking": {"type": "adaptive"}, "effort": "xhigh"},
+    "claude-sonnet-4-6": {"thinking": {"type": "adaptive"}, "effort": "high"},
+    "deepseek-ai_DeepSeek-V4-Pro": {},
+    "gemini-2.5-pro": {"include_thoughts": True, "thinking_budget": -1},
+    "gemini-3.5-flash": {"include_thoughts": True, "thinking_budget": -1},
+    "gpt-5.5-2026-04-23": {"reasoning": "high"},
+    "gpt-5.4-mini-2026-03-17": {"reasoning": "high"},
 }
 
-# Provider-native reasoning keys in a run's resolved tutor config -> the label
-# the leaderboard shows (the wording Appendix D.4 uses).
-REASONING_KEYS = {
-    "effort": "effort",
-    "reasoning": "reasoning effort",
-    "reasoning_effort": "reasoning effort",
-    "thinking_level": "thinking level",
-    "thinking_budget": "thinking budget",
-}
+# Shown when an arm sends no reasoning parameter at all.
+NO_REASONING_PARAM = "none sent (model default)"
 
 # Human reference scores from the paper (Table 8 caption context). Update if the
 # scoring pipeline is re-run over the human transcripts.
@@ -453,17 +451,24 @@ def apply_ttft(rows: list, figures: dict) -> int:
 TTFT_KEYS = ("ttft_s", "ttlt_s", "ttft_first_s", "ttft_later_s")
 
 
-def reasoning_label(thinking: dict) -> str | None:
-    """The leaderboard's reasoning label for a run's resolved tutor thinking
-    block, e.g. ``{"effort": "high", "thinking": {"type": "adaptive"}}`` ->
-    ``"effort high"``. Keys that do not set the amount of reasoning
-    (``include_thoughts``, the adaptive ``thinking`` type) are not shown."""
-    parts = [
-        f"{label} {thinking[key]}"
-        for key, label in REASONING_KEYS.items()
-        if key in thinking
-    ]
-    return ", ".join(parts) or None
+def reasoning_label(thinking: dict) -> str:
+    """The leaderboard's reasoning cell: an arm's provider-native thinking
+    parameters as the config writes them, e.g. ``{"effort": "high",
+    "thinking": {"type": "adaptive"}}`` -> ``"thinking: adaptive, effort:
+    high"``. ``include_thoughts`` is left out: it asks for thought summaries
+    back and does not change how the model reasons."""
+
+    def fmt(v):
+        return str(v).lower() if isinstance(v, bool) else str(v)
+
+    parts = []
+    for key, value in sorted(thinking.items(), key=lambda kv: kv[0] != "thinking"):
+        if key == "include_thoughts":
+            continue
+        if key == "thinking" and isinstance(value, dict) and set(value) == {"type"}:
+            value = value["type"]
+        parts.append(f"{key}: {fmt(value)}")
+    return ", ".join(parts) or NO_REASONING_PARAM
 
 
 def full_runs(results_root: Path) -> dict:
@@ -531,7 +536,7 @@ def _paper_rows(bench: Path, model: str, label: str, ids: set) -> tuple:
     lb = {
         "id": model,
         "name": label,
-        "reasoning": PAPER_REASONING[model],
+        "reasoning": reasoning_label(PAPER_THINKING[model]),
         "source": "paper",
         **scores,
     }
@@ -595,7 +600,7 @@ def build_benchmark_json(repo: Path, probe_root: Path) -> None:
 
     lb_models, lat_models, n_moments, carried = [], [], None, []
     for model, label in MODELS:
-        if model in PAPER_REASONING:
+        if model in PAPER_THINKING:
             lb, lat_row, n = (
                 _paper_rows(bench, model, label, ids)
                 if bench.exists()
@@ -610,8 +615,13 @@ def build_benchmark_json(repo: Path, probe_root: Path) -> None:
                 print(f"  no scores for {model} — leaving it off", file=sys.stderr)
                 continue
             carried.append(model)
-            if model in PAPER_REASONING:
-                lb = {"reasoning": PAPER_REASONING[model], "source": "paper", **lb}
+            if model in PAPER_THINKING:
+                # Always from PAPER_THINKING, so a fix there reaches the page.
+                lb = {
+                    **lb,
+                    "reasoning": reasoning_label(PAPER_THINKING[model]),
+                    "source": "paper",
+                }
             rest = {k: v for k, v in lb.items() if k not in ("id", "name")}
             lb = {"id": model, "name": label, **rest}
         else:
