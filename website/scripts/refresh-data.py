@@ -851,6 +851,156 @@ def build_action_distribution(
     )
 
 
+def _release_lm_facets(tax, path: Path) -> dict:
+    """The paper models' classified facets from the release's
+    action_taxonomy config, per ``(tutor_model, prompt_mode)``.
+
+    These are the paper models' full benchmark_520 replays (~520 moments per
+    cell), classified by the same model, prompt and scheme as every run's
+    taxonomy -- the full-sample counterpart of the paper's ~100-moment cells.
+    Only rows with a category are kept, as a run's classified.csv keeps.
+    """
+    cells: dict = {}
+    for line in path.open(encoding="utf-8"):
+        r = json.loads(line)
+        if r.get("source") != "benchmark_520" or r.get("category") is None:
+            continue
+        cells.setdefault((r["tutor_model"], r["prompt_mode"]), []).append(
+            tax.Facet(
+                moment_id=r["moment_id"],
+                transcript_id=r["transcript_id"],
+                turn_start=r["turn_start"],
+                turn_end=r["turn_end"],
+                statement_index=r["statement_index"],
+                statement=r["statement"],
+                annotation_type="scaffolding",
+                situation_label=r["situation_label"],
+                category=r["category"],
+            )
+        )
+    return cells
+
+
+def _kl_cell(kl: dict) -> dict | None:
+    """One prompt's KL figures from `tutormoments.taxonomy.kl_situation`."""
+    if kl.get("s_r") is None or kl.get("r_s") is None:
+        return None
+    return {
+        "mean": round((kl["s_r"] + kl["r_s"]) / 2, 4),
+        "s_r": round(kl["s_r"], 4),
+        "r_s": round(kl["r_s"], 4),
+        "n_scaffolding": kl["n_scaffolding"],
+        "n_rigor": kl["n_rigor"],
+    }
+
+
+def build_kl(repo: Path, results_root: Path) -> None:
+    """Write kl.json: each model's scaffolding-vs-rigor KL divergence.
+
+    KL(S||R) and KL(R||S) between a tutor's action distributions in
+    scaffolding and in rigor moments, by `tutormoments.taxonomy.kl_situation`
+    (the paper's method: macro % -> pseudo-counts over each situation's
+    moments, add-one smoothing, nats). That smoothing shrinks KL at small n,
+    so every series here is at full sample -- which is why the paper's own
+    table (~50 moments per situation; human 0.179) is not used:
+
+    - paper models: the release's classifications of their full replays
+      (`_release_lm_facets`, pinned to the human reference's revision);
+    - later models: their full runs' own taxonomy/classified.csv;
+    - human tutors: `tutormoments.taxonomy.human_reference()`.
+
+    Anything that cannot be rebuilt (no network, no runs) is carried forward
+    from the committed kl.json.
+    """
+    tax = load_taxonomy_module(repo)
+    if tax is None or not hasattr(tax, "kl_situation"):
+        print(
+            "tutormoments.taxonomy has no kl_situation — skipping kl.json",
+            file=sys.stderr,
+        )
+        return
+    prior_payload, prior = _read_rows("kl.json")
+    dataset, revision = tax.HUMAN_REFERENCE
+
+    try:
+        ref = tax.human_reference()
+        human = {
+            "label": ref["label"],
+            "dataset": ref["dataset"],
+            "revision": ref["revision"],
+            **_kl_cell(ref["kl"]),
+        }
+    except Exception as exc:  # noqa: BLE001 -- the reference is optional; keep the old one
+        print(
+            f"  human KL reference unavailable ({exc}); keeping the committed one",
+            file=sys.stderr,
+        )
+        human = prior_payload.get("human")
+
+    try:
+        release = _release_lm_facets(
+            tax, tax._hf_download(dataset, "action_taxonomy.jsonl", revision)
+        )
+    except Exception as exc:  # noqa: BLE001
+        print(f"  release classifications unavailable ({exc})", file=sys.stderr)
+        release = {}
+    runs = full_runs(results_root)
+    run_prompts = {"plain": "plain", "scaffolding_rigor": "eval_aware"}
+
+    models, carried = [], []
+    for model, label in MODELS:
+        row = None
+        if model in PAPER_THINKING:
+            cells = {
+                key: _kl_cell(tax.kl_situation(release.get((model, mode), [])))
+                for mode, key in run_prompts.items()
+            }
+            if all(cells.values()):
+                row = {"source": {"release": f"{dataset}@{revision}"}, **cells}
+        else:
+            found = {key: runs.get((model, mode)) for mode, key in run_prompts.items()}
+            if all(found.values()):
+                cells = {}
+                for key, cell in found.items():
+                    fp = results_root / cell["run_id"] / "taxonomy" / "classified.csv"
+                    if fp.exists():
+                        cells[key] = _kl_cell(
+                            tax.kl_situation(tax.read_classified_csv(fp))
+                        )
+                if len(cells) == len(found) and all(cells.values()):
+                    row = {
+                        "source": {k: c["run_id"] for k, c in found.items()},
+                        **cells,
+                    }
+        if row is not None:
+            models.append({"id": model, "name": label, **row})
+        elif model in prior:
+            models.append({**prior[model], "name": label})
+            carried.append(model)
+    if carried:
+        print(f"  kl.json carried forward: {', '.join(carried)}")
+    if not models or human is None:
+        print("no KL figures — skipping kl.json", file=sys.stderr)
+        return
+    write_json(
+        "kl.json",
+        {
+            "source": (
+                "Scaffolding-vs-rigor KL divergence of each tutor's action "
+                "distribution (nats), by tutormoments.taxonomy.kl_situation; "
+                "`mean` averages KL(S||R) and KL(R||S). All at full sample: "
+                "paper models from the action_taxonomy release's classifications "
+                "of their full replays, later models from their runs' own "
+                "classifications, human tutors from taxonomy.human_reference(). "
+                "Not comparable to the paper's KL table, which smoothed over "
+                "~50 moments per situation. Generated by scripts/refresh-data.py."
+            ),
+            "human": human,
+            "models": models,
+        },
+    )
+
+
 def main() -> None:
     ap = argparse.ArgumentParser(
         description=__doc__, formatter_class=argparse.RawDescriptionHelpFormatter
@@ -890,6 +1040,7 @@ def main() -> None:
             else repo / "results"
         )
         build_benchmark_json(repo, probe_root)
+        build_kl(repo, probe_root)
 
     csv_path = args.action_csv or (
         repo

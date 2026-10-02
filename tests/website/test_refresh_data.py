@@ -672,3 +672,122 @@ def test_action_distribution_carries_a_later_model_it_cannot_rebuild(
     out = json.loads((out_dir / "action_distribution.json").read_text("utf-8"))
     sol = {m["id"]: m for m in out["models"]}["gpt-6-sol-none"]
     assert sol == {**kept, "name": "GPT-6 Sol"}
+
+
+# ---------------------------------------------------------------------------
+# build_kl
+# ---------------------------------------------------------------------------
+
+
+def _facet_kwargs(moment, situation, letter, i=0):
+    return dict(
+        moment_id=moment,
+        transcript_id="t",
+        turn_start=0,
+        turn_end=1,
+        statement_index=i,
+        statement="s",
+        annotation_type="scaffolding",
+        situation_label=situation,
+        category=letter,
+    )
+
+
+# Per situation: two moments' letters. S leans A, R leans G.
+KL_CELL = {"scaffolding": ("AAB", "AC"), "rigor": ("GG", "GA")}
+
+
+def _kl_facets(taxonomy, prefix=""):
+    return [
+        taxonomy.Facet(**_facet_kwargs(f"{prefix}{sit}{j}", sit, letter, i))
+        for sit, moments in KL_CELL.items()
+        for j, letters in enumerate(moments)
+        for i, letter in enumerate(letters)
+    ]
+
+
+@pytest.fixture
+def kl_env(refresh, tmp_path, monkeypatch):
+    """The runtime's taxonomy with its two network fetches stubbed: the human
+    reference and the release's action_taxonomy.jsonl."""
+    from tutormoments import taxonomy
+
+    release = tmp_path / "action_taxonomy.jsonl"
+    with release.open("w", encoding="utf-8") as fh:
+        for mode in ("plain", "scaffolding_rigor"):
+            for f in _kl_facets(taxonomy):
+                fh.write(
+                    json.dumps(
+                        {
+                            **f.to_dict(),
+                            "source": "benchmark_520",
+                            "tutor_model": "claude-opus-4-8",
+                            "prompt_mode": mode,
+                        }
+                    )
+                    + "\n"
+                )
+            # an excluded facet (no category) must not count
+            fh.write(
+                json.dumps(
+                    {
+                        **_facet_kwargs("x", "rigor", None),
+                        "source": "benchmark_520",
+                        "tutor_model": "claude-opus-4-8",
+                        "prompt_mode": mode,
+                    }
+                )
+                + "\n"
+            )
+    human = {"s_r": 0.5, "r_s": 0.6, "n_scaffolding": 260, "n_rigor": 258}
+    monkeypatch.setattr(
+        taxonomy,
+        "human_reference",
+        lambda: {"label": "h", "dataset": "d", "revision": "r", "kl": human},
+    )
+    monkeypatch.setattr(taxonomy, "_hf_download", lambda *a: release)
+    monkeypatch.setattr(refresh, "OUT_DIR", tmp_path / "data")
+    return taxonomy, tmp_path / "results"
+
+
+def test_build_kl_scores_paper_and_later_models_with_the_runtime(refresh, kl_env):
+    taxonomy, results = kl_env
+    for mode in ("plain", "scaffolding_rigor"):
+        run_id = f"gpt-6-sol-none_{mode}_tutormoments-preview_20261001"
+        _bench_run(results, run_id, tutor="gpt-6-sol-none", mode=mode)
+        (results / run_id / "taxonomy").mkdir()
+        taxonomy.write_classified_csv(
+            _kl_facets(taxonomy), results / run_id / "taxonomy" / "classified.csv"
+        )
+
+    refresh.build_kl(REPO, results)
+
+    out = json.loads((refresh.OUT_DIR / "kl.json").read_text("utf-8"))
+    want = taxonomy.kl_situation(_kl_facets(taxonomy))
+    rows = {m["id"]: m for m in out["models"]}
+    for model in ("claude-opus-4-8", "gpt-6-sol-none"):
+        cell = rows[model]["eval_aware"]
+        assert cell["s_r"] == pytest.approx(want["s_r"], abs=1e-4)
+        assert cell["r_s"] == pytest.approx(want["r_s"], abs=1e-4)
+        assert cell["mean"] == pytest.approx((want["s_r"] + want["r_s"]) / 2, abs=1e-4)
+        assert (cell["n_scaffolding"], cell["n_rigor"]) == (2, 2)
+    dataset, revision = taxonomy.HUMAN_REFERENCE
+    assert rows["claude-opus-4-8"]["source"] == {"release": f"{dataset}@{revision}"}
+    assert rows["gpt-6-sol-none"]["source"]["plain"].startswith("gpt-6-sol-none_plain")
+    assert out["human"]["mean"] == pytest.approx(0.55)
+
+
+def test_build_kl_carries_rows_it_cannot_rebuild(refresh, kl_env):
+    _, results = kl_env
+    refresh.OUT_DIR.mkdir(parents=True)
+    kept = {"id": "gpt-6-sol-none", "name": "old", "plain": {"mean": 0.2}}
+    (refresh.OUT_DIR / "kl.json").write_text(
+        json.dumps({"human": {"mean": 0.55}, "models": [kept]}), encoding="utf-8"
+    )
+
+    refresh.build_kl(REPO, results)  # no runs for gpt-6-sol-none
+
+    out = json.loads((refresh.OUT_DIR / "kl.json").read_text("utf-8"))
+    rows = {m["id"]: m for m in out["models"]}
+    assert rows["gpt-6-sol-none"] == {**kept, "name": "GPT-6 Sol"}
+    assert "claude-opus-4-8" in rows, "rebuilt from the release"

@@ -709,6 +709,105 @@
     draw();
   }
 
+  /* ---------- scaffolding-vs-rigor KL dot plot ----------
+     One row per model, x = the KL divergence between its action
+     distributions in scaffolding and in rigor moments (mean of KL(S||R) and
+     KL(R||S), nats): how much its choice of move depends on what the moment
+     calls for. The dotted line is the human tutors at the same moments.
+     Every series is at full sample; see kl.json's source. */
+
+  function renderKL(data) {
+    var block = document.getElementById("kl-block");
+    var mount = document.getElementById("kl-chart");
+    var tabs = block.querySelectorAll(".chart-tabs button[data-prompt]");
+    var current = "plain";
+    if (!data.models.length || !data.human) return; // block stays hidden
+
+    // One x-axis for both prompts, so switching never rescales.
+    var vmax = data.human.mean;
+    data.models.forEach(function (d) {
+      ["plain", "eval_aware"].forEach(function (p) { if (d[p] && d[p].mean > vmax) vmax = d[p].mean; });
+    });
+    var xMax = Math.ceil((vmax * 1.08) / 0.1) * 0.1;
+
+    function draw() {
+      mount.innerHTML = "";
+      var rows = data.models.filter(function (d) { return d[current]; })
+        .sort(function (a, b) { return b[current].mean - a[current].mean || a.name.localeCompare(b.name); });
+      var rowH = 26;
+      var W = 920;
+      var m = { top: 30, right: 40, bottom: 56, left: 190 };
+      var iw = W - m.left - m.right, ih = rows.length * rowH;
+      var H = m.top + ih + m.bottom;
+      var x = function (v) { return m.left + (v / xMax) * iw; };
+      var rowY = function (i) { return m.top + rowH * (i + 0.5); };
+
+      var svg = el("svg", { viewBox: "0 0 " + W + " " + H, role: "img",
+        "aria-label": "Dot plot of each model's scaffolding-versus-rigor KL divergence, with a dotted line for human tutors" });
+
+      for (var t = 0; t <= xMax + 1e-9; t += 0.1) {
+        el("line", { x1: x(t), y1: m.top, x2: x(t), y2: m.top + ih, stroke: GRID, "stroke-width": 1 }, svg);
+        el("text", { x: x(t), y: m.top + ih + 20, "text-anchor": "middle", "font-size": 12, fill: INK_MUTED }, svg)
+          .textContent = t.toFixed(1);
+      }
+      el("line", { x1: m.left, y1: m.top + ih, x2: m.left + iw, y2: m.top + ih, stroke: INK_MUTED, "stroke-width": 1 }, svg);
+      el("text", { x: m.left + iw / 2, y: H - 12, "text-anchor": "middle", "font-size": 13, fill: INK }, svg)
+        .textContent = "KL divergence, scaffolding vs rigor moments (mean of both directions, nats)";
+
+      // human reference: dotted line down the chart
+      var hx = x(data.human.mean);
+      var hl = el("line", { x1: hx, y1: m.top - 8, x2: hx, y2: m.top + ih, stroke: INK,
+        "stroke-width": 1.6, "stroke-dasharray": "2 4", "stroke-linecap": "round" }, svg);
+      el("text", { x: hx, y: m.top - 14, "text-anchor": "middle", "font-size": 12, "font-weight": 600, fill: INK }, svg)
+        .textContent = "Human tutors " + data.human.mean.toFixed(2);
+      var hhit = el("rect", { x: hx - 8, y: m.top, width: 16, height: ih, fill: "transparent" }, svg);
+      attachHover(hhit, function () {
+        var h = data.human;
+        return '<div class="tt-title">Human tutors</div>' +
+          ttRow("KL, mean", h.mean.toFixed(3)) +
+          ttRow("KL(S‖R) / KL(R‖S)", h.s_r.toFixed(3) + " / " + h.r_s.toFixed(3)) +
+          ttRow("Moments, S / R", h.n_scaffolding + " / " + h.n_rigor);
+      });
+
+      rows.forEach(function (d, i) {
+        var v = d[current], cy = rowY(i), cx = x(v.mean);
+        var s = MODEL_STYLE[d.id] || { color: INK, marker: "square" };
+        el("line", { x1: m.left, y1: cy, x2: cx, y2: cy, stroke: GRID, "stroke-width": 1.5 }, svg);
+        el("text", { x: m.left - 12, y: cy + 4, "text-anchor": "end", "font-size": 12.5, "font-weight": 600, fill: INK }, svg)
+          .textContent = d.name;
+        markerNode(s.marker, cx, cy, 7, s.color, svg);
+        var hit = el("rect", { x: m.left - 180, y: cy - rowH / 2, width: cx - m.left + 196, height: rowH,
+          fill: "transparent", cursor: "pointer" }, svg);
+        attachHover(hit, function () {
+          return '<div class="tt-title">' + d.name + "</div>" +
+            reasoningRow(d.id) +
+            ttRow("KL, mean", v.mean.toFixed(3)) +
+            ttRow("KL(S‖R) / KL(R‖S)", v.s_r.toFixed(3) + " / " + v.r_s.toFixed(3)) +
+            ttRow("Moments, S / R", v.n_scaffolding + " / " + v.n_rigor) +
+            ttRow("Human tutors", data.human.mean.toFixed(3));
+        });
+      });
+
+      mount.appendChild(svg);
+    }
+
+    tabs.forEach(function (btn) {
+      btn.addEventListener("click", function () {
+        current = btn.getAttribute("data-prompt");
+        tabs.forEach(function (b) { b.setAttribute("aria-selected", String(b === btn)); });
+        draw();
+      });
+    });
+
+    document.getElementById("kl-footnote").textContent =
+      "Every series at full sample, about 260 moments per situation, so these values are not comparable to " +
+      "the working paper's KL table, whose add-one smoothing over ~50 moments per situation pulls every " +
+      "value toward zero (human tutors 0.18 there). Paper models from the action-taxonomy release's " +
+      "classifications of their full replays; later models from their own runs.";
+    block.hidden = false;
+    draw();
+  }
+
   /* ---------- animation embed ----------
      The animation page is a fixed 1280x720 stage; scale the iframe to the
      card's width (the card's CSS aspect-ratio keeps the height in step). */
@@ -758,6 +857,10 @@
   // Generated by scripts/refresh-data.py; the section stays hidden until it exists.
   afterLeaderboard("./static/data/cost.json").then(renderCost)
     .catch(function () { /* data pending — leave #cost-block hidden */ });
+
+  // Generated by scripts/refresh-data.py; the section stays hidden until it exists.
+  afterLeaderboard("./static/data/kl.json").then(renderKL)
+    .catch(function () { /* data pending — leave #kl-block hidden */ });
 
   // Generated by scripts/refresh-data.py; the section stays hidden until it exists.
   afterLeaderboard("./static/data/action_distribution.json").then(renderActions)

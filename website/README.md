@@ -26,7 +26,7 @@ docker run --rm -p 8080:8080 tutormoments-web
 
 - `index.html` — the whole page (Ai2-brand styling in `static/css/site.css`)
 - `static/js/main.js` — renders the leaderboard table and the interactive charts from `static/data/*.json`
-- `static/data/` — chart data, all checked in (`leaderboard.json`, `latency.json`, `action_distribution.json`, `cost.json`). If `action_distribution.json` or `cost.json` is absent, its section hides itself
+- `static/data/` — chart data, all checked in (`leaderboard.json`, `latency.json`, `action_distribution.json`, `cost.json`, `kl.json`). If `action_distribution.json`, `cost.json` or `kl.json` is absent, its section hides itself
 - `static/paper/tutormoments-preview.pdf`, `static/animation/index.html` — published copies of the paper and pipeline animation
 - `Dockerfile`, `nginx.conf` — the nginx image Skiff2 builds and runs (serves the static files on port 8080)
 
@@ -93,6 +93,28 @@ prompt and provider tab.
 Add new models to the `MODELS` list in the script, and give them a `MODEL_STYLE` in
 `static/js/main.js`: its `provider` tab, one of the provider's hues, and a marker no other
 model of that provider uses.
+
+### The KL figure
+
+`static/data/kl.json` is each model's scaffolding-vs-rigor KL divergence: KL(S‖R) and
+KL(R‖S) between its action distributions in scaffolding and in rigor moments, and their
+`mean`, which the dot plot shows (the human tutors as a dotted line). All of it comes from
+`tutormoments.taxonomy` (`kl_situation`, `human_reference`; added in allenai/tutormoments#75),
+which uses the paper's method: macro % to pseudo-counts over each situation's moments, add-one
+smoothing, nats.
+
+That smoothing pulls small samples toward uniform, so KL is only comparable at similar n, and
+every series here is at full sample (about 260 moments per situation):
+
+- **paper models**: the `action_taxonomy` release's classifications of their full benchmark_520
+  replays, pinned to the same revision as the human reference;
+- **later models**: their full runs' own `taxonomy/classified.csv`;
+- **human tutors**: `taxonomy.human_reference()`, the human actions at each `moments.jsonl`
+  moment's span (518 moments).
+
+The paper's own KL table (~50 moments per situation, human 0.179) is therefore *not* used and
+not comparable; the chart's footnote says so. Both downloads go through the Hugging Face cache;
+anything the checkout cannot rebuild is carried forward from the committed `kl.json`.
 
 ### The two latency figures
 
