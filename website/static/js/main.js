@@ -150,6 +150,15 @@
     return '<div class="tt-row"><span>' + label + '</span><span class="val">' + value + "</span></div>";
   }
 
+  // Each model's configured reasoning parameters, from leaderboard.json
+  // (the one place refresh-data.py writes them); filled before any chart
+  // renders, so every tooltip can state what the model ran with.
+  var REASONING = {};
+
+  function reasoningRow(id) {
+    return REASONING[id] ? ttRow("Reasoning", REASONING[id]) : "";
+  }
+
   /* ---------- leaderboard ---------- */
 
   // The score the latency and cost charts plot: mean of evaluation-aware
@@ -290,6 +299,7 @@
       var hit = el("circle", { cx: cx, cy: cy, r: 17, fill: "transparent", cursor: "pointer" }, svg);
       attachHover(hit, function () {
         var html = '<div class="tt-title">' + d.name + "</div>" +
+          reasoningRow(d.id) +
           ttRow("Score", d.score.toFixed(3)) +
           ttRow("Time to first answer token", d.ttft_s.toFixed(1) + " s");
         // Split on turn position (turn 1 vs turns 3 and 5), so every model
@@ -406,56 +416,80 @@
       transform: "rotate(-90 18 " + (m.top + ih / 2) + ")" }, svg);
     yl.textContent = "Appropriate scaffolding & rigor (mean)";
 
-    // Frontier as a step line: the best score available without spending
-    // more stays flat until the next frontier model, then rises to it. (A
-    // diagonal between two models would imply options that do not exist.)
+    // Frontier as straight segments between its models, the way Artificial
+    // Analysis draws it. It ends at the top frontier model.
     var frontier = costFrontier(models, per1k);
     var onFrontier = {};
     frontier.forEach(function (d) { onFrontier[d.id] = true; });
-    if (frontier.length > 1) {
-      var path = frontier.map(function (d, i) {
-        var px = x(per1k(d)).toFixed(1), py = y(d.score).toFixed(1);
-        return i === 0 ? "M" + px + " " + py : "H" + px + " V" + py;
-      }).join(" ");
-      // Carry the last step to the plot's right edge: spending more than the
-      // top frontier model buys no better score among these models.
-      path += " H" + (m.left + iw).toFixed(1);
-      el("path", { d: path, fill: "none", stroke: INK_MUTED, "stroke-width": 1.5,
-        "stroke-dasharray": "5 4", "stroke-linejoin": "round" }, svg);
-      var top = frontier[frontier.length - 1];
-      el("text", { x: m.left + iw, y: y(top.score) - 7, "text-anchor": "end", "font-size": 11.5,
-        "font-style": "italic", fill: INK_MUTED }, svg).textContent = "frontier";
+    var segments = [];
+    for (var fi = 1; fi < frontier.length; fi++) {
+      segments.push([x(per1k(frontier[fi - 1])), y(frontier[fi - 1].score),
+        x(per1k(frontier[fi])), y(frontier[fi].score)]);
+    }
+    if (segments.length) {
+      el("path", {
+        d: "M" + segments[0][0].toFixed(1) + " " + segments[0][1].toFixed(1) + " " +
+          segments.map(function (g) { return "L" + g[2].toFixed(1) + " " + g[3].toFixed(1); }).join(" "),
+        fill: "none", stroke: INK_MUTED, "stroke-width": 1.5,
+        "stroke-dasharray": "5 4", "stroke-linejoin": "round"
+      }, svg);
     }
 
-    // Per-model label placement, tuned to the measured positions: the
-    // Claude 5.x cluster sits close enough to crowd side-by-side labels.
-    var labelLeft = {};
-    var labelBelow = { "claude-opus-5-5": true };
-    var labelAbove = { "claude-sonnet-5-5": true };
-    models.forEach(function (d) {
+    // Labels: each model takes the first placement whose box clears the
+    // frontier line, every marker and the labels already placed. A model in
+    // `prefer` tries that side first.
+    var prefer = { "claude-opus-5-5": "below", "claude-sonnet-5-5": "above" };
+    var points = models.map(function (d) { return { d: d, cx: x(per1k(d)), cy: y(d.score) }; });
+    var placed = [];
+
+    function labelBox(side, cx, cy, w) {
+      if (side === "right") return { x0: cx + 14, x1: cx + 14 + w, y0: cy - 7, y1: cy + 7, lx: cx + 14, ly: cy + 4, anchor: "start" };
+      if (side === "left") return { x0: cx - 14 - w, x1: cx - 14, y0: cy - 7, y1: cy + 7, lx: cx - 14, ly: cy + 4, anchor: "end" };
+      if (side === "above") return { x0: cx - w / 2, x1: cx + w / 2, y0: cy - 24, y1: cy - 10, lx: cx, ly: cy - 14, anchor: "middle" };
+      return { x0: cx - w / 2, x1: cx + w / 2, y0: cy + 12, y1: cy + 26, lx: cx, ly: cy + 22, anchor: "middle" };
+    }
+
+    function boxClear(b, self) {
+      if (b.x0 < m.left || b.x1 > W - 4 || b.y0 < 0 || b.y1 > m.top + ih) return false;
+      var hitsSegment = segments.some(function (g) {
+        for (var t = 0; t <= 1; t += 0.02) {
+          var px = g[0] + (g[2] - g[0]) * t, py = g[1] + (g[3] - g[1]) * t;
+          if (px > b.x0 - 2 && px < b.x1 + 2 && py > b.y0 - 2 && py < b.y1 + 2) return true;
+        }
+        return false;
+      });
+      if (hitsSegment) return false;
+      var hitsMarker = points.some(function (p) {
+        return p !== self && p.cx + 9 > b.x0 && p.cx - 9 < b.x1 && p.cy + 9 > b.y0 && p.cy - 9 < b.y1;
+      });
+      if (hitsMarker) return false;
+      return !placed.some(function (o) { return o.x0 < b.x1 && o.x1 > b.x0 && o.y0 < b.y1 && o.y1 > b.y0; });
+    }
+
+    points.forEach(function (p) {
+      var d = p.d, cx = p.cx, cy = p.cy;
       var s = MODEL_STYLE[d.id] || { color: INK, marker: "square" };
-      var cx = x(per1k(d)), cy = y(d.score);
       markerNode(s.marker, cx, cy, 8, s.color, svg);
 
-      // The frontier leaves each of its models rightward and arrives from
-      // below, so their labels go left -- or above, with no room on the left.
-      var above = labelAbove[d.id];
-      var left = labelLeft[d.id] || cx > m.left + iw - 20; // keep the rightmost label inside
-      if (onFrontier[d.id] && !above && !labelBelow[d.id]) {
-        if (cx - 14 - d.name.length * 7 > m.left) left = true;
-        else above = true;
+      var w = d.name.length * 7;
+      var sides = ["right", "left", "above", "below"];
+      if (prefer[d.id]) sides = [prefer[d.id]].concat(sides.filter(function (v) { return v !== prefer[d.id]; }));
+      var box = null;
+      for (var si = 0; si < sides.length && !box; si++) {
+        var cand = labelBox(sides[si], cx, cy, w);
+        if (boxClear(cand, p)) box = cand;
       }
-      var centered = labelBelow[d.id] || above;
-      var lx = centered ? cx : (left ? cx - 14 : cx + 14);
-      var ly = labelBelow[d.id] ? cy + 22 : (above ? cy - 14 : cy + 4);
+      box = box || labelBox(sides[0], cx, cy, w); // nothing clear: fall back to the first choice
+      placed.push(box);
       el("text", {
-        x: lx, y: ly, "font-size": 12.5, "font-weight": 600, fill: INK,
-        "text-anchor": centered ? "middle" : (left ? "end" : "start")
+        x: box.lx, y: box.ly, "font-size": 12.5, "font-weight": 600, fill: INK,
+        "text-anchor": box.anchor
       }, svg).textContent = d.name;
 
       var hit = el("circle", { cx: cx, cy: cy, r: 17, fill: "transparent", cursor: "pointer" }, svg);
       attachHover(hit, function () {
         var html = '<div class="tt-title">' + d.name + "</div>" +
+          reasoningRow(d.id) +
           ttRow("Score", d.score.toFixed(3)) +
           ttRow("Cost per 1,000 responses", fmtUSD(per1k(d)));
         if (typeof d.prompt_tokens_per_response === "number" && typeof d.output_tokens_per_response === "number") {
@@ -475,6 +509,21 @@
       });
     });
 
+    // Name the line once, beside its longest segment, if a clear spot exists.
+    if (segments.length) {
+      var longest = segments.slice().sort(function (g, h) {
+        return Math.hypot(h[2] - h[0], h[3] - h[1]) - Math.hypot(g[2] - g[0], g[3] - g[1]);
+      })[0];
+      var mx = (longest[0] + longest[2]) / 2, my = (longest[1] + longest[3]) / 2;
+      [[0, -12], [0, 16], [-30, -12], [30, 16]].some(function (o) {
+        var b = { x0: mx + o[0] - 22, x1: mx + o[0] + 22, y0: my + o[1] - 10, y1: my + o[1] + 3 };
+        if (!boxClear(b, null)) return false;
+        el("text", { x: mx + o[0], y: my + o[1], "text-anchor": "middle", "font-size": 11.5,
+          "font-style": "italic", fill: INK_MUTED }, svg).textContent = "frontier";
+        return true;
+      });
+    }
+
     mount.appendChild(svg);
 
     var notes = [];
@@ -483,7 +532,7 @@
       notes.push("Not shown, no run with recorded token usage: " + omitted.join(", ") + ".");
     }
     if (frontier.length > 1) {
-      notes.push("Dashed line: the cost-performance frontier, the best score available at or below each cost.");
+      notes.push("Dashed line: the cost-performance frontier, joining the models that nothing cheaper outscores.");
     }
     notes.push("Uncached list prices, a ceiling: provider prompt caching can cut the input share substantially.");
     document.getElementById("cost-footnote").textContent = notes.join(" ");
@@ -609,6 +658,7 @@
           attachHover(hit, function () {
             return '<div class="tt-title">' + c.label + "</div>" +
               ttRow(d.name, fmtPct(v)) +
+              reasoningRow(d.id) +
               (n ? ttRow("Moments classified", n.toLocaleString()) : "") +
               ttRow("Human tutors", fmtPct(c.human));
           });
@@ -691,17 +741,25 @@
 
   /* ---------- boot ---------- */
 
-  fetchJSON("./static/data/leaderboard.json").then(renderLeaderboard)
-    .catch(function (e) { console.error("leaderboard:", e); });
+  // The charts wait for the leaderboard so their tooltips have REASONING;
+  // if it fails they still render, just without that row.
+  var leaderboard = fetchJSON("./static/data/leaderboard.json").then(function (data) {
+    data.models.forEach(function (d) { if (d.reasoning) REASONING[d.id] = d.reasoning; });
+    renderLeaderboard(data);
+  }).catch(function (e) { console.error("leaderboard:", e); });
 
-  fetchJSON("./static/data/latency.json").then(renderLatency)
+  function afterLeaderboard(url) {
+    return leaderboard.then(function () { return fetchJSON(url); });
+  }
+
+  afterLeaderboard("./static/data/latency.json").then(renderLatency)
     .catch(function (e) { console.error("latency chart:", e); });
 
   // Generated by scripts/refresh-data.py; the section stays hidden until it exists.
-  fetchJSON("./static/data/cost.json").then(renderCost)
+  afterLeaderboard("./static/data/cost.json").then(renderCost)
     .catch(function () { /* data pending — leave #cost-block hidden */ });
 
   // Generated by scripts/refresh-data.py; the section stays hidden until it exists.
-  fetchJSON("./static/data/action_distribution.json").then(renderActions)
+  afterLeaderboard("./static/data/action_distribution.json").then(renderActions)
     .catch(function () { /* data pending — leave #actions-block hidden */ });
 })();

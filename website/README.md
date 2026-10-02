@@ -152,10 +152,10 @@ this script after a price change updates the chart; `cost.pricing_version` and e
 `rates.as_of` record which rates were used. A site model with neither source gets no row; it
 is listed in `omitted` and named in the footnote, never plotted at zero. The roster follows
 `latency.json`, so a model must be in `MODELS` to appear. If new points' labels collide,
-adjust the `labelLeft` / `labelBelow` / `labelAbove` maps in `renderCost`.
+add the model to `prefer` in `renderCost`.
 
 The dashed line is the cost-performance frontier, computed in the page from `cost.json`
-(`costFrontier`): the models no other plotted model beats on both cost and score. It is drawn
-as a step (flat to the next frontier model's cost, then up), since that is the best score
-available at or below each cost; a diagonal would imply options that do not exist. Frontier
-models' labels go left of the marker (or above, near the axis) to stay off the line.
+(`costFrontier`): the models no other plotted model beats on both cost and score, joined by
+straight segments as Artificial Analysis draws it. Labels on this chart are placed
+automatically: each takes the first side (right, left, above, below; `prefer` reorders it per
+model) whose box clears the line, the markers and the labels already placed.
