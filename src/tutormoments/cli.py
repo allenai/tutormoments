@@ -1228,6 +1228,14 @@ def _build_parser() -> argparse.ArgumentParser:
         metavar="PATH",
         help="Output file stem (default: leaderboard); writes .md and .csv",
     )
+    report_p.add_argument(
+        "--human-reference-revision",
+        default=None,
+        dest="human_reference_revision",
+        metavar="SHA",
+        help="Full commit SHA of the release the human KL reference row is "
+        "read from (default: the pinned taxonomy.HUMAN_REFERENCE)",
+    )
 
     # -- view subcommand ------------------------------------------------------
     view_p = subs.add_parser(
@@ -1248,14 +1256,22 @@ def _build_parser() -> argparse.ArgumentParser:
         metavar="FILE",
         help="Output HTML file (default: viewer.html)",
     )
+    view_p.add_argument(
+        "--human-reference-revision",
+        default=None,
+        dest="human_reference_revision",
+        metavar="SHA",
+        help="Full commit SHA of the release the human KL reference row is "
+        "read from (default: the pinned taxonomy.HUMAN_REFERENCE)",
+    )
 
-    # taxonomy: standalone (re)generation of action-taxonomy data and headline
-    # tables from a run dir or the ground-truth bundle. All args after
-    # `taxonomy` are forwarded to tutormoments.taxonomy.cli_dispatch (which has its
-    # own classify/headline/run subcommands).
+    # taxonomy: standalone (re)classification of action-taxonomy data from a
+    # run dir or the ground-truth bundle. All args after `taxonomy` are
+    # forwarded to tutormoments.taxonomy.cli_dispatch (which has its own
+    # `classify` subcommand).
     tax_p = subs.add_parser(
         "taxonomy",
-        help="Action-taxonomy data: classify / headline / run (see 'taxonomy -h')",
+        help="Action-taxonomy data: classify (see 'taxonomy -h')",
         add_help=False,
     )
     tax_p.add_argument("args", nargs=argparse.REMAINDER)
@@ -1364,6 +1380,46 @@ def _cmd_smoke(args) -> int:
     return 1 if report_obj.failed else 0
 
 
+def _with_taxonomy_kl(summary: dict, run_id: str, results_root: str) -> dict:
+    """Fill a pre-KL run's `taxonomy.kl` from its classified.csv, in memory.
+
+    Runs from before the summary recorded KL still have the classified facets
+    on disk, so the figure is recomputed (pure Python, no API calls) rather
+    than re-running. summary.json is never rewritten.
+    """
+    tax = summary.get("taxonomy")
+    if isinstance(tax, dict) and tax.get("kl"):
+        return summary
+    classified = os.path.join(results_root, run_id, "taxonomy", "classified.csv")
+    if not os.path.exists(classified):
+        return summary
+    from tutormoments import taxonomy
+
+    try:
+        kl = taxonomy.kl_situation(taxonomy.read_classified_csv(classified))
+    except Exception as e:  # a bad CSV must not sink the whole report
+        logger.warning("Could not compute KL for run %s: %s", run_id, e)
+        return summary
+    tax = tax if isinstance(tax, dict) else {}
+    return {**summary, "taxonomy": {**tax, "kl": kl}}
+
+
+def _load_human_reference(revision: str | None) -> dict | None:
+    """The human-tutor KL reference, or None (with a printed note) on failure.
+
+    Offline with an empty cache, a Hub outage, or a bad revision omits the row;
+    it never stops the report.
+    """
+    from tutormoments import taxonomy
+
+    dataset, pinned = taxonomy.HUMAN_REFERENCE
+    try:
+        return taxonomy.human_reference(dataset, revision or pinned)
+    except Exception as e:
+        print(f"Human reference row omitted ({type(e).__name__}: {e})")
+        return None
+
+
 def _cmd_report(args) -> None:
     """Implement the 'report' subcommand: read all run summaries -> leaderboard md+csv."""
     from pathlib import Path
@@ -1400,7 +1456,7 @@ def _cmd_report(args) -> None:
                 summary["mode"] = cfg_json.get("mode") or (
                     parts[1] if len(parts) > 1 else ""
                 )
-        summaries.append(summary)
+        summaries.append(_with_taxonomy_kl(summary, run_id, args.results_root))
 
     if not summaries:
         print("No run summaries found in: " + args.results_root)
@@ -1420,7 +1476,8 @@ def _cmd_report(args) -> None:
             ", ".join(sorted(sample_ids)),
         )
 
-    markdown, csv_str = report.leaderboard(summaries, probes)
+    human = _load_human_reference(args.human_reference_revision)
+    markdown, csv_str = report.leaderboard(summaries, probes, human)
 
     out_stem = args.out
     md_path = Path(out_stem + ".md")
@@ -1478,9 +1535,9 @@ def _cmd_view(args) -> None:
         summary.setdefault(
             "mode", run_id.split("_")[1] if len(run_id.split("_")) > 1 else ""
         )
-        summaries.append(summary)
+        summaries.append(_with_taxonomy_kl(summary, run_id, args.results_root))
 
-    html = report.view(summaries)
+    html = report.view(summaries, _load_human_reference(args.human_reference_revision))
 
     out_path = Path(args.out)
     out_path.write_text(html, encoding="utf-8")

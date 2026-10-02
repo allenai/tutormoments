@@ -1542,6 +1542,123 @@ def test_report_warns_when_probes_mix_subsamples(tmp_path, caplog):
 
 
 # ---------------------------------------------------------------------------
+# report / view: S-vs-R KL columns and the human reference row
+# ---------------------------------------------------------------------------
+
+_HUMAN_REF = {
+    "label": "balanced_520 human tutors",
+    "dataset": "allenai/tutormoments-preview",
+    "revision": "3bb0c104d65e29facffca7ba864ef10fa22d0e78",
+    "kl": {"s_r": 0.5236, "r_s": 0.5907, "n_scaffolding": 260, "n_rigor": 258},
+}
+
+
+def _report_rows(tmp_path, results_root, *extra):
+    import csv
+
+    from tutormoments.cli import main
+
+    out_stem = str(tmp_path / "leaderboard")
+    main(["report", "--results-root", str(results_root), "--out", out_stem, *extra])
+    with open(out_stem + ".csv", encoding="utf-8") as f:
+        return list(csv.DictReader(f))
+
+
+def test_report_adds_the_human_reference_row_at_the_requested_revision(
+    tmp_path, monkeypatch
+):
+    from tutormoments import taxonomy
+
+    calls = []
+
+    def fake_reference(dataset, revision):
+        calls.append((dataset, revision))
+        return _HUMAN_REF
+
+    monkeypatch.setattr(taxonomy, "human_reference", fake_reference)
+    results_root = tmp_path / "results"
+    _make_fake_run(results_root, "model_alpha_plain_ds_1", "model-alpha", "plain")
+
+    rows = _report_rows(tmp_path, results_root)
+    assert [r["tutor_model"] for r in rows] == [
+        "balanced_520 human tutors",
+        "model-alpha",
+    ]
+    assert rows[0]["kl_s_r"] == "0.524" and rows[0]["n"] == "518"
+    assert calls == [taxonomy.HUMAN_REFERENCE]
+
+    other = "b" * 40
+    _report_rows(tmp_path, results_root, "--human-reference-revision", other)
+    assert calls[-1] == (taxonomy.HUMAN_REFERENCE[0], other)
+
+
+def test_report_omits_the_human_row_when_the_reference_fails(tmp_path, capsys):
+    """Offline (the suite's autouse stub makes every download fail): the row is
+    dropped with a printed note, and the report is still written."""
+    results_root = tmp_path / "results"
+    _make_fake_run(results_root, "model_alpha_plain_ds_1", "model-alpha", "plain")
+
+    rows = _report_rows(tmp_path, results_root)
+    assert [r["tutor_model"] for r in rows] == ["model-alpha"]
+    assert "Human reference row omitted" in capsys.readouterr().out
+
+
+def test_report_fills_kl_for_old_runs_from_classified_csv(tmp_path):
+    """A pre-KL run gets its KL from taxonomy/classified.csv on the fly;
+    summary.json is left untouched."""
+    from tutormoments import taxonomy
+
+    results_root = tmp_path / "results"
+    run_dir = _make_fake_run(
+        results_root, "model_alpha_plain_ds_1", "model-alpha", "plain"
+    )
+    summary_path = run_dir / "summary.json"
+    summary = json.loads(summary_path.read_text("utf-8"))
+    summary["taxonomy"] = {"n_facets": 2, "excluded": 0}
+    summary_path.write_text(json.dumps(summary), encoding="utf-8")
+    before = summary_path.read_text("utf-8")
+
+    def facet(mid, sit, cat):
+        return taxonomy.Facet(
+            moment_id=mid,
+            transcript_id="t",
+            turn_start=0,
+            turn_end=1,
+            statement_index=0,
+            statement="The tutor acts.",
+            annotation_type="scaffolding",
+            situation_label=sit,
+            category=cat,
+        )
+
+    facets = [facet("s1", "scaffolding", "A"), facet("r1", "rigor", "G")]
+    taxonomy.write_classified_csv(facets, run_dir / "taxonomy" / "classified.csv")
+    expected = taxonomy.kl_situation(facets)
+
+    # A second run with no classified.csv stays "-".
+    _make_fake_run(results_root, "model_beta_plain_ds_1", "model-beta", "plain")
+
+    rows = {r["tutor_model"]: r for r in _report_rows(tmp_path, results_root)}
+    assert rows["model-alpha"]["kl_s_r"] == f"{expected['s_r']:.3f}"
+    assert rows["model-alpha"]["kl_r_s"] == f"{expected['r_s']:.3f}"
+    assert rows["model-beta"]["kl_s_r"] == ""
+    assert summary_path.read_text("utf-8") == before
+
+
+def test_view_includes_the_human_reference(tmp_path, monkeypatch):
+    from tutormoments import taxonomy
+    from tutormoments.cli import main
+
+    monkeypatch.setattr(taxonomy, "human_reference", lambda d, r: _HUMAN_REF)
+    results_root = tmp_path / "results"
+    _make_fake_run(results_root, "model_alpha_plain_ds_1", "model-alpha", "plain")
+    out_html = tmp_path / "viewer.html"
+    main(["view", "--results-root", str(results_root), "--out", str(out_html)])
+    html = out_html.read_text(encoding="utf-8")
+    assert "balanced_520 human tutors" in html and "kl_s_r" in html
+
+
+# ---------------------------------------------------------------------------
 # Test 8: view subcommand writes non-empty HTML
 # ---------------------------------------------------------------------------
 

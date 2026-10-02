@@ -746,13 +746,20 @@ def test_leaderboard_joins_probe_ttft_onto_the_matching_cell():
     assert "9.043" in csv_str
 
 
+def _md_row(md: str, prefix: str) -> dict:
+    """{header: cell} for the first Markdown leaderboard row starting with prefix."""
+    lines = md.splitlines()
+    heads = [c.strip() for c in lines[0].strip("|").split("|")]
+    row = next(ln for ln in lines if ln.startswith(prefix))
+    return dict(zip(heads, (c.strip() for c in row.strip("|").split("|"))))
+
+
 def test_leaderboard_dashes_ttft_for_a_cell_with_no_probe():
     """A benchmark run records TTFT too, but under --concurrency. A cell
     without a probe must show nothing rather than borrow that number."""
     md, _ = leaderboard([SUMMARY_A, SUMMARY_B], {})
-    for line in md.splitlines():
-        if line.startswith("| model-"):
-            assert "-" in line.split("|")[8]
+    for prefix in ("| model-alpha", "| model-beta"):
+        assert _md_row(md, prefix)["ttft_p50"] == "-"
 
 
 def test_leaderboard_ttft_join_is_per_mode():
@@ -786,11 +793,10 @@ def test_leaderboard_splits_by_turn_for_a_provider_with_no_cache_reporting():
         )
     }
     md, _ = leaderboard([SUMMARY_A], probes)
-    row = next(line for line in md.splitlines() if line.startswith("| model-alpha"))
-    cells = [c.strip() for c in row.split("|")]
-    assert cells[8] == "14.080"  # ttft_p50
-    assert cells[9] == "14.700"  # ttft_first_p50
-    assert cells[10] == "13.700"  # ttft_later_p50
+    cells = _md_row(md, "| model-alpha")
+    assert cells["ttft_p50"] == "14.080"
+    assert cells["ttft_first_p50"] == "14.700"
+    assert cells["ttft_later_p50"] == "13.700"
 
 
 def test_leaderboard_dashes_the_split_when_a_probe_carries_no_samples():
@@ -798,8 +804,104 @@ def test_leaderboard_dashes_the_split_when_a_probe_carries_no_samples():
     A block without them gets a pooled figure and dashes, not a crash."""
     probes = {("model-alpha", "scaffolding_rigor"): _probe_block(p50_all=7.94)}
     md, _ = leaderboard([SUMMARY_A], probes)
-    row = next(line for line in md.splitlines() if line.startswith("| model-alpha"))
-    cells = [c.strip() for c in row.split("|")]
-    assert cells[8] == "7.940"
-    assert cells[9] == "-"
-    assert cells[10] == "-"
+    cells = _md_row(md, "| model-alpha")
+    assert cells["ttft_p50"] == "7.940"
+    assert cells["ttft_first_p50"] == "-"
+    assert cells["ttft_later_p50"] == "-"
+
+
+# ---------------------------------------------------------------------------
+# S-vs-R KL columns + the human reference row
+# ---------------------------------------------------------------------------
+
+_KL = {"s_r": 0.4123, "r_s": 0.5678, "n_scaffolding": 260, "n_rigor": 258}
+_HUMAN = {
+    "label": "balanced_520 human tutors",
+    "dataset": "allenai/tutormoments-preview",
+    "revision": "3bb0c104d65e29facffca7ba864ef10fa22d0e78",
+    "kl": {"s_r": 0.5236, "r_s": 0.5907, "n_scaffolding": 260, "n_rigor": 258},
+}
+
+
+def _with_kl(summary: dict, kl: dict = _KL) -> dict:
+    return {**summary, "taxonomy": {"n_facets": 10, "kl": kl}}
+
+
+def _csv_rows(csv_str: str) -> list[dict]:
+    import csv
+    import io
+
+    return list(csv.DictReader(io.StringIO(csv_str)))
+
+
+def test_leaderboard_kl_columns_in_md_and_csv():
+    md, csv_str = leaderboard([_with_kl(SUMMARY_A), SUMMARY_B])
+    alpha = _md_row(md, "| model-alpha")
+    assert (alpha["kl_s_r"], alpha["kl_r_s"]) == ("0.412", "0.568")
+    rows = {r["tutor_model"]: r for r in _csv_rows(csv_str)}
+    assert (rows["model-alpha"]["kl_s_r"], rows["model-alpha"]["kl_r_s"]) == (
+        "0.412",
+        "0.568",
+    )
+
+
+def test_leaderboard_kl_dashes_for_runs_without_it():
+    """Pre-KL summaries, failed taxonomy, and a missing situation all show '-'."""
+    no_side = {"s_r": None, "r_s": None, "n_scaffolding": 3, "n_rigor": 0}
+    failed = {**SUMMARY_B, "taxonomy": {"error": "no API key"}}
+    md, csv_str = leaderboard([SUMMARY_A, failed, _with_kl(SUMMARY_NONE, no_side)])
+    for prefix in ("| model-alpha", "| model-beta", "| model-gamma"):
+        cells = _md_row(md, prefix)
+        assert (cells["kl_s_r"], cells["kl_r_s"]) == ("-", "-")
+    for row in _csv_rows(csv_str):
+        assert (row["kl_s_r"], row["kl_r_s"]) == ("", "")
+
+
+def test_leaderboard_human_reference_row_heads_the_table():
+    md, csv_str = leaderboard([_with_kl(SUMMARY_A)], human=_HUMAN)
+    lines = md.splitlines()
+    assert lines[2].startswith("| balanced_520 human tutors |")
+    human = _md_row(md, "| balanced_520 human tutors")
+    assert (human["kl_s_r"], human["kl_r_s"], human["n"]) == ("0.524", "0.591", "518")
+    assert human["appropriate_scaffolding"] == "-"
+    assert human["condition"] == "human_reference"
+    # The note names the pinned source under the table.
+    assert "allenai/tutormoments-preview@3bb0c10" in md
+    rows = _csv_rows(csv_str)
+    assert rows[0]["tutor_model"] == "balanced_520 human tutors"
+    assert (rows[0]["kl_s_r"], rows[0]["appropriate_scaffolding"]) == ("0.524", "")
+    assert rows[1]["tutor_model"] == "model-alpha"
+
+
+def test_leaderboard_without_human_reference_has_no_reference_row():
+    md, csv_str = leaderboard([SUMMARY_A])
+    assert "human tutors" not in md and "human tutors" not in csv_str
+    assert len(_csv_rows(csv_str)) == 1
+
+
+def test_view_embeds_kl_and_the_human_reference():
+    html = view([_with_kl(SUMMARY_A)], human=_HUMAN)
+    assert "kl_s_r" in html and "kl_r_s" in html
+    assert "0.412" in html and "0.568" in html
+    assert "balanced_520 human tutors" in html and "0.524" in html
+    assert "const HUMAN = null" in view([SUMMARY_A])
+
+
+def test_format_run_summary_prints_kl_under_the_action_mix():
+    metrics = dict(SUMMARY_A)
+    metrics["taxonomy"] = {
+        "n_facets": 10,
+        "excluded": 0,
+        "orientation": {"scaffolding": 5, "rigor": 5, "neutral": 0},
+        "kl": _KL,
+    }
+    out = format_run_summary(metrics)
+    assert "KL S||R / R||S (nats)      0.412 / 0.568 (n=260 S, 258 R)" in out
+    assert out.index("Action mix") < out.index("KL S||R")
+    kl_line = next(ln for ln in out.splitlines() if "KL S||R" in ln)
+    assert kl_line.isascii()
+
+    metrics["taxonomy"] = {**metrics["taxonomy"], "kl": {"s_r": None, "r_s": None}}
+    assert "KL S||R" not in format_run_summary(metrics)
+    del metrics["taxonomy"]["kl"]
+    assert "KL S||R" not in format_run_summary(metrics)

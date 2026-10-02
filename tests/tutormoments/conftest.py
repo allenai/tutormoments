@@ -17,3 +17,16 @@ def _clear_client_cache():
     _reset_client_cache()
     yield
     _reset_client_cache()
+
+
+@pytest.fixture(autouse=True)
+def _no_human_reference_download(monkeypatch):
+    """Keep `report` / `view` offline: the human KL reference downloads from
+    the Hub, so it fails here and the row is omitted. Tests that exercise it
+    pass their own `download` (or patch `human_reference`)."""
+    from tutormoments import taxonomy
+
+    def _offline(*_a, **_kw):
+        raise RuntimeError("network disabled in the offline suite")
+
+    monkeypatch.setattr(taxonomy, "_hf_download", _offline)
