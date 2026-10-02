@@ -193,6 +193,11 @@ _LEADERBOARD_COLS = [
     ("appropriate_scaffolding", "appropriate_scaffolding"),
     ("appropriate_rigor", "appropriate_rigor"),
     ("avoids_overscaffold", "avoids_overscaffold"),
+    # From the run's action-taxonomy block: how differently the tutor acts in
+    # scaffolding vs rigor moments, KL(S||R) and KL(R||S) in nats. "-" for
+    # runs with no classified taxonomy.
+    ("kl_s_r", "kl_s_r"),
+    ("kl_r_s", "kl_r_s"),
     # From `tutormoments latency` (serial probe), joined on (tutor_model,
     # mode). ttft_p50 is the headline: pooled over all samples, one number per
     # model. first/later split on turn position -- the first message of a
@@ -231,6 +236,7 @@ def _extract_row(summary: dict, probes: dict | None = None) -> dict:
     lat = (summary.get("latency") or {}).get("tutor") or {}
     tokens = (summary.get("tokens") or {}).get("total") or {}
     cost = summary.get("cost") or {}
+    kl = (summary.get("taxonomy") or {}).get("kl") or {}
 
     over_rate = over.get("rate")
     avoids = (1.0 - over_rate) if isinstance(over_rate, (int, float)) else None
@@ -251,6 +257,8 @@ def _extract_row(summary: dict, probes: dict | None = None) -> dict:
         "appropriate_scaffolding": cal_s.get("score"),
         "appropriate_rigor": cal_r.get("score"),
         "avoids_overscaffold": avoids,
+        "kl_s_r": kl.get("s_r"),
+        "kl_r_s": kl.get("r_s"),
         # Absent unless this cell has a probe run: a benchmark run records
         # TTFT too, but under --concurrency, which distorts it by a
         # model-dependent amount. See docs/latency.md.
@@ -266,6 +274,36 @@ def _extract_row(summary: dict, probes: dict | None = None) -> dict:
         # unpriced, or its usage cannot be priced exactly -- see costing.py.
         "tutor_cost_per_conversation": cost.get("tutor_cost_per_conversation_usd"),
     }
+
+
+def human_reference_row(human: dict) -> dict:
+    """A leaderboard row for the human-tutor KL reference.
+
+    *human* is `tutormoments.taxonomy.human_reference`'s result. Only the
+    identity, n (moments with classified actions) and the two KL columns are
+    filled; every other column is "-".
+    """
+    kl = human.get("kl") or {}
+    return {
+        "tutor_model": human.get("label", ""),
+        "condition": "human_reference",
+        "mode": "",
+        "n": (kl.get("n_scaffolding") or 0) + (kl.get("n_rigor") or 0),
+        "kl_s_r": kl.get("s_r"),
+        "kl_r_s": kl.get("r_s"),
+    }
+
+
+def human_reference_note(human: dict) -> str:
+    """One line naming where the human reference row comes from."""
+    kl = human.get("kl") or {}
+    return (
+        f"Human reference ({human.get('label', '')}): human-tutor actions at each "
+        f"moment's span, annotators pooled, from {human.get('dataset')}@"
+        f"{str(human.get('revision'))[:7]} action_taxonomy; "
+        f"{kl.get('n_scaffolding', 0)} scaffolding / {kl.get('n_rigor', 0)} rigor "
+        "moments. KL is in nats, add-one smoothed over each side's moments."
+    )
 
 
 def _fmt_md(v) -> str:
@@ -295,7 +333,9 @@ def _fmt_usd(v, *, none: str) -> str:
     return f"{v:.4f}"
 
 
-def leaderboard(runs: list, probes: dict | None = None) -> tuple:
+def leaderboard(
+    runs: list, probes: dict | None = None, human: dict | None = None
+) -> tuple:
     """Build a leaderboard Markdown table and CSV from a list of run summaries.
 
     Args:
@@ -305,6 +345,9 @@ def leaderboard(runs: list, probes: dict | None = None) -> tuple:
         probes: optional ``{(tutor_model, mode): latency.json block}`` from
               `tutormoments.latency.probe_runs`, supplying the TTFT columns.
               Cells with no probe show "-".
+        human: optional `tutormoments.taxonomy.human_reference` result. When
+              given, a human-tutor reference row heads the table (KL columns
+              only) and the Markdown names its source under the table.
 
     Returns:
         (markdown_table: str, csv_str: str)
@@ -312,7 +355,7 @@ def leaderboard(runs: list, probes: dict | None = None) -> tuple:
     Columns (the paper's three metrics under the paper's names, plus
     identity, TTFT, and latency/token diagnostics):
         tutor_model, mode, n, appropriate_scaffolding, appropriate_rigor,
-        avoids_overscaffold, ttft_p50, ttft_first_p50, ttft_later_p50,
+        avoids_overscaffold, kl_s_r, kl_r_s, ttft_p50, ttft_first_p50, ttft_later_p50,
         tutor_lat_p50, tutor_lat_p95, tokens_total, tutor_cost_per_conversation
 
     Two different latency measurements sit side by side here, deliberately:
@@ -339,6 +382,8 @@ def leaderboard(runs: list, probes: dict | None = None) -> tuple:
         return (v is None, -(v if isinstance(v, (int, float)) else 0.0))
 
     rows.sort(key=_sort_key)
+    if human is not None:
+        rows.insert(0, human_reference_row(human))
 
     col_keys = [k for k, _ in _LEADERBOARD_COLS]
     col_heads = [h for _, h in _LEADERBOARD_COLS]
@@ -353,6 +398,8 @@ def leaderboard(runs: list, probes: dict | None = None) -> tuple:
             for k in col_keys
         ]
         md_lines.append("| " + " | ".join(cells) + " |")
+    if human is not None:
+        md_lines += ["", human_reference_note(human)]
     markdown = "\n".join(md_lines)
 
     # --- CSV ---
@@ -469,6 +516,12 @@ def format_run_summary(
             pct = 100.0 * orient.get(key, 0) / n_facets
             parts.append(f"{key} {pct:.0f}%")
         lines.append(f"  {'Action mix':<26} {'  '.join(parts)}")
+        kl = tax.get("kl") or {}
+        if kl.get("s_r") is not None and kl.get("r_s") is not None:
+            lines.append(
+                f"  {'KL S||R / R||S (nats)':<26} {kl['s_r']:.3f} / {kl['r_s']:.3f} "
+                f"(n={kl.get('n_scaffolding', 0)} S, {kl.get('n_rigor', 0)} R)"
+            )
 
     if row.get("tutor_lat_p50") is not None or row.get("tutor_lat_p95") is not None:
         lines.append(
@@ -497,7 +550,7 @@ def format_run_summary(
 # ---------------------------------------------------------------------------
 
 
-def view(runs: list) -> str:
+def view(runs: list, human: dict | None = None) -> str:
     """Build a self-contained HTML viewer for a list of run summaries.
 
     The viewer embeds the run data as JSON and renders model/mode selectors
@@ -505,6 +558,8 @@ def view(runs: list) -> str:
 
     Args:
         runs: list of run summary dicts.
+        human: optional `tutormoments.taxonomy.human_reference` result,
+            shown as a reference row above the runs (never filtered out).
 
     Returns:
         self-contained HTML string (utf-8 safe, no external dependencies).
@@ -530,6 +585,8 @@ def view(runs: list) -> str:
                 "appropriate_scaffolding": _safe(row["appropriate_scaffolding"]),
                 "appropriate_rigor": _safe(row["appropriate_rigor"]),
                 "avoids_overscaffold": _safe(row["avoids_overscaffold"]),
+                "kl_s_r": _safe(row["kl_s_r"]),
+                "kl_r_s": _safe(row["kl_r_s"]),
                 "tutor_lat_p50": _safe(row["tutor_lat_p50"]),
                 "tutor_lat_p95": _safe(row["tutor_lat_p95"]),
                 "tokens_total": row["tokens_total"],
@@ -540,6 +597,14 @@ def view(runs: list) -> str:
         )
 
     blob = _json.dumps(payload_runs, ensure_ascii=True)
+    human_row = None
+    if human is not None:
+        h = human_reference_row(human)
+        human_row = {
+            **{k: _safe(v) for k, v in h.items()},
+            "note": human_reference_note(human),
+        }
+    human_blob = _json.dumps(human_row, ensure_ascii=True)
 
     html = (
         r"""<!DOCTYPE html>
@@ -568,6 +633,8 @@ tr:hover td { background: #f9f9fc; }
 .num { text-align: right; font-variant-numeric: tabular-nums; }
 .top { background: #f0fff4 !important; }
 .none-val { color: #bbb; }
+.human td { background: #f4f6ff; font-style: italic; }
+.note { font-size: 12px; color: #666; margin-top: 10px; }
 .score-high { color: #155724; font-weight: 700; }
 .score-mid  { color: #856404; }
 .score-low  { color: #721c24; }
@@ -593,6 +660,8 @@ tr:hover td { background: #f9f9fc; }
       <th class="num">appropriate_scaffolding</th>
       <th class="num">appropriate_rigor</th>
       <th class="num">avoids_overscaffold</th>
+      <th class="num">kl_s_r</th>
+      <th class="num">kl_r_s</th>
       <th class="num">tutor_lat_p50</th>
       <th class="num">tutor_lat_p95</th>
       <th class="num">tokens_total</th>
@@ -601,10 +670,14 @@ tr:hover td { background: #f9f9fc; }
   </thead>
   <tbody id="lb-body"></tbody>
 </table>
+<p id="human-note" class="note"></p>
 
 <script>
 const RUNS = """
         + blob
+        + r""";
+const HUMAN = """
+        + human_blob
         + r""";
 
 function fmt(v, places) {
@@ -620,7 +693,7 @@ function scoreClass(v) {
   return 'score-low';
 }
 
-function buildRow(r, isTop) {
+function buildRow(r, isTop, rowClass) {
   function cell(v, cls, places) {
     const fv = fmt(v, places);
     const sc = (typeof v === 'number') ? scoreClass(v) : '';
@@ -628,7 +701,7 @@ function buildRow(r, isTop) {
     if (fv === null) return '<td class="num none-val">-</td>';
     return '<td class="' + classes + '">' + fv + '</td>';
   }
-  const rowCls = isTop ? ' class="top"' : '';
+  const rowCls = rowClass ? ' class="' + rowClass + '"' : (isTop ? ' class="top"' : '');
   return (
     '<tr' + rowCls + '>' +
     '<td>' + (r.tutor_model || '') + '</td>' +
@@ -638,6 +711,8 @@ function buildRow(r, isTop) {
     cell(r.appropriate_scaffolding, '') +
     cell(r.appropriate_rigor, '') +
     cell(r.avoids_overscaffold, '') +
+    cell(r.kl_s_r, '') +
+    cell(r.kl_r_s, '') +
     cell(r.tutor_lat_p50, '') +
     cell(r.tutor_lat_p95, '') +
     cell(r.tokens_total, '', 0) +
@@ -665,7 +740,8 @@ function render() {
     return bv - av;
   });
   const body = document.getElementById('lb-body');
-  body.innerHTML = filtered.map((r, i) => buildRow(r, i === 0 && filtered.length > 1)).join('');
+  const humanRow = HUMAN ? buildRow(HUMAN, false, 'human') : '';
+  body.innerHTML = humanRow + filtered.map((r, i) => buildRow(r, i === 0 && filtered.length > 1)).join('');
 }
 
 // Populate filter dropdowns
@@ -685,6 +761,7 @@ document.getElementById('model-filter').addEventListener('change', render);
 document.getElementById('condition-filter').addEventListener('change', render);
 document.getElementById('mode-filter').addEventListener('change', render);
 
+if (HUMAN) document.getElementById('human-note').textContent = HUMAN.note;
 render();
 </script>
 </body>
