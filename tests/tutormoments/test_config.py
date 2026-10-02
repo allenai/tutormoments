@@ -55,6 +55,7 @@ def test_packaged_default_config_parses_and_has_expected_roster():
         "gpt-5.5-2026-04-23",
         "gpt-5.5-2026-04-23-none",
         "gpt-6-astra",
+        "gpt-6-sol-none",
         "gpt-6-luna-none",
         "deepseek-v4-pro-0813",
     }

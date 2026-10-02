@@ -37,10 +37,11 @@ benchmark_models:
   # Same model with reasoning off (reasoning_effort=none); smoke asserts zero
   # reasoning tokens for this condition.
   gpt-5.5-2026-04-23-none: { model: gpt-5.5-2026-04-23, reasoning: none, condition: none }
-  # GPT-6 range: top-tier Astra at high, cheapest/fastest Luna with reasoning
-  # off. Undated ids -- OpenAI publishes no dated snapshots for GPT-6 yet, so
+  # GPT-6 range: top-tier Astra at high; mid-tier Sol and cheapest/fastest
+  # Luna with reasoning off. Undated ids -- OpenAI publishes no dated snapshots for GPT-6 yet, so
   # the alias may move; config.json records the run date.
   gpt-6-astra:             { model: gpt-6-astra, reasoning: high, condition: high }
+  gpt-6-sol-none:          { model: gpt-6-sol, reasoning: none, condition: none }
   gpt-6-luna-none:         { model: gpt-6-luna, reasoning: none, condition: none }
   # DeepSeek-V4-Pro-0813 (thinking on by default) at Together's documented
   # top effort tier. Replaces the DeepSeek-V4-Pro arm, which Together no
