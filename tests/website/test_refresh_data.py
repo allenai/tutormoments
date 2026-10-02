@@ -1,4 +1,4 @@
-"""Unit tests for the TTFT half of website/scripts/refresh-data.py.
+"""Unit tests for website/scripts/refresh-data.py.
 
 The script previously carried its own copy of the probe's publishability rules
 and got them wrong -- it gated on cache hit *rate*, which the runtime refuses to
@@ -7,8 +7,10 @@ one shared block of system prompt. These tests pin the corrected behaviour:
 figures come from `tutormoments.latency`, the site's model ids are matched to the
 probe's, and a stale figure is never left standing next to a fresh one.
 
-Score and end-to-end-latency assembly is thin I/O over an analysis export and is
-covered by tests/analysis/test_benchmark_perf_cost.py.
+The paper models' score and end-to-end-latency assembly is thin I/O over an
+analysis export and is covered by tests/analysis/test_benchmark_perf_cost.py.
+The tests here cover the rest: later models scored from their full runs, and
+every figure the checkout cannot rebuild carried forward rather than dropped.
 """
 
 import importlib.util
@@ -173,7 +175,7 @@ def test_probe_ttft_flags_a_mixed_subsample(refresh, tmp_path, capsys):
 
 
 # ---------------------------------------------------------------------------
-# apply_ttft / refresh_ttft_only
+# apply_ttft / build_benchmark_json
 # ---------------------------------------------------------------------------
 
 
@@ -190,57 +192,183 @@ def test_apply_ttft_drops_a_stale_figure(refresh):
     assert rows[1] == {"id": "gone", "latency_s": 7.0}
 
 
-def test_refresh_ttft_only_keeps_the_scores_it_did_not_measure(
-    refresh, tmp_path, monkeypatch
-):
-    """A checkout can have probe runs without a full scored sweep. Rebuilding
-    latency.json wholesale there would discard the paper's scores."""
-    out = tmp_path / "data"
-    out.mkdir()
-    (out / "latency.json").write_text(
-        json.dumps(
-            {
-                "source": "Figure 7, paper",
-                "models": [
-                    {
-                        "id": "claude-opus-4-8",
-                        "name": "Claude Opus 4.8",
-                        "latency_s": 12.5,
-                        "latency_estimated": True,
-                        "score": 0.8445,
-                    }
-                ],
-            }
-        ),
+def _write_site(out: Path, leaderboard: list, latency: list, **extra) -> None:
+    """The committed static/data JSON a refresh starts from."""
+    out.mkdir(parents=True, exist_ok=True)
+    (out / "leaderboard.json").write_text(
+        json.dumps({"source": "paper", "n_moments": 520, "models": leaderboard}),
         encoding="utf-8",
     )
+    (out / "latency.json").write_text(
+        json.dumps({"source": "Figure 7, paper", "models": latency, **extra}),
+        encoding="utf-8",
+    )
+
+
+PAPER_OPUS = {
+    "id": "claude-opus-4-8",
+    "name": "Claude Opus 4.8",
+    "plain": {"scaffolding": 0.615, "rigor": 0.208, "avoids_over": 0.462},
+    "eval_aware": {"scaffolding": 0.858, "rigor": 0.831, "avoids_over": 0.896},
+}
+PAPER_OPUS_LAT = {
+    "id": "claude-opus-4-8",
+    "name": "Claude Opus 4.8",
+    "latency_s": 12.5,
+    "latency_estimated": True,
+    "score": 0.8445,
+}
+
+
+@pytest.fixture
+def site(refresh, tmp_path, monkeypatch):
+    """A checkout without the paper's results/benchmark, and its site data."""
+    out = tmp_path / "data"
     monkeypatch.setattr(refresh, "OUT_DIR", out)
-    probes = tmp_path / "results"
-    _probe_dir(probes, "a_scaffolding_rigor_latency_20260818", tutor="claude-opus-4-8")
+    return {"repo": tmp_path / "repo", "results": tmp_path / "results", "out": out}
 
-    refresh.refresh_ttft_only(REPO, probes)
 
-    payload = json.loads((out / "latency.json").read_text("utf-8"))
-    row = payload["models"][0]
+def _read(out: Path, name: str) -> dict:
+    return json.loads((out / name).read_text("utf-8"))
+
+
+def test_build_keeps_the_paper_rows_it_cannot_rebuild(refresh, site):
+    """Most checkouts have probe runs but not the paper's scored sweep.
+    Rebuilding there must keep the paper's scores and refresh only TTFAT."""
+    _write_site(site["out"], [PAPER_OPUS], [PAPER_OPUS_LAT])
+    _probe_dir(
+        site["results"], "a_scaffolding_rigor_latency_20260818", tutor="claude-opus-4-8"
+    )
+
+    refresh.build_benchmark_json(site["repo"], site["results"])
+
+    lb = _read(site["out"], "leaderboard.json")["models"][0]
+    assert lb["eval_aware"] == PAPER_OPUS["eval_aware"]
+    assert lb["reasoning"] == "effort xhigh", "the paper's Appendix D.4 setting"
+    assert lb["source"] == "paper"
+    lat = _read(site["out"], "latency.json")
+    row = lat["models"][0]
     assert row["score"] == 0.8445
     assert row["latency_s"] == 12.5
     assert row["ttft_s"] == 9.0
-    assert payload["source"] == "Figure 7, paper"
-    assert payload["ttft"]["subsample_id"] == "589e8acf8ac761f2"
+    assert lat["ttft"]["subsample_id"] == "589e8acf8ac761f2"
 
 
-def test_refresh_ttft_only_without_probe_runs_leaves_the_file_alone(
-    refresh, tmp_path, monkeypatch
-):
-    out = tmp_path / "data"
-    out.mkdir()
-    original = {"source": "Figure 7, paper", "models": [{"id": "x", "ttft_s": 1.0}]}
-    (out / "latency.json").write_text(json.dumps(original), encoding="utf-8")
-    monkeypatch.setattr(refresh, "OUT_DIR", out)
+def test_build_without_probe_runs_keeps_the_published_ttfat(refresh, site):
+    """No probe runs at all is a checkout gap, not a measurement that every
+    model lost its figure."""
+    ttft = {"mode": "scaffolding_rigor", "subsample_id": "589e8acf8ac761f2"}
+    _write_site(
+        site["out"],
+        [PAPER_OPUS],
+        [{**PAPER_OPUS_LAT, "ttft_s": 9.04, "ttlt_s": 10.52}],
+        ttft=ttft,
+    )
 
-    refresh.refresh_ttft_only(REPO, tmp_path / "empty")
+    refresh.build_benchmark_json(site["repo"], site["results"])
 
-    assert json.loads((out / "latency.json").read_text("utf-8")) == original
+    lat = _read(site["out"], "latency.json")
+    assert lat["models"][0]["ttft_s"] == 9.04
+    assert lat["models"][0]["ttlt_s"] == 10.52
+    assert lat["ttft"] == ttft
+
+
+def test_build_scores_a_later_model_from_its_full_runs(refresh, site):
+    _write_site(site["out"], [PAPER_OPUS], [PAPER_OPUS_LAT])
+    for mode, scores in (
+        ("plain", (0.85, 0.2, 0.425)),
+        ("scaffolding_rigor", (0.95, 0.8, 0.096)),
+    ):
+        _bench_run(
+            site["results"],
+            f"gpt-6-sol-none_{mode}_tutormoments-preview_20261001",
+            tutor="gpt-6-sol-none",
+            mode=mode,
+            scores=scores,
+            thinking={"reasoning": "none"},
+        )
+
+    refresh.build_benchmark_json(site["repo"], site["results"])
+
+    rows = {m["id"]: m for m in _read(site["out"], "leaderboard.json")["models"]}
+    sol = rows["gpt-6-sol-none"]
+    assert sol["name"] == "GPT-6 Sol"
+    assert sol["reasoning"] == "reasoning effort none"
+    assert sol["plain"] == {"scaffolding": 0.85, "rigor": 0.2, "avoids_over": 0.575}
+    assert sol["eval_aware"] == {
+        "scaffolding": 0.95,
+        "rigor": 0.8,
+        "avoids_over": 0.904,
+    }
+    assert sol["source"] == {
+        "plain": "gpt-6-sol-none_plain_tutormoments-preview_20261001",
+        "eval_aware": "gpt-6-sol-none_scaffolding_rigor_tutormoments-preview_20261001",
+    }
+    assert list(rows) == ["claude-opus-4-8", "gpt-6-sol-none"], "MODELS order"
+
+    lat = {m["id"]: m for m in _read(site["out"], "latency.json")["models"]}
+    assert lat["gpt-6-sol-none"]["score"] == 0.875
+    assert lat["gpt-6-sol-none"]["latency_s"] == 1.47
+    assert "ttft_s" not in lat["gpt-6-sol-none"], "no probe: not measured, never 0"
+
+    cost = _read(site["out"], "cost.json")
+    assert [m["id"] for m in cost["models"]] == ["gpt-6-sol-none"]
+    assert cost["models"][0]["score"] == 0.875, "the latency chart's y value"
+    assert cost["omitted"] == ["Claude Opus 4.8"]
+
+
+def test_build_needs_both_prompts_before_replacing_a_carried_row(refresh, site):
+    """A half-finished sweep (one prompt done) must not knock out the row."""
+    prior = {**PAPER_OPUS, "id": "gpt-6-sol-none", "name": "GPT-6 Sol"}
+    _write_site(site["out"], [prior], [])
+    _bench_run(
+        site["results"],
+        "gpt-6-sol-none_plain_tutormoments-preview_20261101",
+        tutor="gpt-6-sol-none",
+        mode="plain",
+    )
+
+    refresh.build_benchmark_json(site["repo"], site["results"])
+
+    row = _read(site["out"], "leaderboard.json")["models"][0]
+    assert row["eval_aware"] == PAPER_OPUS["eval_aware"]
+
+
+def test_full_runs_takes_the_newest_complete_unsampled_run(refresh, tmp_path):
+    kw = {"tutor": "deepseek-ai/DeepSeek-V4-Pro-0813"}
+    _bench_run(
+        tmp_path, "ds_scaffolding_rigor_x_20260901", scores=(0.5, 0.5, 0.5), **kw
+    )
+    _bench_run(
+        tmp_path, "ds_scaffolding_rigor_x_20260929", scores=(0.6, 0.6, 0.5), **kw
+    )
+    _bench_run(tmp_path, "ds_scaffolding_rigor_x_20261001", sample=10, **kw)
+    _bench_run(tmp_path, "ds_scaffolding_rigor_x_20261002", failed=3, **kw)
+    _probe_dir(tmp_path, "ds_scaffolding_rigor_latency_20261003", tutor=kw["tutor"])
+
+    runs = refresh.full_runs(tmp_path)
+
+    assert list(runs) == [("deepseek-ai_DeepSeek-V4-Pro-0813", "scaffolding_rigor")]
+    cell = runs[("deepseek-ai_DeepSeek-V4-Pro-0813", "scaffolding_rigor")]
+    assert cell["run_id"] == "ds_scaffolding_rigor_x_20260929"
+
+
+@pytest.mark.parametrize(
+    "thinking, label",
+    [
+        ({"effort": "high", "thinking": {"type": "adaptive"}}, "effort high"),
+        (
+            {"thinking_level": "minimal", "include_thoughts": True},
+            "thinking level minimal",
+        ),
+        ({"thinking_budget": -1, "include_thoughts": True}, "thinking budget -1"),
+        ({"reasoning_effort": "max"}, "reasoning effort max"),
+        ({"reasoning": "none"}, "reasoning effort none"),
+        ({}, None),
+    ],
+)
+def test_reasoning_label_uses_the_providers_own_terms(refresh, thinking, label):
+    assert refresh.reasoning_label(thinking) == label
 
 
 # ---------------------------------------------------------------------------
@@ -274,8 +402,13 @@ def _bench_run(
     mode: str = "scaffolding_rigor",
     n_calls: int = 1560,
     output: int = 400,
+    scores: tuple = (0.9, 0.8, 0.1),
+    thinking: dict | None = None,
+    sample: int | None = None,
+    failed: int = 0,
 ) -> None:
-    """A benchmark run directory: summary.json + config.json, as cli.py writes."""
+    """A benchmark run directory: summary.json + config.json, as cli.py writes.
+    ``scores`` is (scaffold score, rigor score, overscaffold rate)."""
     usage = _usage(
         model=tutor,
         uncached=500 * n_calls,
@@ -287,13 +420,22 @@ def _bench_run(
     summary = {
         "tutor_model": tutor,
         "mode": mode,
-        "run_counts": {"attempted": 520, "succeeded": 520, "failed": 0},
-        "latency": {"source": "run", "tutor": {"n": n_calls}},
+        "n_scenarios": 520,
+        "run_counts": {"attempted": 520, "succeeded": 520 - failed, "failed": failed},
+        "scaffold_calibrated": {"score": scores[0]},
+        "rigor_calibrated": {"score": scores[1]},
+        "overscaffold": {"rate": scores[2]},
+        "latency": {"source": "run", "tutor": {"n": n_calls, "mean_seconds": 1.469}},
         "tokens": {"tutor": usage},
         "cost": {"n_conversations": 520},
     }
+    config = {
+        "sample": sample,
+        "arm": tutor,
+        "resolved_tutors": {tutor: {"thinking": thinking or {}}},
+    }
     (run / "summary.json").write_text(json.dumps(summary), encoding="utf-8")
-    (run / "config.json").write_text(json.dumps({"sample": None}), encoding="utf-8")
+    (run / "config.json").write_text(json.dumps(config), encoding="utf-8")
 
 
 def test_measured_cost_prices_a_probe_at_current_rates(refresh, tmp_path):
@@ -398,45 +540,6 @@ def test_cost_rows_follow_the_latency_roster_and_name_the_omitted(refresh):
     assert omitted == ["Model B"]
 
 
-def test_refresh_ttft_only_also_writes_cost_json(refresh, tmp_path, monkeypatch):
-    out = tmp_path / "data"
-    out.mkdir()
-    (out / "latency.json").write_text(
-        json.dumps(
-            {
-                "source": "paper",
-                "models": [
-                    {
-                        "id": "gpt-5.4-mini-2026-03-17",
-                        "name": "GPT 5.4 mini",
-                        "score": 0.7,
-                    },
-                    {"id": "claude-opus-4-8", "name": "Claude Opus 4.8", "score": 0.84},
-                ],
-            }
-        ),
-        encoding="utf-8",
-    )
-    monkeypatch.setattr(refresh, "OUT_DIR", out)
-    probes = tmp_path / "results"
-    _probe_dir(
-        probes,
-        "mini_scaffolding_rigor_latency_20261001",
-        tutor="gpt-5.4-mini-2026-03-17",
-        usage=_usage(),
-    )
-    _probe_dir(
-        probes, "opus_scaffolding_rigor_latency_20260818", tutor="claude-opus-4-8"
-    )
-
-    refresh.refresh_ttft_only(REPO, probes)
-
-    cost = json.loads((out / "cost.json").read_text("utf-8"))
-    assert [m["id"] for m in cost["models"]] == ["gpt-5.4-mini-2026-03-17"]
-    assert cost["models"][0]["score"] == 0.7, "the latency chart's y value"
-    assert cost["omitted"] == ["Claude Opus 4.8"]
-
-
 def test_write_cost_without_costable_runs_leaves_cost_json_alone(
     refresh, tmp_path, monkeypatch
 ):
@@ -448,3 +551,46 @@ def test_write_cost_without_costable_runs_leaves_cost_json_alone(
     refresh.write_cost(REPO, tmp_path / "empty", [{"id": "a", "name": "A", "score": 1}])
 
     assert json.loads((out / "cost.json").read_text("utf-8")) == {"models": ["kept"]}
+
+
+# ---------------------------------------------------------------------------
+# build_action_distribution
+# ---------------------------------------------------------------------------
+
+
+def test_action_distribution_skips_models_the_export_does_not_cover(
+    refresh, tmp_path, monkeypatch
+):
+    """The paper's export has columns for its seven models only; later rows
+    of MODELS must not make the refresh crash on a missing column."""
+    import csv
+
+    prefixes = ["human"] + [
+        f"{col}__{p}"
+        for col in refresh.ACTION_CSV_MODELS.values()
+        for p in ("plain", "SR")
+    ]
+    fields = ["letter", "name", "orientation"] + [
+        f"{pre}__{k}"
+        for pre in prefixes
+        for k in ("n_moments", "macro_mean_pct", "ci_low", "ci_high")
+    ]
+    fp = tmp_path / "action_taxonomy_distribution.csv"
+    with fp.open("w", newline="", encoding="utf-8") as fh:
+        w = csv.DictWriter(fh, fieldnames=fields)
+        w.writeheader()
+        for i, letter in enumerate("ABCDEFGHIJKLM"):
+            row = {"letter": letter, "name": letter, "orientation": "neutral"}
+            for f in fields[3:]:
+                row[f] = 100 if f.endswith("n_moments") else float(i)
+            w.writerow(row)
+    monkeypatch.setattr(refresh, "OUT_DIR", tmp_path / "data")
+
+    refresh.build_action_distribution(fp, "test")
+
+    out = json.loads(
+        (tmp_path / "data" / "action_distribution.json").read_text("utf-8")
+    )
+    assert [m["id"] for m in out["models"]] == [
+        m for m, _ in refresh.MODELS if m in refresh.ACTION_CSV_MODELS
+    ]

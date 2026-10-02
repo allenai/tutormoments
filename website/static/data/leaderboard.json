@@ -1,49 +1,313 @@
 {
-  "source": "Table 8, TutorMoments-Preview working paper (2026-06-30). Regenerate with scripts/refresh-data.py.",
+  "source": "Paper models: Table 8 of the TutorMoments-Preview working paper (2026-06-30). Other models: their full `tutormoments run` benchmark runs, run ids in each row's source. Regenerate with scripts/refresh-data.py.",
   "n_moments": 520,
-  "human": { "scaffolding": 0.458, "rigor": 0.182, "avoids_over": 0.496 },
+  "human": {
+    "scaffolding": 0.458,
+    "rigor": 0.182,
+    "avoids_over": 0.496
+  },
   "models": [
     {
       "id": "claude-opus-4-8",
       "name": "Claude Opus 4.8",
-      "plain": { "scaffolding": 0.615, "rigor": 0.208, "avoids_over": 0.462 },
-      "eval_aware": { "scaffolding": 0.858, "rigor": 0.831, "avoids_over": 0.896 }
+      "reasoning": "effort xhigh",
+      "source": "paper",
+      "plain": {
+        "scaffolding": 0.615,
+        "rigor": 0.208,
+        "avoids_over": 0.462
+      },
+      "eval_aware": {
+        "scaffolding": 0.858,
+        "rigor": 0.831,
+        "avoids_over": 0.896
+      }
     },
     {
       "id": "claude-sonnet-4-6",
       "name": "Claude Sonnet 4.6",
-      "plain": { "scaffolding": 0.573, "rigor": 0.085, "avoids_over": 0.437 },
-      "eval_aware": { "scaffolding": 0.831, "rigor": 0.792, "avoids_over": 0.913 }
+      "reasoning": "effort high",
+      "source": "paper",
+      "plain": {
+        "scaffolding": 0.573,
+        "rigor": 0.085,
+        "avoids_over": 0.437
+      },
+      "eval_aware": {
+        "scaffolding": 0.831,
+        "rigor": 0.792,
+        "avoids_over": 0.913
+      }
+    },
+    {
+      "id": "claude-opus-5-5",
+      "name": "Claude Opus 5.5",
+      "reasoning": "effort high",
+      "source": {
+        "plain": "claude-opus-5-5_plain_tutormoments-preview_20261001",
+        "eval_aware": "claude-opus-5-5_scaffolding_rigor_tutormoments-preview_20261001"
+      },
+      "plain": {
+        "scaffolding": 0.804,
+        "rigor": 0.219,
+        "avoids_over": 0.513
+      },
+      "eval_aware": {
+        "scaffolding": 0.958,
+        "rigor": 0.808,
+        "avoids_over": 0.894
+      }
+    },
+    {
+      "id": "claude-fable-5-1",
+      "name": "Claude Fable 5.1",
+      "reasoning": "effort high",
+      "source": {
+        "plain": "claude-fable-5-1_plain_tutormoments-preview_20261001",
+        "eval_aware": "claude-fable-5-1_scaffolding_rigor_tutormoments-preview_20261001"
+      },
+      "plain": {
+        "scaffolding": 0.8,
+        "rigor": 0.231,
+        "avoids_over": 0.523
+      },
+      "eval_aware": {
+        "scaffolding": 0.946,
+        "rigor": 0.796,
+        "avoids_over": 0.883
+      }
+    },
+    {
+      "id": "claude-sonnet-5-5",
+      "name": "Claude Sonnet 5.5",
+      "reasoning": "effort low",
+      "source": {
+        "plain": "claude-sonnet-5-5_plain_tutormoments-preview_20261001",
+        "eval_aware": "claude-sonnet-5-5_scaffolding_rigor_tutormoments-preview_20261001"
+      },
+      "plain": {
+        "scaffolding": 0.927,
+        "rigor": 0.408,
+        "avoids_over": 0.675
+      },
+      "eval_aware": {
+        "scaffolding": 0.958,
+        "rigor": 0.846,
+        "avoids_over": 0.908
+      }
     },
     {
       "id": "deepseek-ai_DeepSeek-V4-Pro",
       "name": "DeepSeek V4 Pro",
-      "plain": { "scaffolding": 0.485, "rigor": 0.088, "avoids_over": 0.379 },
-      "eval_aware": { "scaffolding": 0.712, "rigor": 0.492, "avoids_over": 0.623 }
+      "reasoning": "reasoning effort high",
+      "source": "paper",
+      "plain": {
+        "scaffolding": 0.485,
+        "rigor": 0.088,
+        "avoids_over": 0.379
+      },
+      "eval_aware": {
+        "scaffolding": 0.712,
+        "rigor": 0.492,
+        "avoids_over": 0.623
+      }
+    },
+    {
+      "id": "deepseek-v4-pro-0813",
+      "name": "DeepSeek V4 Pro 0813",
+      "reasoning": "reasoning effort max",
+      "source": {
+        "plain": "deepseek-v4-pro-0813_plain_tutormoments-preview_20260929",
+        "eval_aware": "deepseek-v4-pro-0813_scaffolding_rigor_tutormoments-preview_20260929"
+      },
+      "plain": {
+        "scaffolding": 0.527,
+        "rigor": 0.127,
+        "avoids_over": 0.481
+      },
+      "eval_aware": {
+        "scaffolding": 0.835,
+        "rigor": 0.465,
+        "avoids_over": 0.698
+      }
     },
     {
       "id": "gemini-2.5-pro",
       "name": "Gemini 2.5 Pro",
-      "plain": { "scaffolding": 0.727, "rigor": 0.223, "avoids_over": 0.546 },
-      "eval_aware": { "scaffolding": 0.896, "rigor": 0.712, "avoids_over": 0.854 }
+      "reasoning": "thinking budget -1",
+      "source": "paper",
+      "plain": {
+        "scaffolding": 0.727,
+        "rigor": 0.223,
+        "avoids_over": 0.546
+      },
+      "eval_aware": {
+        "scaffolding": 0.896,
+        "rigor": 0.712,
+        "avoids_over": 0.854
+      }
     },
     {
       "id": "gemini-3.5-flash",
       "name": "Gemini 3.5 Flash",
-      "plain": { "scaffolding": 0.723, "rigor": 0.158, "avoids_over": 0.598 },
-      "eval_aware": { "scaffolding": 0.885, "rigor": 0.646, "avoids_over": 0.817 }
+      "reasoning": "thinking budget -1",
+      "source": "paper",
+      "plain": {
+        "scaffolding": 0.723,
+        "rigor": 0.158,
+        "avoids_over": 0.598
+      },
+      "eval_aware": {
+        "scaffolding": 0.885,
+        "rigor": 0.646,
+        "avoids_over": 0.817
+      }
+    },
+    {
+      "id": "gemini-3.8-flash",
+      "name": "Gemini 3.8 Flash",
+      "reasoning": "thinking level high",
+      "source": {
+        "plain": "gemini-3.8-flash_plain_tutormoments-preview_20260930",
+        "eval_aware": "gemini-3.8-flash_scaffolding_rigor_tutormoments-preview_20260930"
+      },
+      "plain": {
+        "scaffolding": 0.735,
+        "rigor": 0.127,
+        "avoids_over": 0.637
+      },
+      "eval_aware": {
+        "scaffolding": 0.931,
+        "rigor": 0.627,
+        "avoids_over": 0.835
+      }
+    },
+    {
+      "id": "gemini-3.6-flash",
+      "name": "Gemini 3.6 Flash",
+      "reasoning": "thinking level minimal",
+      "source": {
+        "plain": "gemini-3.6-flash_plain_tutormoments-preview_20260930",
+        "eval_aware": "gemini-3.6-flash_scaffolding_rigor_tutormoments-preview_20260930"
+      },
+      "plain": {
+        "scaffolding": 0.7,
+        "rigor": 0.158,
+        "avoids_over": 0.596
+      },
+      "eval_aware": {
+        "scaffolding": 0.865,
+        "rigor": 0.519,
+        "avoids_over": 0.737
+      }
     },
     {
       "id": "gpt-5.5-2026-04-23",
       "name": "GPT 5.5",
-      "plain": { "scaffolding": 0.269, "rigor": 0.046, "avoids_over": 0.173 },
-      "eval_aware": { "scaffolding": 0.773, "rigor": 0.531, "avoids_over": 0.665 }
+      "reasoning": "reasoning effort high",
+      "source": "paper",
+      "plain": {
+        "scaffolding": 0.269,
+        "rigor": 0.046,
+        "avoids_over": 0.173
+      },
+      "eval_aware": {
+        "scaffolding": 0.773,
+        "rigor": 0.531,
+        "avoids_over": 0.665
+      }
+    },
+    {
+      "id": "gpt-5.5-2026-04-23-none",
+      "name": "GPT 5.5 (no reasoning)",
+      "reasoning": "reasoning effort none",
+      "source": {
+        "plain": "gpt-5.5-2026-04-23-none_plain_tutormoments-preview_20260929",
+        "eval_aware": "gpt-5.5-2026-04-23-none_scaffolding_rigor_tutormoments-preview_20260929"
+      },
+      "plain": {
+        "scaffolding": 0.288,
+        "rigor": 0.035,
+        "avoids_over": 0.179
+      },
+      "eval_aware": {
+        "scaffolding": 0.808,
+        "rigor": 0.281,
+        "avoids_over": 0.55
+      }
     },
     {
       "id": "gpt-5.4-mini-2026-03-17",
       "name": "GPT 5.4 mini",
-      "plain": { "scaffolding": 0.181, "rigor": 0.023, "avoids_over": 0.188 },
-      "eval_aware": { "scaffolding": 0.738, "rigor": 0.404, "avoids_over": 0.598 }
+      "reasoning": "reasoning effort high",
+      "source": "paper",
+      "plain": {
+        "scaffolding": 0.181,
+        "rigor": 0.023,
+        "avoids_over": 0.188
+      },
+      "eval_aware": {
+        "scaffolding": 0.738,
+        "rigor": 0.404,
+        "avoids_over": 0.598
+      }
+    },
+    {
+      "id": "gpt-6-astra",
+      "name": "GPT-6 Astra",
+      "reasoning": "reasoning effort high",
+      "source": {
+        "plain": "gpt-6-astra_plain_tutormoments-preview_20260929",
+        "eval_aware": "gpt-6-astra_scaffolding_rigor_tutormoments-preview_20260929"
+      },
+      "plain": {
+        "scaffolding": 0.942,
+        "rigor": 0.327,
+        "avoids_over": 0.648
+      },
+      "eval_aware": {
+        "scaffolding": 0.938,
+        "rigor": 0.915,
+        "avoids_over": 0.96
+      }
+    },
+    {
+      "id": "gpt-6-sol-none",
+      "name": "GPT-6 Sol",
+      "reasoning": "reasoning effort none",
+      "source": {
+        "plain": "gpt-6-sol-none_plain_tutormoments-preview_20261001",
+        "eval_aware": "gpt-6-sol-none_scaffolding_rigor_tutormoments-preview_20261001"
+      },
+      "plain": {
+        "scaffolding": 0.85,
+        "rigor": 0.196,
+        "avoids_over": 0.575
+      },
+      "eval_aware": {
+        "scaffolding": 0.95,
+        "rigor": 0.8,
+        "avoids_over": 0.904
+      }
+    },
+    {
+      "id": "gpt-6-luna-none",
+      "name": "GPT-6 Luna",
+      "reasoning": "reasoning effort none",
+      "source": {
+        "plain": "gpt-6-luna-none_plain_tutormoments-preview_20260929",
+        "eval_aware": "gpt-6-luna-none_scaffolding_rigor_tutormoments-preview_20260929"
+      },
+      "plain": {
+        "scaffolding": 0.642,
+        "rigor": 0.119,
+        "avoids_over": 0.437
+      },
+      "eval_aware": {
+        "scaffolding": 0.919,
+        "rigor": 0.585,
+        "avoids_over": 0.777
+      }
     }
   ]
 }

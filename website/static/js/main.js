@@ -14,8 +14,24 @@
     "gemini-2.5-pro":              { color: "#0072B2", marker: "diamond" },
     "gemini-3.5-flash":            { color: "#56B4E9", marker: "pentagon" },
     "gpt-5.5-2026-04-23":          { color: "#009E73", marker: "plus" },
-    "gpt-5.4-mini-2026-03-17":     { color: "#F0529C", marker: "cross" }
+    "gpt-5.4-mini-2026-03-17":     { color: "#F0529C", marker: "cross" },
+    // Runs since the paper: the same hue per provider family, a marker no
+    // other model on the same chart uses.
+    "claude-opus-5-5":             { color: "#D55E00", marker: "circle" },
+    "claude-fable-5-1":            { color: "#D55E00", marker: "diamond" },
+    "claude-sonnet-5-5":           { color: "#E69F00", marker: "hexagon" },
+    "deepseek-v4-pro-0813":        { color: "#CC79A7", marker: "square" },
+    "gemini-3.8-flash":            { color: "#56B4E9", marker: "triangle-up" },
+    "gemini-3.6-flash":            { color: "#0072B2", marker: "triangle-down" },
+    "gpt-5.5-2026-04-23-none":     { color: "#009E73", marker: "cross" },
+    "gpt-6-astra":                 { color: "#F0529C", marker: "star" },
+    "gpt-6-sol-none":              { color: "#F0529C", marker: "pentagon" },
+    "gpt-6-luna-none":             { color: "#F0529C", marker: "plus" }
   };
+
+  // Shared y-axis for the two score scatters, so a model sits at the same
+  // height on both.
+  var SCORE_MIN = 0.5, SCORE_MAX = 1.0;
 
   var INK = "#0A3235";
   var INK_MUTED = "rgba(10, 50, 53, 0.48)";
@@ -63,7 +79,19 @@
       .join(" ");
   }
 
+  function starPoints(cx, cy, r) {
+    var pts = [];
+    for (var i = 0; i < 10; i++) {
+      var a = (Math.PI * i) / 5, rr = i % 2 ? r * 0.45 : r;
+      pts.push((cx + rr * Math.sin(a)).toFixed(2) + "," + (cy - rr * Math.cos(a)).toFixed(2));
+    }
+    return pts.join(" ");
+  }
+
   function markerNode(shape, cx, cy, r, color, parent) {
+    if (shape === "circle") {
+      return el("circle", { cx: cx, cy: cy, r: r * 0.95, fill: color, stroke: "#fff", "stroke-width": 1.2 }, parent);
+    }
     var points;
     switch (shape) {
       case "triangle-down": points = polygonPoints(cx, cy, r * 1.1, 3, 180); break;
@@ -73,6 +101,7 @@
       case "pentagon":      points = polygonPoints(cx, cy, r * 1.1, 5, 0); break;
       case "plus":          points = crossPoints(cx, cy, r * 1.15, 0); break;
       case "cross":         points = crossPoints(cx, cy, r * 1.15, 45); break;
+      case "star":          points = starPoints(cx, cy, r * 1.35); break;
       default:              points = polygonPoints(cx, cy, r, 6, 0);
     }
     return el("polygon", {
@@ -137,10 +166,10 @@
     });
 
     var html = "<thead>";
-    html += '<tr class="group-row"><th></th>' +
+    html += '<tr class="group-row"><th></th><th></th>' +
       '<th colspan="3" class="group-plain">Plain prompt</th>' +
       '<th colspan="3" class="group-aware">Evaluation-aware prompt</th></tr>';
-    html += "<tr><th>Model</th>";
+    html += '<tr><th>Model</th><th class="reasoning">Reasoning</th>';
     prompts.forEach(function (p) {
       metrics.forEach(function (m, i) {
         html += "<th" + (i === 0 ? ' class="table-divider"' : "") + ">" + metricLabels[m] + "</th>";
@@ -149,7 +178,7 @@
     html += "</tr></thead><tbody>";
 
     data.models.forEach(function (d) {
-      html += "<tr><td>" + d.name + "</td>";
+      html += "<tr><td>" + d.name + '</td><td class="reasoning">' + (d.reasoning || "") + "</td>";
       prompts.forEach(function (p) {
         metrics.forEach(function (m, i) {
           var v = d[p][m];
@@ -165,9 +194,13 @@
     table.innerHTML = html;
   }
 
-  /* ---------- time-to-first-token vs performance scatter ----------
-     x is TTFT p50 from `tutormoments latency`, a strictly serial probe: the
-     only latency figure that is comparable across models. The paper's Fig. 7
+  /* ---------- time-to-first-answer-token vs performance scatter ----------
+     x is the probe's TTFT p50 (`ttft_s`) from `tutormoments latency`, a
+     strictly serial probe: the only latency figure that is comparable across
+     models. The site calls it TTFAT, time to first *answer* token: the probe
+     times the first visible token, so a reasoning model's thinking counts
+     toward it. Elsewhere "TTFT" usually means the first token of any kind,
+     reasoning included, which would flatter a model that thinks out loud. The paper's Fig. 7
      plotted end-to-end seconds per turn, which benchmark runs gather under
      concurrency, so it moves with each model's rate-limit tier as well as with
      the model. That figure is kept in the tooltip rather than on the axis.
@@ -182,7 +215,8 @@
     // Models without a probe run carry no ttft_s and cannot be placed on this
     // axis. Omitted rather than zero-filled: "not measured" is not "fast".
     var models = data.models.filter(function (d) { return typeof d.ttft_s === "number"; });
-    var missing = data.models.length - models.length;
+    var missing = data.models.filter(function (d) { return typeof d.ttft_s !== "number"; })
+      .map(function (d) { return d.name; });
     if (!models.length) {
       document.getElementById("latency-block").hidden = true;
       return;
@@ -192,14 +226,14 @@
     var m = { top: 24, right: 120, bottom: 58, left: 74 };
     var iw = W - m.left - m.right, ih = H - m.top - m.bottom;
 
-    var xMin = 0, yMin = 0.5, yMax = 0.9;
+    var xMin = 0, yMin = SCORE_MIN, yMax = SCORE_MAX;
     var xMax = niceMax(Math.max.apply(null, models.map(function (d) { return d.ttft_s; })));
     var xStep = xMax > 24 ? 4 : 2;
     var x = function (v) { return m.left + ((v - xMin) / (xMax - xMin)) * iw; };
     var y = function (v) { return m.top + (1 - (v - yMin) / (yMax - yMin)) * ih; };
 
     var svg = el("svg", { viewBox: "0 0 " + W + " " + H, role: "img",
-      "aria-label": "Scatter plot of tutoring performance against median time to first token for "
+      "aria-label": "Scatter plot of tutoring performance against median time to first answer token for "
         + models.length + " language models" });
 
     // gridlines + ticks
@@ -209,7 +243,7 @@
       el("text", { x: x(xi), y: m.top + ih + 22, "text-anchor": "middle", "font-size": 12, fill: INK_MUTED }, svg)
         .textContent = xi;
     }
-    for (yi = 0.5; yi <= 0.901; yi += 0.1) {
+    for (yi = yMin; yi <= yMax + 0.001; yi += 0.1) {
       el("line", { x1: m.left, y1: y(yi), x2: m.left + iw, y2: y(yi), stroke: GRID, "stroke-width": 1 }, svg);
       el("text", { x: m.left - 10, y: y(yi) + 4, "text-anchor": "end", "font-size": 12, fill: INK_MUTED }, svg)
         .textContent = yi.toFixed(1);
@@ -218,7 +252,7 @@
 
     // axis titles
     el("text", { x: m.left + iw / 2, y: H - 12, "text-anchor": "middle", "font-size": 13, fill: INK }, svg)
-      .textContent = "Time to first token, median seconds";
+      .textContent = "Time to first answer token (TTFAT), median seconds";
     var yl = el("text", { x: 18, y: m.top + ih / 2, "text-anchor": "middle", "font-size": 13, fill: INK,
       transform: "rotate(-90 18 " + (m.top + ih / 2) + ")" }, svg);
     yl.textContent = "Appropriate scaffolding & rigor (mean)";
@@ -244,7 +278,7 @@
       attachHover(hit, function () {
         var html = '<div class="tt-title">' + d.name + "</div>" +
           ttRow("Score", d.score.toFixed(3)) +
-          ttRow("Time to first token", d.ttft_s.toFixed(1) + " s");
+          ttRow("Time to first answer token", d.ttft_s.toFixed(1) + " s");
         // Split on turn position (turn 1 vs turns 3 and 5), so every model
         // with a probe run has it -- no dependence on cache reporting.
         if (typeof d.ttft_first_s === "number" && typeof d.ttft_later_s === "number") {
@@ -260,9 +294,9 @@
 
     mount.appendChild(svg);
 
-    if (missing) {
+    if (missing.length) {
       document.getElementById("latency-footnote").textContent =
-        missing + " model(s) omitted: no latency probe run.";
+        "Not yet probed, so not shown: " + missing.join(", ") + ".";
     }
   }
 
@@ -315,7 +349,7 @@
     var ticks = logTicks(Math.min.apply(null, costs) / 1.2, Math.max.apply(null, costs) * 1.2);
     var cMin = ticks[0], cMax = ticks[ticks.length - 1];
 
-    var yMin = 0.5, yMax = 0.9;
+    var yMin = SCORE_MIN, yMax = SCORE_MAX;
     var lMin = Math.log10(cMin), lMax = Math.log10(cMax);
     var x = function (v) { return m.left + ((Math.log10(v) - lMin) / (lMax - lMin)) * iw; };
     var y = function (v) { return m.top + (1 - (v - yMin) / (yMax - yMin)) * ih; };
@@ -332,7 +366,7 @@
       el("text", { x: x(t), y: m.top + ih + 22, "text-anchor": "middle", "font-size": 12, fill: INK_MUTED }, svg)
         .textContent = fmtUSD(t).replace(/\.00$/, "");
     });
-    for (yi = 0.5; yi <= 0.901; yi += 0.1) {
+    for (yi = yMin; yi <= yMax + 0.001; yi += 0.1) {
       el("line", { x1: m.left, y1: y(yi), x2: m.left + iw, y2: y(yi), stroke: GRID, "stroke-width": 1 }, svg);
       el("text", { x: m.left - 10, y: y(yi) + 4, "text-anchor": "end", "font-size": 12, fill: INK_MUTED }, svg)
         .textContent = yi.toFixed(1);
@@ -345,21 +379,23 @@
       transform: "rotate(-90 18 " + (m.top + ih / 2) + ")" }, svg);
     yl.textContent = "Appropriate scaffolding & rigor (mean)";
 
-    // Per-model label placement, tuned once the measured positions are known.
+    // Per-model label placement, tuned to the measured positions: the
+    // Claude 5.x cluster sits close enough to crowd side-by-side labels.
     var labelLeft = {};
-    var labelBelow = {};
+    var labelBelow = { "claude-opus-5-5": true };
+    var labelAbove = { "claude-sonnet-5-5": true };
     models.forEach(function (d) {
       var s = MODEL_STYLE[d.id] || { color: INK, marker: "square" };
       var cx = x(per1k(d)), cy = y(d.score);
       markerNode(s.marker, cx, cy, 8, s.color, svg);
 
+      var centered = labelBelow[d.id] || labelAbove[d.id];
       var left = labelLeft[d.id] || cx > m.left + iw - 20; // keep the rightmost label inside
-      var lx = left ? cx - 14 : cx + 14;
-      var ly = labelBelow[d.id] ? cy + 22 : cy + 4;
-      if (labelBelow[d.id]) lx = cx;
+      var lx = centered ? cx : (left ? cx - 14 : cx + 14);
+      var ly = labelBelow[d.id] ? cy + 22 : (labelAbove[d.id] ? cy - 14 : cy + 4);
       el("text", {
         x: lx, y: ly, "font-size": 12.5, "font-weight": 600, fill: INK,
-        "text-anchor": labelBelow[d.id] ? "middle" : (left ? "end" : "start")
+        "text-anchor": centered ? "middle" : (left ? "end" : "start")
       }, svg).textContent = d.name;
 
       var hit = el("circle", { cx: cx, cy: cy, r: 17, fill: "transparent", cursor: "pointer" }, svg);
@@ -386,8 +422,10 @@
     mount.appendChild(svg);
 
     var notes = [];
-    var omitted = (data.omitted || []).length;
-    if (omitted) notes.push(omitted + " model(s) omitted: no benchmark or probe run with recorded token usage.");
+    var omitted = data.omitted || [];
+    if (omitted.length) {
+      notes.push("Not shown, no run with recorded token usage: " + omitted.join(", ") + ".");
+    }
     notes.push("Uncached list prices, a ceiling: provider prompt caching can cut the input share substantially.");
     document.getElementById("cost-footnote").textContent = notes.join(" ");
     block.hidden = false;

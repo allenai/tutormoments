@@ -226,6 +226,12 @@ a:hover { color: var(--pink); text-decoration-color: var(--pink); }
 .table-card tbody tr:last-child td { border-bottom: none; }
 .table-card tbody tr:hover td { background: var(--cream-50); }
 .table-card td.best { color: var(--pink); font-weight: 700; }
+.table-card th.reasoning, .table-card td.reasoning { text-align: left; }
+.table-card tbody td.reasoning {
+  font-family: var(--font-body);
+  font-size: 0.85rem;
+  color: var(--ink-soft);
+}
 .table-divider { border-left: 1px solid var(--line); }
 
 .table-note {

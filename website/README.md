@@ -53,23 +53,45 @@ After running new models:
 ```
 
 Run it with an interpreter that can `import tutormoments` — the checkout's own venv is the
-easy one. The TTFT figures come with publishability rules that live in
+easy one. The TTFAT figures (`ttft_s`; see below) come with publishability rules that live in
 `tutormoments.latency`, and the script reads them out rather than restating them. Under a
 bare `python3` it refreshes everything else and says that it skipped `ttft_s`.
 
-This regenerates `static/data/{leaderboard,latency,action_distribution,cost}.json`. The
-action-distribution figure reads the repo's
+This regenerates `static/data/{leaderboard,latency,action_distribution,cost}.json`.
+
+Where each model's scores come from:
+
+- **Paper models** (the seven in `PAPER_REASONING`, which also holds their reasoning settings
+  from the paper's Appendix D.4) keep the paper's Table 8 numbers: read from
+  `results/benchmark/_full_combined` when the checkout has it, carried forward from the
+  committed `leaderboard.json` otherwise. A later run of the same arm does not replace them.
+- **Every other model** is scored from its newest full `tutormoments run` under the results
+  root, one per prompt (`results/<run_id>/summary.json`; no `--sample`, no failed moments).
+  Its reasoning label is read off that run's `config.json`, and each row's `source` names the
+  two run ids. A model with only one prompt done keeps its committed row.
+
+Anything the checkout cannot rebuild is carried forward from the committed JSON rather than
+dropped, including the TTFAT figures when there are no probe runs at all. So a refresh from a
+checkout holding only some results is safe.
+
+The action-distribution figure reads the repo's
 `analysis/working-paper-20260630/action_taxonomy_distribution.csv` export; pass
 `--action-csv path/to/action_taxonomy_distribution.csv` to use a copy outside the checkout. Add
-new models to the `MODELS` list in the script (plus `ACTION_CSV_MODELS`, and `MODEL_STYLE` in
-`static/js/main.js`). Partial refreshes are fine — missing inputs just skip that JSON.
+new models to the `MODELS` list in the script, and give them a `MODEL_STYLE` in
+`static/js/main.js`: one of the provider's hues and a marker no other model on the same chart
+uses. Models not in `ACTION_CSV_MODELS` (anything after the paper) are left off the
+action-distribution chart, since that export only covers the paper's models.
 
 ### The two latency figures
 
 `static/data/latency.json` carries both, from different sources, and they are not
 interchangeable:
 
-- **`ttft_s`** — median time to first *visible* token, from `tutormoments latency`. That probe
+- **`ttft_s`** — median time to first *answer* token, from `tutormoments latency`. The site
+  labels it **TTFAT** (time to first answer token). The clock stops at the first visible token
+  of the reply, so a reasoning model's thinking time counts toward it. That differs from the
+  "TTFT" many latency trackers publish, which stops at the first token of any kind, reasoning
+  included (allenai/tutormoments#39). The JSON key keeps the runtime's `ttft` name. That probe
   runs strictly serially, so this is the figure that is comparable across models, and it is
   what the chart's x-axis plots. `ttft_first_s` / `ttft_later_s` split it by turn position —
   the first message of a session against turns 3 and 5 — which the probe recorded itself, so
@@ -90,8 +112,9 @@ The `ttft.subsample_id` recorded in the JSON is what makes the series auditable:
 hash means different prompts were measured, and the script warns rather than charting two
 samples together. See `docs/latency.md` in the main repo.
 
-`latency_s` is still read off the paper's Figure 7 (±0.2s) for every model; a checkout with
-`results/benchmark/` present replaces those with exact values. Since nothing on the page
+For the paper models, `latency_s` is still read off the paper's Figure 7 (±0.2s); a checkout
+with `results/benchmark/` present replaces those with exact values. For later models it is the
+mean from their full run's `summary.json`. Since nothing on the page
 renders it, that estimate no longer needs a footnote.
 
 ### The cost figure
@@ -115,6 +138,6 @@ Each row's `source` says where its tokens came from:
 Prices are the checkout's registry rates at refresh time, whichever the source, so re-running
 this script after a price change updates the chart; `cost.pricing_version` and each row's
 `rates.as_of` record which rates were used. A site model with neither source gets no row; it
-is listed in `omitted` and counted in the footnote, never plotted at zero. The roster follows
+is listed in `omitted` and named in the footnote, never plotted at zero. The roster follows
 `latency.json`, so a model must be in `MODELS` to appear. If new points' labels collide,
-adjust the `labelLeft` / `labelBelow` maps in `renderCost`.
+adjust the `labelLeft` / `labelBelow` / `labelAbove` maps in `renderCost`.

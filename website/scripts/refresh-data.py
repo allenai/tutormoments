@@ -6,10 +6,15 @@ static JSON. Re-run this after benchmarking new models:
 
     python3 scripts/refresh-data.py /path/to/tutormoments
 
-Reads (same sources as the repo's analysis/working-paper-20260630 scripts):
+Reads, for the paper's models (same sources as the repo's
+analysis/working-paper-20260630 scripts):
   results/benchmark/_full_combined/<model>__<prompt>/scores.json   -> leaderboard.json
   results/benchmark/<model>_v10_<prompt>_tutor_oracle_student*/exchanges/*.json
                                                                    -> latency.json (latency_s)
+for every other model:
+  results/<run_id>/{summary,config}.json (full `tutormoments run`s)  -> leaderboard.json,
+                                                                      latency.json (latency_s)
+and for all of them:
   results/<model>_<prompt>_latency_<date>/latency.json             -> latency.json (ttft_s)
   results/<run_id>/summary.json (full runs), else the probe above  -> cost.json
   data/taxonomy/{human,lm}/classified.csv (via tutormoments.taxonomy)  -> action_distribution.json
@@ -49,18 +54,56 @@ OUT_DIR = SITE_ROOT / "static" / "data"
 
 PROMPTS = {"plain": "plain", "scaffolding_rigor": "eval_aware"}
 
-# Display label per model dir prefix, in paper row order. Add new models here
-# (id must match the directory prefix under results/benchmark/_full_combined and
-# the model id used in taxonomy classified.csv with "/" replaced by "_").
+# Display label per site model id, in leaderboard row order (grouped by
+# provider). Add new models here. A paper model's id is its directory prefix
+# under results/benchmark/_full_combined; any other model's id is its
+# benchmark arm name (the `tutor_model` its full run's summary.json records,
+# "/" replaced by "_").
 MODELS = [
     ("claude-opus-4-8", "Claude Opus 4.8"),
     ("claude-sonnet-4-6", "Claude Sonnet 4.6"),
+    ("claude-opus-5-5", "Claude Opus 5.5"),
+    ("claude-fable-5-1", "Claude Fable 5.1"),
+    ("claude-sonnet-5-5", "Claude Sonnet 5.5"),
     ("deepseek-ai_DeepSeek-V4-Pro", "DeepSeek V4 Pro"),
+    ("deepseek-v4-pro-0813", "DeepSeek V4 Pro 0813"),
     ("gemini-2.5-pro", "Gemini 2.5 Pro"),
     ("gemini-3.5-flash", "Gemini 3.5 Flash"),
+    ("gemini-3.8-flash", "Gemini 3.8 Flash"),
+    ("gemini-3.6-flash", "Gemini 3.6 Flash"),
     ("gpt-5.5-2026-04-23", "GPT 5.5"),
+    ("gpt-5.5-2026-04-23-none", "GPT 5.5 (no reasoning)"),
     ("gpt-5.4-mini-2026-03-17", "GPT 5.4 mini"),
+    ("gpt-6-astra", "GPT-6 Astra"),
+    ("gpt-6-sol-none", "GPT-6 Sol"),
+    ("gpt-6-luna-none", "GPT-6 Luna"),
 ]
+
+# The working paper's models and their reasoning settings, as its Appendix D.4
+# states them. Their scores stay the paper's (Table 8): read from
+# results/benchmark/_full_combined where present, carried forward from the
+# committed leaderboard.json otherwise -- a later run of the same arm does not
+# replace a published number. Every other model is scored from its full
+# benchmark run, its reasoning setting read off that run's config.json.
+PAPER_REASONING = {
+    "claude-opus-4-8": "effort xhigh",
+    "claude-sonnet-4-6": "effort high",
+    "deepseek-ai_DeepSeek-V4-Pro": "reasoning effort high",
+    "gemini-2.5-pro": "thinking budget -1",
+    "gemini-3.5-flash": "thinking budget -1",
+    "gpt-5.5-2026-04-23": "reasoning effort high",
+    "gpt-5.4-mini-2026-03-17": "reasoning effort high",
+}
+
+# Provider-native reasoning keys in a run's resolved tutor config -> the label
+# the leaderboard shows (the wording Appendix D.4 uses).
+REASONING_KEYS = {
+    "effort": "effort",
+    "reasoning": "reasoning effort",
+    "reasoning_effort": "reasoning effort",
+    "thinking_level": "thinking level",
+    "thinking_budget": "thinking budget",
+}
 
 # Human reference scores from the paper (Table 8 caption context). Update if the
 # scoring pipeline is re-run over the human transcripts.
@@ -407,97 +450,239 @@ def apply_ttft(rows: list, figures: dict) -> int:
     return n
 
 
-def refresh_ttft_only(repo: Path, probe_root: Path) -> None:
-    """Update ttft_s in the existing latency.json, leaving the rest alone.
+TTFT_KEYS = ("ttft_s", "ttlt_s", "ttft_first_s", "ttft_later_s")
 
-    The two figures in latency.json come from different places: latency_s from
-    benchmark runs, ttft_s from probe runs. A checkout can easily have the
-    probes without the benchmark results (probes are cheap to re-run; a full
-    scored sweep is not), and in that case rebuilding the file wholesale would
-    throw away the scores it already carries.
+
+def reasoning_label(thinking: dict) -> str | None:
+    """The leaderboard's reasoning label for a run's resolved tutor thinking
+    block, e.g. ``{"effort": "high", "thinking": {"type": "adaptive"}}`` ->
+    ``"effort high"``. Keys that do not set the amount of reasoning
+    (``include_thoughts``, the adaptive ``thinking`` type) are not shown."""
+    parts = [
+        f"{label} {thinking[key]}"
+        for key, label in REASONING_KEYS.items()
+        if key in thinking
+    ]
+    return ", ".join(parts) or None
+
+
+def full_runs(results_root: Path) -> dict:
+    """Latest full benchmark run per ``(site_id, mode)``.
+
+    Returns ``{(site_id, mode): {"run_id", "summary", "config"}}``. Eligible
+    runs replayed the whole dataset (no ``--sample``) with no failed moments
+    -- the same rule `tutormoments.costing.costed_runs` applies -- and among
+    those the newest run id (date suffix) wins. Plain JSON reads, so this half
+    of the refresh works under a bare ``python3``.
     """
-    fp = OUT_DIR / "latency.json"
-    if not fp.exists():
-        print(f"no {fp} to update — skipping ttft_s", file=sys.stderr)
-        return
-    payload = json.loads(fp.read_text("utf-8"))
-    figures, provenance = probe_ttft(repo, probe_root, "scaffolding_rigor")
-    if not figures:
-        return
-    n = apply_ttft(payload.get("models") or [], figures)
-    # Keep provenance above the rows it describes.
-    payload = {
-        "source": payload.get("source"),
-        "ttft": provenance,
-        "models": payload.get("models") or [],
+    out, best = {}, {}
+    if not results_root.is_dir():
+        return out
+    for run in sorted(results_root.iterdir()):
+        try:
+            summary = json.loads((run / "summary.json").read_text("utf-8"))
+            config = json.loads((run / "config.json").read_text("utf-8"))
+        except (OSError, json.JSONDecodeError):
+            continue
+        if config.get("sample") is not None:
+            continue
+        if (summary.get("run_counts") or {}).get("failed", 0):
+            continue
+        if not (summary.get("tutor_model") and summary.get("scaffold_calibrated")):
+            continue
+        cell = (summary["tutor_model"].replace("/", "_"), summary.get("mode", ""))
+        rank = (run.name.rsplit("_", 1)[-1], run.name)
+        if cell not in best or rank > best[cell]:
+            best[cell] = rank
+            out[cell] = {"run_id": run.name, "summary": summary, "config": config}
+    return out
+
+
+def run_perf(summary: dict) -> dict:
+    """The leaderboard's three figures from a run summary (same fields, and
+    same derivation, as `perf` reads from a _full_combined scores.json)."""
+    return {
+        "scaffolding": round(summary["scaffold_calibrated"]["score"], 3),
+        "rigor": round(summary["rigor_calibrated"]["score"], 3),
+        "avoids_over": round(1.0 - summary["overscaffold"]["rate"], 3),
     }
-    write_json("latency.json", payload)
-    print(f"  ttft_s updated for {n} model(s) from probe runs in {probe_root}")
-    write_cost(repo, probe_root, payload["models"])
+
+
+def _read_rows(name: str) -> tuple[dict, dict]:
+    """The committed ``static/data/<name>``: ``(payload, {id: row})``."""
+    fp = OUT_DIR / name
+    if not fp.exists():
+        return {}, {}
+    payload = json.loads(fp.read_text("utf-8"))
+    return payload, {row["id"]: row for row in payload.get("models") or []}
+
+
+def _paper_rows(bench: Path, model: str, label: str, ids: set) -> tuple:
+    """Leaderboard + latency rows for a paper model from _full_combined."""
+    scores, n = {}, None
+    for prompt, key in PROMPTS.items():
+        p = perf(bench, model, prompt)
+        if p:
+            n = n or p.pop("n")
+            p.pop("n", None)
+            scores[key] = p
+    if len(scores) != len(PROMPTS):
+        return None, None, None
+    lb = {
+        "id": model,
+        "name": label,
+        "reasoning": PAPER_REASONING[model],
+        "source": "paper",
+        **scores,
+    }
+    lat = latency(bench, model, "scaffolding_rigor", ids)
+    lat_row = None
+    if lat is not None:
+        lat_row = {
+            "id": model,
+            "name": label,
+            "latency_s": lat,
+            "latency_estimated": False,
+        }
+    return lb, lat_row, n
+
+
+def _run_rows(runs: dict, model: str, label: str) -> tuple:
+    """Leaderboard + latency rows for a non-paper model from its full runs."""
+    cells = {key: runs.get((model, prompt)) for prompt, key in PROMPTS.items()}
+    if not all(cells.values()):
+        return None, None, None
+    ea = cells["eval_aware"]
+    tutor = (ea["config"].get("resolved_tutors") or {}).get(
+        ea["config"].get("arm")
+    ) or {}
+    lb = {
+        "id": model,
+        "name": label,
+        "reasoning": reasoning_label(tutor.get("thinking") or {}),
+        "source": {key: cell["run_id"] for key, cell in cells.items()},
+        **{key: run_perf(cell["summary"]) for key, cell in cells.items()},
+    }
+    # End-to-end seconds per tutor turn under the run's --concurrency: kept
+    # for correspondence with the paper's latency_s, never charted.
+    mean = ((ea["summary"].get("latency") or {}).get("tutor") or {}).get("mean_seconds")
+    lat_row = None
+    if mean is not None:
+        lat_row = {
+            "id": model,
+            "name": label,
+            "latency_s": round(mean, 2),
+            "latency_estimated": False,
+        }
+    return lb, lat_row, ea["summary"].get("n_scenarios")
 
 
 def build_benchmark_json(repo: Path, probe_root: Path) -> None:
-    bench = repo / "results" / "benchmark"
-    if not bench.exists():
-        print(
-            f"no {bench} — skipping leaderboard.json scores and latency_s",
-            file=sys.stderr,
-        )
-        refresh_ttft_only(repo, probe_root)
-        return
+    """Rebuild leaderboard.json and latency.json (and cost.json from them).
 
+    Every figure is re-measured where this checkout has its source and
+    carried forward from the committed JSON where it does not: a checkout
+    with only some of the results (probes are cheap to re-run, a scored sweep
+    is not; the paper's _full_combined is not in most checkouts) must not
+    throw away the rows it cannot rebuild.
+    """
+    bench = repo / "results" / "benchmark"
     ids_fp = bench / "_balanced_520_scenario_ids.json"
     ids = set(json.loads(ids_fp.read_text("utf-8"))) if ids_fp.exists() else set()
+    runs = full_runs(probe_root)
+    prior_lb, prior_lb_rows = _read_rows("leaderboard.json")
+    prior_lat, prior_lat_rows = _read_rows("latency.json")
 
-    lb_models, lat_models, n_moments = [], [], None
+    lb_models, lat_models, n_moments, carried = [], [], None, []
     for model, label in MODELS:
-        scores = {}
-        for prompt, key in PROMPTS.items():
-            p = perf(bench, model, prompt)
-            if p:
-                n_moments = n_moments or p.pop("n")
-                p.pop("n", None)
-                scores[key] = p
-        if len(scores) != len(PROMPTS):
-            continue
-        lb_models.append({"id": model, "name": label, **scores})
+        if model in PAPER_REASONING:
+            lb, lat_row, n = (
+                _paper_rows(bench, model, label, ids)
+                if bench.exists()
+                else (None, None, None)
+            )
+        else:
+            lb, lat_row, n = _run_rows(runs, model, label)
+        if lb is None:
+            lb = prior_lb_rows.get(model)
+            lat_row = prior_lat_rows.get(model)
+            if lb is None:
+                print(f"  no scores for {model} — leaving it off", file=sys.stderr)
+                continue
+            carried.append(model)
+            if model in PAPER_REASONING:
+                lb = {"reasoning": PAPER_REASONING[model], "source": "paper", **lb}
+            rest = {k: v for k, v in lb.items() if k not in ("id", "name")}
+            lb = {"id": model, "name": label, **rest}
+        else:
+            n_moments = n_moments or n
+            # The paper's exchanges may be absent even where its scores are
+            # not; keep the latency_s already published rather than drop it.
+            lat_row = lat_row or prior_lat_rows.get(model)
+        lb_models.append(lb)
+        if lat_row is not None:
+            ea = lb["eval_aware"]
+            lat_models.append(
+                {
+                    **{k: v for k, v in lat_row.items() if k not in TTFT_KEYS},
+                    "name": label,
+                    "score": round((ea["scaffolding"] + ea["rigor"]) / 2, 4),
+                }
+            )
+    if carried:
+        print(f"  carried forward from the committed JSON: {', '.join(carried)}")
 
-        lat = latency(bench, model, "scaffolding_rigor", ids)
-        ea = scores["eval_aware"]
-        if lat is not None:
-            row = {
-                "id": model,
-                "name": label,
-                "latency_s": lat,
-                "latency_estimated": False,
-                "score": round((ea["scaffolding"] + ea["rigor"]) / 2, 4),
-            }
-            lat_models.append(row)
+    if not lb_models:
+        print("no scores to write — skipping leaderboard.json", file=sys.stderr)
+        return
+    write_json(
+        "leaderboard.json",
+        {
+            "source": (
+                "Paper models: Table 8 of the TutorMoments-Preview working paper "
+                "(2026-06-30). Other models: their full `tutormoments run` "
+                "benchmark runs, run ids in each row's source. Regenerate with "
+                "scripts/refresh-data.py."
+            ),
+            "n_moments": n_moments or prior_lb.get("n_moments"),
+            "human": HUMAN,
+            "models": lb_models,
+        },
+    )
 
-    if lb_models:
-        write_json(
-            "leaderboard.json",
-            {
-                "source": f"Generated by scripts/refresh-data.py from {repo}",
-                "n_moments": n_moments,
-                "human": HUMAN,
-                "models": lb_models,
-            },
-        )
-    if lat_models:
-        # ttft_s is only present for models with a probe run -- omitted rather
-        # than zero-filled, so the chart can tell "not measured" from "fast".
-        figures, provenance = probe_ttft(repo, probe_root, "scaffolding_rigor")
+    # ttft_s is only present for models with a probe run -- omitted rather
+    # than zero-filled, so the chart can tell "not measured" from "fast". A
+    # checkout with no probe runs at all keeps the published figures.
+    figures, provenance = probe_ttft(repo, probe_root, "scaffolding_rigor")
+    if figures:
         apply_ttft(lat_models, figures)
-        write_json(
-            "latency.json",
-            {
-                "source": f"Generated by scripts/refresh-data.py from {repo}",
-                "ttft": provenance,
-                "models": lat_models,
-            },
-        )
-        write_cost(repo, probe_root, lat_models)
+    else:
+        print("  no probe runs — keeping the published ttft figures", file=sys.stderr)
+        provenance = prior_lat.get("ttft")
+        for row in lat_models:
+            prior = prior_lat_rows.get(row["id"]) or {}
+            row.update({k: prior[k] for k in TTFT_KEYS if k in prior})
+    write_json(
+        "latency.json",
+        {
+            "source": (
+                "score = mean of evaluation-aware Appropriate Scaffolding and "
+                "Appropriate Rigor, from leaderboard.json. ttft_s / ttlt_s "
+                "measured by `tutormoments latency`, a serial probe: ttft_s is "
+                "time to the first *answer* token (reasoning excluded), which "
+                "the site calls TTFAT. ttft_first_s / ttft_later_s split it by "
+                "turn position (the first message of a session vs turns 3 and "
+                "5). See the ttft block for mode, subsample and timestamps. "
+                "latency_s is end-to-end seconds per tutor turn from benchmark "
+                "runs under --concurrency, kept for correspondence with the "
+                "paper's Figure 7 but not displayed; read off that figure to "
+                "~±0.2s where latency_estimated is true."
+            ),
+            "ttft": provenance,
+            "models": lat_models,
+        },
+    )
+    write_cost(repo, probe_root, lat_models)
 
 
 def build_action_distribution(csv_path: Path, source: str) -> None:
@@ -543,7 +728,11 @@ def build_action_distribution(csv_path: Path, source: str) -> None:
 
     models = []
     for model, label in MODELS:
-        col = ACTION_CSV_MODELS[model]
+        # Only the paper's models have an export; later runs' taxonomy
+        # classifications are not in it.
+        col = ACTION_CSV_MODELS.get(model)
+        if col is None:
+            continue
         entry: dict = {"id": model, "name": label}
         for csv_prompt, key in csv_prompts.items():
             entry[key] = {
