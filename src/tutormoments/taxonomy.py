@@ -26,12 +26,14 @@ Pipeline (each stage idempotent and writable to/readable from disk):
   load_* / facets_from_annotations  -> Facet stream
   build_pool -> kept facets + excluded facets (with reason)
   classify_pool -> {statement -> category letter}, resume-safe via sidecar
-  build_headline_tables -> 5 pandas DataFrames (macro/moment)
+  kl_situation -> scaffolding-vs-rigor KL, recorded in every run's summary
+  human_reference -> the same KL for the human tutors, from the release
 
 pandas is an optional extra (install with `pip install 'tutormoments[analysis]'`),
-needed only by the headline-table stage. Importing this module never requires
-it; it is checked lazily when the headline stage runs. matplotlib/seaborn are
-not used here -- they belong to the analysis figures.
+needed only by the DataFrame helpers the figure notebooks use
+(facets_to_dataframe, macro_distribution, read_paper_distribution). Importing
+this module never requires it, and the KL path is pure Python.
+matplotlib/seaborn are not used here -- they belong to the analysis figures.
 """
 
 from __future__ import annotations
@@ -1120,10 +1122,10 @@ def read_paper_distribution(csv_path: Path, series: str = "human"):
 
 
 # ============================================================================
-# 6. Headline analysis (macro/moment tables)
+# 6. Macro distributions (moment-level tables for the figure notebooks)
 # ============================================================================
 #
-# Every percentage in the headline is a macro mean over moments: for each
+# Every percentage here is a macro mean over moments: for each
 # moment we compute the within-moment fraction of facets in each category,
 # then average across moments. This controls for per-moment verbosity so a
 # moment decomposed into more facets doesn't dominate.
@@ -1135,14 +1137,14 @@ def read_paper_distribution(csv_path: Path, series: str = "human"):
 def _require_analysis_extras() -> None:
     """Raise ImportError with an install hint if pandas is missing.
 
-    The headline tables use pandas only; matplotlib/seaborn are needed by the
+    The DataFrame helpers use pandas only; matplotlib/seaborn are needed by the
     analysis figures (notebooks + benchmark_perf_cost.py), not by this module.
     """
     try:
         importlib.import_module("pandas")
     except ImportError:
         raise ImportError(
-            "tutormoments taxonomy headline tables require pandas. "
+            "tutormoments taxonomy DataFrame helpers require pandas. "
             "Install with: pip install 'tutormoments[analysis]'"
         )
 
@@ -1150,8 +1152,8 @@ def _require_analysis_extras() -> None:
 def facets_to_dataframe(facets: Iterable[Facet]):
     """Materialise a Facet stream as a pandas DataFrame.
 
-    Adds an `orientation` column derived from `category` so headline
-    functions don't have to re-derive it on every groupby.
+    Adds an `orientation` column derived from `category` so callers don't
+    have to re-derive it on every groupby.
     """
     _require_analysis_extras()
     pd = importlib.import_module("pandas")
@@ -1220,100 +1222,6 @@ def macro_distribution(df, group_keys: tuple[str, ...] = ()):
     return pd.DataFrame(out_rows)
 
 
-def macro_orientation(df, group_keys: tuple[str, ...] = ()):
-    """Macro-mean % of each orientation (scaffolding/rigor/neutral) per cell.
-
-    Same shape as `macro_distribution` but with an `orientation` column
-    instead of `letter`.
-    """
-    _require_analysis_extras()
-    pd = importlib.import_module("pandas")
-    out_rows = []
-    orients = ["scaffolding", "rigor", "neutral"]
-    grouper = df.groupby(list(group_keys)) if group_keys else [((), df)]
-    for key, gdf in grouper:
-        if not isinstance(key, tuple):
-            key = (key,)
-        moment_frac = _moment_fractions(gdf, "orientation")
-        moment_frac = moment_frac.reindex(columns=orients, fill_value=0.0)
-        n_moments = len(moment_frac)
-        for o in orients:
-            mean, lo, hi = _normal_ci(moment_frac[o].tolist())
-            out_rows.append(
-                {
-                    **{k: v for k, v in zip(group_keys, key)},
-                    "orientation": o,
-                    "n_moments": n_moments,
-                    "mean_pct": mean * 100,
-                    "ci_low": lo * 100,
-                    "ci_high": hi * 100,
-                }
-            )
-    return pd.DataFrame(out_rows)
-
-
-def macro_appropriateness(df, group_keys: tuple[str, ...] = ()):
-    """Per-cell appropriateness scores (macro / moment).
-
-    For each cell: in scaffolding moments, the macro % of facets that are
-    scaffolding-oriented; in rigor moments, the macro % that are
-    rigor-oriented. A well-calibrated tutor scores high on both.
-    """
-    _require_analysis_extras()
-    pd = importlib.import_module("pandas")
-    out_rows = []
-    grouper = df.groupby(list(group_keys)) if group_keys else [((), df)]
-    for key, gdf in grouper:
-        if not isinstance(key, tuple):
-            key = (key,)
-        row: dict[str, Any] = {k: v for k, v in zip(group_keys, key)}
-        for sit, target in (("scaffolding", "scaffolding"), ("rigor", "rigor")):
-            sub = gdf[gdf["situation_label"] == sit]
-            if sub.empty:
-                row[f"{sit}_n_moments"] = 0
-                row[f"{sit}_approp_pct"] = 0.0
-                row[f"{sit}_ci_low"] = 0.0
-                row[f"{sit}_ci_high"] = 0.0
-                continue
-            moment_frac = _moment_fractions(sub, "orientation")
-            vals = moment_frac.get(target, pd.Series([0.0] * len(moment_frac))).tolist()
-            mean, lo, hi = _normal_ci(vals)
-            row[f"{sit}_n_moments"] = len(moment_frac)
-            row[f"{sit}_approp_pct"] = mean * 100
-            row[f"{sit}_ci_low"] = lo * 100
-            row[f"{sit}_ci_high"] = hi * 100
-        out_rows.append(row)
-    return pd.DataFrame(out_rows)
-
-
-def prompt_effect_deltas(lm_df, model_col: str = "model", prompt_col: str = "prompt"):
-    """Per-model SR-minus-plain deltas on the orientation rollup.
-
-    Returns a DataFrame indexed by model with columns
-    `d_scaffolding, d_rigor, d_neutral` (percentage points).
-    """
-    _require_analysis_extras()
-    pd = importlib.import_module("pandas")  # used to build the final DataFrame
-    orient = macro_orientation(lm_df, group_keys=(model_col, prompt_col))
-    pivot = orient.pivot_table(
-        index=[model_col, "orientation"], columns=prompt_col, values="mean_pct"
-    )
-    out = {}
-    prompts = pivot.columns.tolist()
-    if not {"plain"}.issubset(prompts):
-        raise ValueError(
-            f"prompt_effect_deltas requires a 'plain' prompt; got {prompts}"
-        )
-    sr_col = next((p for p in prompts if p != "plain"), None)
-    if sr_col is None:
-        raise ValueError(
-            "prompt_effect_deltas requires a second prompt alongside 'plain'"
-        )
-    for (model, orientation), row in pivot.iterrows():
-        out.setdefault(model, {})[f"d_{orientation}"] = row[sr_col] - row["plain"]
-    return pd.DataFrame(out).T.reset_index(names=model_col)
-
-
 def js_divergence(p, q, eps: float = 1e-12) -> float:
     """Jensen-Shannon divergence in base 2; output in [0, 1]."""
     import math
@@ -1333,104 +1241,205 @@ def js_divergence(p, q, eps: float = 1e-12) -> float:
     return 0.5 * kl(p, m) + 0.5 * kl(q, m)
 
 
-def js_divergence_to_human(
-    human_df, lm_df, group_keys: tuple[str, ...] = ("model", "prompt")
-):
-    """Per LM cell, JS divergence between its macro distribution and human's.
+# ============================================================================
+# 7. Scaffolding-vs-rigor KL divergence
+# ============================================================================
+#
+# How differently a tutor acts in scaffolding moments (S) vs rigor moments (R):
+# KL(S||R) and KL(R||S) between the two macro distributions. The method is the
+# paper's (analysis/working-paper-20260630, locked kl_divergence_table.tex):
+# per situation, macro % -> pseudo-counts over that situation's moments
+# (pct / 100 * n), add-one smoothing, KL in nats.
+#
+# Pure Python (no pandas), so every run records it without the analysis extra.
+# The smoothing's pull toward uniform shrinks as n grows, so KL values are
+# only comparable at similar n; n is recorded beside them for that reason.
 
-    Returns a DataFrame with `*group_keys, n_moments, js_divergence` sorted
-    by divergence ascending (closest to human first).
+KL_SITUATIONS: tuple[str, str] = ("scaffolding", "rigor")
+
+
+def smoothed_probs(
+    pcts: list[float], n_moments: int, alpha: float = 1.0
+) -> list[float]:
+    """Macro % -> add-`alpha` smoothed probabilities over `n_moments` moments."""
+    counts = [p / 100.0 * n_moments + alpha for p in pcts]
+    total = sum(counts)
+    return [c / total for c in counts]
+
+
+def kl_nats(p: list[float], q: list[float]) -> float:
+    """KL(p||q) in nats. Both must be strictly positive (see smoothed_probs)."""
+    import math
+
+    return sum(pi * (math.log(pi) - math.log(qi)) for pi, qi in zip(p, q))
+
+
+def macro_pcts(facets: Iterable[Facet]) -> tuple[list[float], int]:
+    """Macro-mean % of each letter over moments, plus the moment count.
+
+    The pure-Python `macro_distribution` mean: each moment's within-moment
+    fraction per letter, averaged across moments. Facets without a category
+    are ignored; a moment with none is not a moment.
     """
-    _require_analysis_extras()
-    pd = importlib.import_module("pandas")  # used at return
-    h = macro_distribution(human_df)
-    human_vec = (
-        h.set_index("letter")["mean_pct"].reindex(CATEGORY_LETTERS, fill_value=0.0)
-        / 100
-    ).tolist()
-    cells = macro_distribution(lm_df, group_keys=group_keys)
-    rows = []
-    for key, sub in cells.groupby(list(group_keys)):
-        if not isinstance(key, tuple):
-            key = (key,)
-        vec = (
-            sub.set_index("letter")["mean_pct"].reindex(
-                CATEGORY_LETTERS, fill_value=0.0
-            )
-            / 100
-        ).tolist()
-        rows.append(
-            {
-                **{k: v for k, v in zip(group_keys, key)},
-                "n_moments": int(sub["n_moments"].iloc[0]),
-                "js_divergence": js_divergence(vec, human_vec),
-            }
-        )
-    return pd.DataFrame(rows).sort_values("js_divergence").reset_index(drop=True)
+    from collections import Counter
+
+    by_moment: dict[str, Counter] = {}
+    for f in facets:
+        if f.category is None:
+            continue
+        by_moment.setdefault(f.moment_id, Counter())[f.category] += 1
+    n = len(by_moment)
+    if n == 0:
+        return [0.0] * len(CATEGORY_LETTERS), 0
+    totals = [sum(c.values()) for c in by_moment.values()]
+    pcts = [
+        100.0 * sum(c[letter] / t for c, t in zip(by_moment.values(), totals)) / n
+        for letter in CATEGORY_LETTERS
+    ]
+    return pcts, n
 
 
-def build_headline_tables(
-    human_facets: Iterable[Facet], lm_facets: Iterable[Facet]
-) -> dict[str, Any]:
-    """Compute all five headline tables in one pass.
+def kl_situation(facets: Iterable[Facet]) -> dict[str, Any]:
+    """S-vs-R KL divergence of one cell's classified facets.
 
-    Returns a dict keyed by table name:
-      distribution, orientation_rollup, appropriateness, prompt_effect,
-      js_divergence_to_human.
+    Returns ``{s_r, r_s, n_scaffolding, n_rigor}``: KL(S||R) and KL(R||S) in
+    nats, and the moment count each side was smoothed over. Moments are
+    grouped by `moment_id` (a multi-trial run pools its trials under one id),
+    and only `situation_label` scaffolding / rigor moments take part. Both KL
+    values are None when either situation has no classified moment.
     """
-    _require_analysis_extras()
-    human_df = facets_to_dataframe(human_facets)
-    lm_df = facets_to_dataframe(lm_facets)
-    human_df["cell"] = "human"
-    lm_df["cell"] = lm_df["model"].astype(str) + " / " + lm_df["prompt"].astype(str)
-    combined = _pd_concat([human_df, lm_df])
-    return {
-        "distribution": macro_distribution(combined, group_keys=("cell",)),
-        "orientation_rollup": macro_orientation(combined, group_keys=("cell",)),
-        "appropriateness": macro_appropriateness(combined, group_keys=("cell",)),
-        "prompt_effect": prompt_effect_deltas(lm_df),
-        "js_divergence_to_human": js_divergence_to_human(human_df, lm_df),
-    }
-
-
-def _pd_concat(frames):
-    pd = importlib.import_module("pandas")
-    return pd.concat(frames, ignore_index=True)
-
-
-def write_headline_csvs(tables: dict[str, Any], out_dir: Path) -> None:
-    """Persist every table to `out_dir/<table_name>.csv`.
-
-    Uses atomic write-and-rename so a crash mid-write never leaves a partial CSV.
-    """
-    _require_analysis_extras()
-    import os
-
-    out_dir = Path(out_dir)
-    out_dir.mkdir(parents=True, exist_ok=True)
-    for name, df in tables.items():
-        final = out_dir / f"{name}.csv"
-        tmp = final.with_suffix(".csv.tmp")
-        df.to_csv(tmp, index=False)
-        os.replace(tmp, final)
-
-
-def read_headline_csvs(in_dir: Path) -> dict[str, Any]:
-    """Load every table written by `write_headline_csvs`."""
-    _require_analysis_extras()
-    pd = importlib.import_module("pandas")
-    in_dir = Path(in_dir)
-    out: dict[str, Any] = {}
-    for path in sorted(in_dir.glob("*.csv")):
-        out[path.stem] = pd.read_csv(path)
+    facets = list(facets)
+    out: dict[str, Any] = {"s_r": None, "r_s": None}
+    dists = {}
+    for sit in KL_SITUATIONS:
+        pcts, n = macro_pcts(f for f in facets if f.situation_label == sit)
+        out[f"n_{sit}"] = n
+        if n:
+            dists[sit] = smoothed_probs(pcts, n)
+    if len(dists) == len(KL_SITUATIONS):
+        s, r = dists["scaffolding"], dists["rigor"]
+        out["s_r"], out["r_s"] = kl_nats(s, r), kl_nats(r, s)
     return out
 
 
+# -- Human reference ----------------------------------------------------------
+#
+# The human side of the comparison, on the same moments the runs use: the
+# human-tutor actions at each `moments.jsonl` moment's span, read from the
+# published `action_taxonomy` config (already classified -- no API calls).
+# Every annotator at a span is pooled into that one moment, and the moment's
+# own `dimension` is its situation label (moments.jsonl is authoritative,
+# even where the ground-truth label at the span differs). Pinned to a full
+# commit SHA so the reference cannot drift under a report.
+
+HUMAN_REFERENCE: tuple[str, str] = (
+    "allenai/tutormoments-preview",
+    "3bb0c104d65e29facffca7ba864ef10fa22d0e78",
+)
+HUMAN_REFERENCE_LABEL = "balanced_520 human tutors"
+HUMAN_REFERENCE_FILES = ("moments.jsonl", "action_taxonomy.jsonl")
+_FULL_SHA_RE = re.compile(r"^[0-9a-f]{40}$")
+
+
+def _iter_jsonl(path: Path) -> Iterator[dict]:
+    with Path(path).open(encoding="utf-8") as f:
+        for line in f:
+            line = line.strip()
+            if line:
+                yield json.loads(line)
+
+
+def _hf_download(dataset: str, filename: str, revision: str) -> Path:
+    from huggingface_hub import hf_hub_download  # ships with `datasets`
+
+    return Path(
+        hf_hub_download(dataset, filename, repo_type="dataset", revision=revision)
+    )
+
+
+def human_reference_facets(
+    moments_path: Path, action_taxonomy_path: Path
+) -> list[Facet]:
+    """Classified human-tutor facets at each moment's span, one moment per span.
+
+    A moment's span is (`provenance.conv_id`'s last ``_`` part,
+    `provenance.turn_start`, `provenance.turn_end`); human `action_taxonomy`
+    rows join on (`transcript_id`, `turn_start`, `turn_end`). Each facet takes
+    the moment's id (pooling annotators) and the moment's `dimension`.
+    """
+    spans: dict[tuple[str, int, int], tuple[str, str]] = {}
+    for m in _iter_jsonl(moments_path):
+        prov = m.get("provenance") or {}
+        conv_id = prov.get("conv_id")
+        if not conv_id or prov.get("turn_start") is None:
+            continue
+        key = (conv_id.rsplit("_", 1)[-1], prov["turn_start"], prov["turn_end"])
+        spans[key] = (m["id"], m.get("dimension") or "unknown")
+
+    out: list[Facet] = []
+    for r in _iter_jsonl(action_taxonomy_path):
+        if r.get("source") != "human" or r.get("category") is None:
+            continue
+        hit = spans.get((r["transcript_id"], r["turn_start"], r["turn_end"]))
+        if hit is None:
+            continue
+        moment_id, dimension = hit
+        out.append(
+            Facet(
+                moment_id=moment_id,
+                transcript_id=r["transcript_id"],
+                turn_start=r["turn_start"],
+                turn_end=r["turn_end"],
+                statement_index=r["statement_index"],
+                statement=r["statement"],
+                annotation_type="scaffolding",
+                situation_label=dimension,
+                action_label=r.get("action_label"),
+                result_label=r.get("result_label"),
+                source="hf",
+                stance_prefixed=bool(r.get("stance_prefixed")),
+                category=r["category"],
+            )
+        )
+    return out
+
+
+def human_reference(
+    dataset: str = HUMAN_REFERENCE[0],
+    revision: str = HUMAN_REFERENCE[1],
+    *,
+    download=None,
+) -> dict[str, Any]:
+    """S-vs-R KL of the human tutors on the released moments, at `revision`.
+
+    `revision` must be a full 40-character commit SHA. `download(dataset,
+    filename, revision) -> Path` fetches one release file (default: the
+    Hugging Face cache). Returns ``{label, dataset, revision, kl}`` with `kl`
+    shaped like `kl_situation`'s. Raises on any download or parse failure;
+    callers that treat the reference as optional catch it.
+    """
+    if not _FULL_SHA_RE.match(revision or ""):
+        raise ValueError(
+            f"human reference revision must be a full 40-character commit SHA, "
+            f"got {revision!r}"
+        )
+    download = download or _hf_download
+    moments_path, taxonomy_path = (
+        download(dataset, name, revision) for name in HUMAN_REFERENCE_FILES
+    )
+    return {
+        "label": HUMAN_REFERENCE_LABEL,
+        "dataset": dataset,
+        "revision": revision,
+        "kl": kl_situation(human_reference_facets(moments_path, taxonomy_path)),
+    }
+
+
 # ============================================================================
-# 7. Pipeline orchestration
+# 8. Pipeline orchestration
 # ============================================================================
 #
-# Each `run_*` function is idempotent and writes its outputs to disk so the
+# `run_classify` is idempotent and writes its outputs to disk so the
 # next stage can read them back. They are usable from Python and from the CLI.
 
 InputSpec = dict[
@@ -1481,40 +1490,6 @@ def run_classify(input_spec: InputSpec, out_dir: Path, **classify_kwargs) -> Pat
     return classified_path
 
 
-def run_headline(
-    human_classified: Path, lm_classified: Path, out_dir: Path
-) -> dict[str, Any]:
-    """Compute the 5 headline tables from two classified.csv files."""
-    human = read_classified_csv(Path(human_classified))
-    lm = read_classified_csv(Path(lm_classified))
-    tables = build_headline_tables(human, lm)
-    write_headline_csvs(tables, Path(out_dir))
-    return tables
-
-
-def run_all(
-    human_input: InputSpec, lm_input: InputSpec, out_dir: Path, **classify_kwargs
-) -> dict[str, Any]:
-    """Run the whole pipeline end-to-end.
-
-    Layout under `out_dir`:
-      human/         classified.csv, pool.csv, excluded.csv, assignments.jsonl
-      lm/            classified.csv, pool.csv, excluded.csv, assignments.jsonl
-      headline/      distribution.csv ... js_divergence_to_human.csv
-
-    Figures are produced by paper-facing notebooks under
-    `analysis/working-paper-*` that consume the headline CSVs.
-    """
-    out_dir = Path(out_dir)
-    human_classified = run_classify(human_input, out_dir / "human", **classify_kwargs)
-    lm_classified = run_classify(lm_input, out_dir / "lm", **classify_kwargs)
-    if not human_classified.exists() or not lm_classified.exists():
-        logger.info("classification incomplete; rerun to finish before headline")
-        return {}
-    tables = run_headline(human_classified, lm_classified, out_dir / "headline")
-    return {"headline": tables}
-
-
 def classify_run(
     annotations: Iterable[Any],
     moments: Iterable[Any],
@@ -1536,7 +1511,9 @@ def classify_run(
     (the sanity-probe cap is disabled here).
 
     Returns a summary dict:
-      {scheme_version, counts: {letter: n}, n_facets, excluded, usage}.
+      {scheme_version, counts: {letter: n}, orientation, kl, n_facets,
+       excluded, usage}
+    where `kl` is `kl_situation` over the run's classified facets.
     """
     out_dir = Path(out_dir)
     facets = list(facets_from_annotations(annotations, moments, model=model, mode=mode))
@@ -1584,6 +1561,7 @@ def classify_run(
             "rigor": orientation.get("rigor", 0),
             "neutral": orientation.get("neutral", 0),
         },
+        "kl": kl_situation(classified),
         "n_facets": len(classified),
         "excluded": len(excluded),
         "usage": usage,
@@ -1591,15 +1569,16 @@ def classify_run(
 
 
 # ============================================================================
-# 8. CLI dispatcher
+# 9. CLI dispatcher
 # ============================================================================
 
 
 def _build_argparser() -> argparse.ArgumentParser:
     parser = argparse.ArgumentParser(
         prog="tutormoments taxonomy",
-        description="Classify decomposed tutor actions into A-M and produce "
-        "headline tables. Paper figures live in working-paper notebooks.",
+        description="Classify decomposed tutor actions into A-M. Runs record "
+        "their own S-vs-R KL; `tutormoments report` tabulates it. Paper figures "
+        "live in working-paper notebooks.",
     )
     sub = parser.add_subparsers(dest="cmd", required=True)
 
@@ -1624,31 +1603,6 @@ def _build_argparser() -> argparse.ArgumentParser:
         help="cap LLM batches this run (e.g. for first-run probes)",
     )
 
-    p_hl = sub.add_parser("headline", help="build the 5 headline CSVs")
-    p_hl.add_argument(
-        "--human",
-        required=True,
-        type=Path,
-        help="classified.csv from `taxonomy classify` for the human pool",
-    )
-    p_hl.add_argument(
-        "--lm",
-        required=True,
-        type=Path,
-        help="classified.csv from `taxonomy classify` for the LM pool",
-    )
-    p_hl.add_argument("--output", required=True, type=Path)
-
-    p_run = sub.add_parser("run", help="classify (twice) -> headline end-to-end")
-    p_run.add_argument("--human-kind", default="key_moments", choices=input_kinds)
-    p_run.add_argument("--human-input", required=True)
-    p_run.add_argument("--human-scenarios")
-    p_run.add_argument("--lm-kind", default="tutormoments", choices=input_kinds)
-    p_run.add_argument("--lm-input", required=True)
-    p_run.add_argument("--lm-scenarios")
-    p_run.add_argument("--output", required=True, type=Path)
-    p_run.add_argument("--max-batches", type=int, default=None)
-
     return parser
 
 
@@ -1664,28 +1618,6 @@ def cli_dispatch(argv: Optional[list[str]] = None) -> int:
                 raise SystemExit("--scenarios is required when --kind tutormoments")
             spec["scenarios"] = args.scenarios
         run_classify(spec, Path(args.output), max_batches=args.max_batches)
-        return 0
-
-    if args.cmd == "headline":
-        run_headline(args.human, args.lm, args.output)
-        return 0
-
-    if args.cmd == "run":
-        human_spec: InputSpec = {"kind": args.human_kind, "path": args.human_input}
-        if args.human_kind == "tutormoments":
-            if not args.human_scenarios:
-                raise SystemExit(
-                    "--human-scenarios is required when --human-kind tutormoments"
-                )
-            human_spec["scenarios"] = args.human_scenarios
-        lm_spec: InputSpec = {"kind": args.lm_kind, "path": args.lm_input}
-        if args.lm_kind == "tutormoments":
-            if not args.lm_scenarios:
-                raise SystemExit(
-                    "--lm-scenarios is required when --lm-kind tutormoments"
-                )
-            lm_spec["scenarios"] = args.lm_scenarios
-        run_all(human_spec, lm_spec, args.output, max_batches=args.max_batches)
         return 0
 
     return 1

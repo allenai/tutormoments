@@ -125,9 +125,16 @@ tutormoments report --results-root results --out leaderboard
 ```
 
 This writes `leaderboard.md` and `leaderboard.csv`. Columns are the paper's three metrics,
-then TTFT from any serial [latency](#latency) probe in the same results root, then the run's
-own end-to-end tutor latency, token totals, and tutor cost per conversation (list rates,
-actual cache mix — see [docs/cost.md](docs/cost.md); runs predating cost capture show `-`).
+then the run's scaffolding-vs-rigor KL divergence (`kl_s_r`, `kl_r_s`; see
+[Action taxonomy](#action-taxonomy)), then TTFT from any serial [latency](#latency) probe in
+the same results root, then the run's own end-to-end tutor latency, token totals, and tutor
+cost per conversation (list rates, actual cache mix — see [docs/cost.md](docs/cost.md); runs
+predating cost capture show `-`).
+
+The first row is a **human reference** (`balanced_520 human tutors`) with the same two KL
+values for the human tutors on the same moments. It is read from the published dataset at a
+pinned commit; pass `--human-reference-revision <sha>` to use another. When the Hub is
+unreachable and nothing is cached, the row is left out with a printed note.
 
 Build a self-contained HTML viewer:
 
@@ -228,7 +235,9 @@ python my_tutormoments_wrapper.py run --tutors my-tutor --sample 1 --data_path <
 The released dataset carries two representations of the same underlying data:
 
 - **Source configs** for data consumers — `transcripts` (full sessions),
-  `annotations` (human SAR annotations), `ground_truth` (labeled key moments).
+  `annotations` (human SAR annotations), `ground_truth` (labeled key moments),
+  `action_taxonomy` (decomposed tutor actions classified A–M; see
+  [Action taxonomy](#action-taxonomy)).
 - **`moments`** for eval runners — the frozen, self-contained runnable set
   (520 moments: 260 scaffolding / 260 rigor). Each record carries the pre-cut
   transcript context, gold dimension, the real human continuation (for the
@@ -271,46 +280,70 @@ and `avoids_overscaffold`.
 ## Action taxonomy
 
 The action taxonomy classifies each decomposed tutor action into a 13-letter
-scheme and produces the tables behind the paper's action-distribution figures.
-The *data generation* lives in the runtime (`tutormoments.taxonomy` +
-`tutormoments taxonomy`); the *figures* are rendered by the notebooks under
+scheme (A–M), each letter oriented toward scaffolding, rigor or neither. The
+classification lives in the runtime (`tutormoments.taxonomy` + `tutormoments
+taxonomy classify`); the paper's *figures* are rendered by the notebooks under
 `analysis/working-paper-*`, which import `from tutormoments import taxonomy`.
 
-**Every `tutormoments run` classifies its own LM-side actions** — alongside the
-headline metrics — writing `results/<run_id>/taxonomy/classified.csv` and a
-`taxonomy` block (raw category counts) into `summary.json`. This adds an LLM
-classification pass per run (model set by the `taxonomy` config block, default
-`claude-opus-4-8`); it is resume-safe and never fails the run.
+**Every `tutormoments run` classifies its own tutor actions**, writing
+`results/<run_id>/taxonomy/classified.csv` and a `taxonomy` block into
+`summary.json`: category counts, the orientation mix, and the KL divergence
+below. This adds an LLM classification pass per run (model set by the
+`taxonomy` config block, default `claude-opus-4-8`). It can resume, and it never
+fails the run.
 
-The comparison figures plot each LM against a fixed **human reference**
-distribution. That reference is the paper's frozen, published distribution —
-[`analysis/working-paper-20260630/v1_action_taxonomy_distribution.csv`](analysis/working-paper-20260630/v1_action_taxonomy_distribution.csv)
-— so you do **not** re-classify the ground truth; the figure notebooks load it
-by default via `tutormoments.taxonomy.read_paper_distribution(...)`. Only the LM
-side comes from your run. Rendering the figures needs pandas + matplotlib —
-install the `analysis` extra:
+**KL divergence.** `taxonomy.kl` records how differently the tutor acts in
+scaffolding moments (S) and rigor moments (R): KL(S‖R) and KL(R‖S) in nats,
+with `n_scaffolding` / `n_rigor` (unique moments; trials pool under one moment).
+The method is the paper's: per situation, the macro % of each category becomes
+pseudo-counts over that situation's moments, with add-one smoothing. Larger
+values mean the tutor separates the two situations more. The smoothing pulls
+both sides toward uniform less as n grows, so compare runs at similar n (a
+`--sample` run's KL is not comparable to a full run's). The run summary prints
+it, and `tutormoments report` / `view` tabulate it next to the human reference.
+Runs from before KL was recorded get it from their `classified.csv` at report
+time, with no re-run.
+
+**The human reference** uses the dataset's `action_taxonomy` config: one row per
+decomposed action, classified A–M, for the human tutors (`ground_truth`) and the
+paper's models (`benchmark_520`), with its own schema and manifest. The reference
+takes the human-tutor actions at each `moments.jsonl` moment's span, pools every
+annotator at that span into the moment, and uses the moment's own `dimension`
+as its situation. At the pinned commit that is 518 of the 520 moments (260
+scaffolding / 258 rigor; the other 2 have no classified human actions), with
+KL(S‖R) 0.524 and KL(R‖S) 0.591.
+
+**The paper's numbers are frozen.** The paper's human KL (0.179 / 0.177, in
+[`analysis/working-paper-20260630/kl_divergence_table.tex`](analysis/working-paper-20260630/kl_divergence_table.tex))
+and its action-distribution figure data
+([`v1_action_taxonomy_distribution.csv`](analysis/working-paper-20260630/v1_action_taxonomy_distribution.csv))
+were computed from classifications that no longer exist. Recomputing on the
+release's moments doesn't reproduce them, which is why the reference above
+differs. Both files stay the paper's record and are never regenerated (a test
+pins their hashes). Compare new runs with the reference row, which is computed
+the same way on the same moments as the runs.
+
+The figure notebooks plot each LM against the paper's frozen human distribution
+(`tutormoments.taxonomy.read_paper_distribution(...)`); the LM side comes from a
+`classified.csv`. Rendering them needs pandas + matplotlib — install the
+`analysis` extra:
 
 ```bash
 pip install -e ".[analysis]"
 ```
 
 Then point a figure notebook's `LM_CLASSIFIED` at your run's
-`results/<run_id>/taxonomy/classified.csv` and run it — the human baseline is
-already wired to the paper distribution.
+`results/<run_id>/taxonomy/classified.csv` and run it.
 
-Regenerating (optional): to rebuild the human reference from scratch, or to
-produce the full headline tables from classified facets:
+Re-classifying (optional):
 
 ```bash
-# Regenerate the human reference from the ground-truth bundle:
+# Classify the human side from the ground-truth bundle:
 tutormoments taxonomy classify --kind key_moments --input key_moments.jsonl --output ./human
 
 # Re-classify a completed run's LM side (normally emitted by the run itself):
 tutormoments taxonomy classify --kind tutormoments --input results/<run_id>/ \
   --scenarios data/balanced_520_release/moments.jsonl --output ./lm
-
-# Headline tables from classified facets (needs a classified human side):
-tutormoments taxonomy headline --human ./human/classified.csv --lm ./lm/classified.csv --output ./headline
 ```
 
 ## Repository Layout
@@ -472,9 +505,6 @@ tutormoments-build dataset build-action-taxonomy \
   --revision <40-char dataset commit SHA> \
   --out data/action_taxonomy_release \
   --created 2026-10-01
-
-# Compare that build with the paper's frozen distribution CSV and KL table
-python -m tutormoments_build.action_taxonomy_compare --release data/action_taxonomy_release
 ```
 
 `tutormoments_build/balanced_520_ids.json` is the canonical, frozen selection of

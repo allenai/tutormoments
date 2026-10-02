@@ -31,6 +31,10 @@ imports them.
 - `src/tutormoments/latency_probe_ids.json` is frozen the same way
   `balanced_520_ids.json` is: committed and never regenerated — re-picking it
   breaks comparability with every prior latency measurement.
+- `analysis/working-paper-20260630/kl_divergence_table.tex` and
+  `v1_action_taxonomy_distribution.csv` are the paper's frozen numbers (its
+  classifications can't be regenerated). Never edit or overwrite them;
+  `tests/analysis/test_frozen_paper_files.py` pins their hashes.
 - The `src/tutormoments` runtime consumes released datasets only. It never constructs, filters, or regenerates benchmark data (including student traits — those are frozen in the release).
 - `data/` and `results/` are gitignored and must stay that way to allow researchers to generate their own results.
 - All LLM prompts live under consolidated `prompts/{my prompt}.md` directories as standalone markdown files, never inline in Python source. This ensures that they are human readable. Templates are loaded from disk and filled at call time.

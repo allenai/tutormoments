@@ -558,6 +558,55 @@ def test_classify_run_writes_classified_and_counts(tmp_path):
     assert summary["usage"]["total_tokens"] > 0
 
 
+def test_classify_run_summary_records_kl_over_unique_moments(tmp_path):
+    """The run's own KL lands in the summary; n counts unique moments, so a
+    second trial of the same moment does not double it."""
+    anns = [
+        _ann(
+            scenario_id="s1", action_decomposed=["The tutor asks a guiding question."]
+        ),
+        _ann(
+            scenario_id="s1", action_decomposed=["The tutor asks a guiding question."]
+        ),
+        _ann(scenario_id="r1", action_decomposed=["The tutor asks for a proof."]),
+    ]
+    moments = [
+        _moment(id="s1", dimension="scaffolding"),
+        _moment(id="s1", dimension="scaffolding"),
+        _moment(id="r1", dimension="rigor"),
+    ]
+    client = _FakeClient(
+        payloads=['{"assignments":[{"id":1,"category":"A"},{"id":2,"category":"G"}]}']
+    )
+    summary = tx.classify_run(
+        anns, moments, tmp_path / "taxonomy", model="m", mode="plain", client=client
+    )
+    kl = summary["kl"]
+    assert (kl["n_scaffolding"], kl["n_rigor"]) == (1, 1)
+    classified = tx.read_classified_csv(tmp_path / "taxonomy" / "classified.csv")
+    assert kl == tx.kl_situation(classified)
+    assert kl["s_r"] > 0 and kl["r_s"] > 0
+
+
+def test_taxonomy_cli_has_only_classify():
+    """`taxonomy headline` / `taxonomy run` were removed; classify remains."""
+    parser = tx._build_argparser()
+    for gone in ("headline", "run"):
+        with pytest.raises(SystemExit):
+            parser.parse_args([gone, "--output", "x"])
+    args = parser.parse_args(
+        ["classify", "--kind", "key_moments", "--input", "gt.jsonl", "--output", "o"]
+    )
+    assert args.cmd == "classify" and args.kind == "key_moments"
+    for name in (
+        "build_headline_tables",
+        "run_headline",
+        "run_all",
+        "macro_orientation",
+    ):
+        assert not hasattr(tx, name)
+
+
 def test_taxonomy_spec_reads_config():
     from tutormoments import config as cfgmod
 
