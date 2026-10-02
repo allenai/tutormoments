@@ -914,10 +914,14 @@
         h("p", "ex-hint", "No replay of this moment for this model and prompt.", mc);
       } else {
         var mv = h("div", "ex-verdict", null, mc);
+        // A miss for over-scaffolding is named as that alone: the action
+        // label beside it would read as a second, contradictory verdict.
+        var overMiss = !cell.right && cell.overscaffold;
         h("span", "ex-chip " + (cell.right ? "ok" : "miss"),
-          (cell.right ? "✓ " : "✗ ") + (ACTION_TEXT[cell.label] || cell.label || "No call"), mv);
+          (cell.right ? "✓ " : "✗ ") +
+            (overMiss ? "Over-scaffolded" : (ACTION_TEXT[cell.label] || cell.label || "No call")), mv);
         var why = cell.right ? "fits the moment, per the scorer"
-          : (cell.overscaffold ? "over-scaffolded, per the scorer"
+          : (overMiss ? "per the scorer"
             : (mo.dimension === "rigor" ? "rigor was called for, per the scorer" : "scaffolding was called for, per the scorer"));
         h("span", null, why, mv);
         renderTurns(cell.turns, mc, "Student (simulated)");
