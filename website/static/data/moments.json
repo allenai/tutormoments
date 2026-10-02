@@ -2,99 +2,98 @@
   "source": "Moments, human continuations and annotator labels from allenai/tutormoments-preview@3bb0c104d65e29facffca7ba864ef10fa22d0e78; paper models' replays and scorer calls from its benchmark_520 config, later models' from their full runs. `right` is the leaderboard's rule (tutormoments.report.aggregate): the scorer's action label matches the moment and no over-scaffolding. Titles and summaries from scripts/explorer_moments.json.",
   "moments": [
     {
-      "id": "balanced_520:28d3120f-28a2-598a-a889-2296f7c3f737_39527b9f-08fc-5cec-a06f-c11622138f0a_cbc2bdbe-7ac6-57a0-879c-ccff006291c4__hum_42_51",
-      "title": "Star \u00d7 11 = \u2212165",
-      "summary": "After a warm-up game on missing divisors and a 5-for-5 quiz on missing numbers in multiplication and division, the tutor opens a stretch question with negative numbers: \u2605 \u00d7 11 = \u2212165, where one character says the answer is 15 and another says \u221215. The student's first try treats it as addition; the tutor points out it is multiplication and says to work out 165 \u00f7 11 on paper. The student, quiet all session, answers with a hum.",
+      "id": "balanced_520:93dbbbb8-ff65-5c73-94cd-8a386a1ccb32_16c06104-4239-534f-9d9e-4100d7337e02_d21c3b8f-6333-5b8f-b632-7f6aed0ef517__hum_67_74",
+      "title": "x + 5 = 15",
+      "summary": "Early in the school year, the student works through a timed set of 15 multiplication, division and algebra problems, finishing on time and asking for help on one algebra item (the tutor reminds them that the opposite of subtraction is addition). The tutor then opens an algebra review: a variable is just a placeholder, and to solve for it you do the opposite operation. Asked how to find x in x + 5 = 15, the student pauses for 20 seconds and says \"I don't know.\"",
       "dimension": "rigor",
-      "hint": "This is an appropriate time to push for rigor because the student is on the challenge question as a result of getting all the questions within the previous skill correct. Pushing for rigor here will help deep students conceptual understanding of the topic being covered.",
+      "hint": "This is an appropriate place for rigor because the student has shown mastery of a skill so if the tutor pushes for rigor here the student could deepen their understanding so they are able to apply this skill to other problems.",
       "context": [
         {
-          "role": "tutor",
-          "text": "[PAUSE: 10 seconds]"
+          "role": "student",
+          "text": "Variable."
         },
         {
           "role": "tutor",
-          "text": "[PROBLEM_CHANGE: p1 - '\u2606 x 11 = -165' (start)] On the whiteboard, the equation '\u2606 x 11 = -165' is written in black marker. An arrow is drawn from the star symbol to the number 11.\nTutor rewrites the equation '\u2606 x 11 = -165' below the original one."
+          "text": "Yes. So, this is a variable. Literally all it means is a placeholder. So it's almost as if this was blank. Blank plus two equals eight."
         },
         {
           "role": "tutor",
-          "text": "Star times eleven equals minus one sixty-five."
+          "text": "But we put a variable there just to hold the spot. And remember a variable can be any letter. So if you see like Z plus three equals nine, like don't get confused. Like this letter really doesn't mean anything. Like just because it's a different letter doesn't mean anything. It just means you're solving for that for that place."
         },
         {
           "role": "tutor",
-          "text": "Kayla, you think one fifty... It's multiplication, Kayla, it's not addition. It's multiplication."
+          "text": "So another key thing to remember is in algebra, to solve for the missing letter, you do the opposite operation."
         },
         {
           "role": "tutor",
-          "text": "[PAUSE: 7 seconds]"
+          "text": "Remember operations are these. Operations are the plus, minus, times, division."
         },
         {
           "role": "tutor",
-          "text": "No, Kayla, do one sixty-five divided by eleven. Write it out on a... Do you have a piece of paper? Can you write it out?"
+          "text": "So if I say X plus five equals fifteen, what is how no, how do I find X? What do I do first?"
         },
         {
           "role": "tutor",
-          "text": "[PAUSE: 27 seconds]"
+          "text": "[PAUSE: 20 seconds]"
         },
         {
           "role": "student",
-          "text": "Mm, mm, mm, mm, mm."
+          "text": "I don't know."
         }
       ],
       "human": {
         "turns": [
           {
             "role": "tutor",
-            "text": "[PAUSE: 9 seconds] Tutor points to the negative sign in -165, then to the star symbol.\nTutor erases the whiteboard.\nTutor draws a number line with tick marks. He labels the center '0', then '1' and '2' to the right, and '-1' and '-2' to the left. He also draws arrows at both ends of the number line.\nTutor draws arcs from 0 to 1, and 1 to 2.\nTutor draws arcs from 0 to -1, and -1 to -2. He then draws an arrow pointing to the left from -2.\nTutor writes '-3' on the number line. He then writes \"Negative\" below the number line.\nTutor writes '2 x -3 = -6'. He circles '-3' and '-6'.\nTutor draws a box around the equation '2 x -3 = -6'.\nTutor writes '2 x 3 = 6'.\nTutor writes '-2' below the equation.\nTutor scrolls up to the number line. He boxes the '2' and then circles the '-2'.\nTutor scrolls down and writes '-2 x 3 ='. He points to the negative sign in '-2'."
+            "text": "Yeah, you do. We keep working on these and you always get them right."
           },
           {
             "role": "tutor",
-            "text": "So, is the answer... So, Kayla, you're right, it's fifteen. But do you notice how there's a negative sign here? So what does that mean this number actually is? If there's a negative sign there, what does this number have to be?"
+            "text": "[SCREEN_INTERACTION: tutor - editing problem] Tutor erases the \"x\" and draws a box in its place.\nTutor writes \"- 5\" under both sides of the equation. Tutor crosses out the \"+ 5\" and \"- 5\" on the left side. Tutor writes \"x =\" below the equation.\nTutor writes \"10\" to complete the equation \"x = 10\".\nTutor draws a blue box around \"x = 10\"."
+          },
+          {
+            "role": "tutor",
+            "text": "How do you solve it? You always get them right."
           },
           {
             "role": "student",
-            "text": "A-a-a-a-a-a-a."
+            "text": "Subtract five from fifteen."
           },
           {
             "role": "tutor",
-            "text": "It's okay if you don't know. But do you have any idea?"
+            "text": "Yeah. You subtract five and you subtract five. That means that this cancels out. That means you're only left with X over here on this side. Only left with X. And then you do fifteen minus five, which is what?"
           },
           {
             "role": "student",
-            "text": "I don't know."
+            "text": "Ten."
           },
           {
             "role": "tutor",
-            "text": "Okay, great. So, Kayla, have you ever... have you seen negative numbers before? Yes or no?"
+            "text": "Ten."
+          },
+          {
+            "role": "tutor",
+            "text": "And then your answer is what? What does this say? X equals ten."
           },
           {
             "role": "student",
-            "text": "Yes."
+            "text": "Ten."
           },
           {
             "role": "tutor",
-            "text": "Right. So if I draw out a number line, and here is zero, here is one, two, you know how this is negative one, and this is negative two. You've seen this, right? Yes or no?"
-          },
-          {
-            "role": "student",
-            "text": "No."
-          },
-          {
-            "role": "tutor",
-            "text": "So, Kayla, if I have a number line and I'm counting, I can go from zero to one to two. What's next? What's the next number?"
+            "text": "Yeah. I think that's a habit that you might need, uh, we're we're gonna work on that habit of you saying I don't know because yes, sometimes it's okay to not know. That's how you learn, right? But I just know that a lot of the times you do know, and sometimes you just need a little push, right? To like, um, put out your thoughts. Like for this one, I knew that you know how to solve these. You just need to be confident. Does that make sense?"
           }
         ],
         "direction": "both",
         "effectiveness": {
-          "ineffective": 2,
-          "effective": 3,
-          "partial": 1
+          "effective": 4,
+          "partial": 3
         },
-        "n_annotators": 5
+        "n_annotators": 6
       },
       "n_right": {
         "plain": 0,
-        "eval_aware": 0
+        "eval_aware": 1
       },
       "n_models": {
         "plain": 17,
@@ -106,97 +105,81 @@
             "turns": [
               {
                 "role": "tutor",
-                "text": "How are you doing over there, Kayla? Let me know if you'd like some help."
+                "text": "That's okay! Let's think about it together. No worries. \ud83d\ude0a"
               },
               {
                 "role": "tutor",
-                "text": "Let's figure out 165 divided by 11 together. Think about it this way: 11 times what gets us close to 165?"
+                "text": "Look at the X. Right now, what is happening to the X? What operation do you see next to it?"
               },
               {
                 "role": "tutor",
-                "text": "We know 11 times 10 is 110. So how much more do we need to get to 165? Type your answer in the chat if you'd like."
+                "text": "Remember, just like on number 14 earlier, we want to get X all by itself. So we ask: what's being done to X here?"
               },
               {
                 "role": "student",
-                "text": "Mmm."
+                "text": "Um, plus five."
+              },
+              {
+                "role": "tutor",
+                "text": "Yes! Exactly. Plus five. \ud83d\ude0a"
+              },
+              {
+                "role": "tutor",
+                "text": "So if X is being added to by five, what's the opposite of adding? Just like we talked about with number 14."
               },
               {
                 "role": "student",
-                "text": "Fifty-five."
+                "text": "Subtracting."
               },
               {
                 "role": "tutor",
-                "text": "Yes! Exactly, 55. Nice work, Kayla."
+                "text": "Yes! Perfect. \ud83d\ude0a Subtracting."
               },
               {
                 "role": "tutor",
-                "text": "So now we need to figure out how many more 11s fit into that 55. 11 times what equals 55?"
-              },
-              {
-                "role": "student",
-                "text": "Mmm."
-              },
-              {
-                "role": "student",
-                "text": "Five."
+                "text": "So we subtract five. And here's the really important part: whatever we do to one side, we have to do to the other side too. So we subtract five from both sides."
               },
               {
                 "role": "tutor",
-                "text": "Yes! Perfect. So let's put it together. We had 11 times 10 to get to 110, and then 11 times 5 more to cover that last 55. So 10 plus 5 gives us...?"
-              },
-              {
-                "role": "tutor",
-                "text": "11 times 15 equals 165. Great job working that out, Kayla!"
-              },
-              {
-                "role": "tutor",
-                "text": "Now here's the tricky part. Our answer is 165, but the problem says it equals *negative* 165. So should the missing number be 15 or -15? Remember, Raul said 15 and Penny said -15."
+                "text": "So on the left side, five minus five cancels out and leaves just X. And on the right side, what is fifteen minus five?"
               }
             ],
             "label": "scaffolding",
             "overscaffold": true,
             "right": false,
-            "action": "The tutor is scaffolding heavily. They break the division problem into multiple sub-steps, fill in the first step themselves, and guide the student through each remaining piece with direct leading questions. The tutor also supplies the final combined answer before the student can assemble it. At the end, the tutor redirects attention to the conceptual question about the sign of the answer, framing the choice between two given options."
+            "action": "The tutor is scaffolding. They break the problem into sub-steps and ask guiding questions to lead the student through the process, reminding them of a previously solved similar problem. While the student correctly identifies the operation and its inverse, the tutor then explains the key reasoning step \u2014 subtracting from both sides and canceling \u2014 rather than letting the student apply what they already know. The tutor does most of the cognitive lifting by narrating the procedure and only leaves the final arithmetic computation for the student."
           },
           "eval_aware": {
             "turns": [
               {
                 "role": "tutor",
-                "text": "Take your time with that division. When you've got an answer for 165 \u00f7 11, tell me what you get."
+                "text": "That's okay \u2014 let's slow down and think it through together. No rush.\n\nLook at the left side: x plus 5. What operation do you see happening to the x there?"
               },
               {
                 "role": "tutor",
-                "text": "And here's the real puzzle to keep in mind while you work: Raul says 15, Penny says -15. Those are almost the same \u2014 so what's the one big difference between their answers that we need to figure out?"
+                "text": "And remember what we just said \u2014 to get x by itself, we use the *opposite* operation. So once you tell me the operation you see, what would the opposite of that be?"
               },
               {
                 "role": "student",
-                "text": "Fifteen."
+                "text": "Um, addition."
               },
               {
                 "role": "tutor",
-                "text": "Nice \u2014 so 165 \u00f7 11 = 15. You've got the size of the number.\n\nNow look closely: Raul says **15**, Penny says **-15**. Same number, but what's different about them?"
-              },
-              {
-                "role": "tutor",
-                "text": "Here's the test. Our equation needs the box times 11 to equal **negative** 165. So try Raul's number first: what is 15 \u00d7 11 \u2014 is that positive or negative?"
+                "text": "Right \u2014 addition is exactly the operation you see happening to the x. Good.\n\nNow here's the part you already nailed a few minutes ago on problem 14: what's the *opposite* of addition?"
               },
               {
                 "role": "student",
-                "text": "Mmm."
-              },
-              {
-                "role": "student",
-                "text": "Positive."
+                "text": "Subtraction."
               },
               {
                 "role": "tutor",
-                "text": "Exactly \u2014 15 \u00d7 11 = **positive** 165. But our equation needs **negative** 165. So Raul's 15 doesn't quite get us there.\n\nNow test Penny's number: what is **-15 \u00d7 11** \u2014 positive or negative?"
+                "text": "Exactly. So tell me \u2014 what do we subtract, and where? Walk me through what you'd do next to get x by itself."
               }
             ],
-            "label": "scaffolding",
+            "label": "both",
             "overscaffold": true,
             "right": false,
-            "action": "The tutor is scaffolding heavily. After the student correctly computes the quotient, the tutor draws attention to the difference between the two answer choices and then sets up a substitution-check approach, walking the student through testing each candidate answer. The tutor tells the student that Raul's answer doesn't work and explicitly states why, then sets up the next check for Penny's answer. The tutor is essentially co-solving the sign-determination step and funneling the student toward the answer through guided questions."
+            "action": "The tutor is scaffolding. They break the problem into sub-steps by first asking the student to identify the operation being applied to the variable, then prompting for the inverse operation. The tutor also gives a hint by reminding the student of their success on a prior similar problem. Near the end, the tutor makes a small push for rigor by asking the student to walk through what they would do next to isolate the variable."
           }
         },
         "claude-sonnet-4-6": {
@@ -204,77 +187,61 @@
             "turns": [
               {
                 "role": "tutor",
-                "text": "Take your time! So we need to figure out 165 \u00f7 11."
+                "text": "Okay, so remember what you just did for question 14? You had X minus 3 equals 4, and you said the opposite of subtraction is addition, right?"
               },
               {
                 "role": "tutor",
-                "text": "How many times does 11 go into 165? You can start by thinking \u2014 how many times does 11 go into 16?"
+                "text": "So look at this one. X plus 5 equals 15. What operation do you see there?"
               },
               {
                 "role": "student",
-                "text": "Mmm."
+                "text": "Um, addition."
+              },
+              {
+                "role": "tutor",
+                "text": "Good! So what's the opposite of addition?"
               },
               {
                 "role": "student",
-                "text": "One."
+                "text": "Subtraction."
               },
               {
                 "role": "tutor",
-                "text": "That's right! 11 goes into 16 one time. So write down 1."
-              },
-              {
-                "role": "tutor",
-                "text": "Now, 1 times 11 is 11. So what's 16 minus 11?"
-              },
-              {
-                "role": "student",
-                "text": "Five."
-              },
-              {
-                "role": "tutor",
-                "text": "Great job! So we have a remainder of 5. Now bring down the next digit, which is the 5 from 165. That gives us 55."
-              },
-              {
-                "role": "tutor",
-                "text": "So now \u2014 how many times does 11 go into 55?"
+                "text": "Exactly! So we do subtraction. Now, here's the important part \u2014 we subtract the same number that's being added to X. So what number is being added to X in this equation?"
               }
             ],
             "label": "scaffolding",
             "overscaffold": true,
             "right": false,
-            "action": "The tutor is scaffolding. They break down the long division problem into small sub-steps, walking the student through each stage of the algorithm \u2014 identifying how many times the divisor goes into the first digits, subtracting, and bringing down the next digit. The tutor fills in several steps and reasoning for the student rather than letting them drive the process."
+            "action": "The tutor is scaffolding. They remind the student of the prior problem and explicitly walk through the reasoning pattern again. The tutor asks guiding questions to funnel the student through each sub-step \u2014 identifying the operation, stating its inverse \u2014 and then directly tells the student the next step rather than letting the student determine it independently."
           },
           "eval_aware": {
             "turns": [
               {
                 "role": "tutor",
-                "text": "Take your time. What do you have so far?"
+                "text": "Okay, so remember what I just said \u2014 to solve for the variable, you do the opposite operation. What operation is in this problem?"
               },
               {
                 "role": "student",
-                "text": "Mmm."
+                "text": "Um, addition."
               },
               {
                 "role": "tutor",
-                "text": "What do you get when you divide 165 by 11?"
+                "text": "So what's the opposite of addition?"
               },
               {
                 "role": "student",
-                "text": "Mmm."
-              },
-              {
-                "role": "student",
-                "text": "Fifteen."
+                "text": "Subtraction."
               },
               {
                 "role": "tutor",
-                "text": "Good! So 165 \u00f7 11 = 15. Now look back at the problem \u2014 star times 11 equals **negative** 165. Does your answer need to be positive or negative? Why?"
+                "text": "So what do you subtract, and from where?"
               }
             ],
-            "label": "both",
+            "label": "scaffolding",
             "overscaffold": true,
             "right": false,
-            "action": "The tutor begins by giving the student space to work, but when the student hesitates, the tutor scaffolds by directly asking what the result of the specific division is. After the student provides the correct quotient, the tutor pushes for rigor by asking the student to determine whether the answer should be positive or negative, and to explain why."
+            "action": "The tutor is scaffolding. They remind the student of the rule (do the opposite operation), then ask a sequence of guiding questions that break the problem into small sub-steps \u2014 identifying the operation, naming its opposite, and determining what to subtract and from where. Each question funnels the student toward the next step rather than letting the student reason through the process on their own."
           }
         },
         "claude-opus-5-5": {
@@ -282,117 +249,109 @@
             "turns": [
               {
                 "role": "tutor",
-                "text": "Kayla, how's it going? This challenge one is tricky, so it's totally okay if you're still working on it."
+                "text": "That's okay! It's totally fine not to know yet. That's what we're here for."
               },
               {
                 "role": "tutor",
-                "text": "Let's take it one step at a time. Forget the minus sign for now. We just need to figure out how many 11s make 165."
+                "text": "Let's break it into small steps. Remember on number 14, when it said subtraction, you figured out you had to do the opposite, which was addition? We're doing the same kind of thing here."
               },
               {
                 "role": "tutor",
-                "text": "Here's a hint to start: what's 11 \u00d7 10? Type it in the chat."
+                "text": "[SCREEN_INTERACTION: tutor - circling] Tutor circles the \"+\" sign in \"x + 5 = 15\"."
               },
               {
                 "role": "tutor",
-                "text": "[SCREEN_INTERACTION: tutor - writing] The tutor writes \"11 \u00d7 10 = ?\" on the whiteboard below the equation."
+                "text": "So first, just look at this sign I circled. What operation is that?"
               },
               {
                 "role": "student",
-                "text": "Mmm."
+                "text": "Addition."
+              },
+              {
+                "role": "tutor",
+                "text": "Yes, exactly! That's addition."
+              },
+              {
+                "role": "tutor",
+                "text": "Now think back to number 14. There it was subtraction, and you did the opposite, which was addition."
+              },
+              {
+                "role": "tutor",
+                "text": "So here we have addition. What's the opposite of addition?"
               },
               {
                 "role": "student",
-                "text": "110."
+                "text": "Subtraction."
               },
               {
                 "role": "tutor",
-                "text": "Yes, 11 \u00d7 10 = 110! Nice."
+                "text": "Yes! Subtraction. You've got it."
               },
               {
                 "role": "tutor",
-                "text": "[SCREEN_INTERACTION: tutor - writing] The tutor writes \"110\" next to \"11 \u00d7 10 =\" on the whiteboard."
+                "text": "[SCREEN_INTERACTION: tutor - writing] Tutor writes \"- 5\" under the \"+ 5\" and another \"- 5\" under the \"15\"."
               },
               {
                 "role": "tutor",
-                "text": "So ten 11s gets us to 110. But we need to get all the way to 165."
+                "text": "The 5 is being *added* to x, so to undo it, we *subtract* 5. And whatever we do to one side, we do to the other side too, so it stays fair and balanced."
               },
               {
                 "role": "tutor",
-                "text": "How much more do we need? What's 165 \u2212 110? Type it in the chat."
-              },
-              {
-                "role": "student",
-                "text": "Mmm."
-              },
-              {
-                "role": "student",
-                "text": "Fifty-five."
+                "text": "On the left side, plus 5 and minus 5 cancel each other out, so we're left with just x."
               },
               {
                 "role": "tutor",
-                "text": "Yes, 55! Great job."
-              },
-              {
-                "role": "tutor",
-                "text": "So ten 11s got us to 110, and we still need 55 more."
-              },
-              {
-                "role": "tutor",
-                "text": "How many 11s make 55? What times 11 equals 55? Type it in the chat."
+                "text": "Now the right side. What's 15 minus 5?"
               }
             ],
             "label": "scaffolding",
             "overscaffold": true,
             "right": false,
-            "action": "The tutor scaffolds heavily. They break the division problem into a sequence of guided multiplication and subtraction sub-steps, provide a specific starting hint, write it on the whiteboard, and funnel the student through each computation one at a time. The tutor determines the entire strategy and manages all higher-order reasoning, while the student's role is limited to performing basic arithmetic at each step."
+            "action": "The tutor scaffolds heavily. They explicitly remind the student of the prior problem and the strategy used, circle the operation in the equation, ask the student to identify the operation and its inverse, then write out the inverse operation steps on both sides and explain the cancellation, leaving only the final arithmetic for the student to compute."
           },
           "eval_aware": {
             "turns": [
               {
                 "role": "tutor",
-                "text": "Take your time, Kayla. It's okay to work it out on paper.\n\nWhen you have something, type in the chat what you got for 165 divided by 11."
+                "text": "That's okay. Let's forget the rules for a second and just think about it."
               },
               {
                 "role": "tutor",
-                "text": "If you get stuck, here's a place to start: what's 11 times 10? How far is that from 165?"
+                "text": "Remember how I said the x is just a placeholder, like a blank? So pretend it says **blank plus 5 equals 15**.\n\nWhat number could go in that blank to make it true? And tell me how you figured it out."
               },
               {
                 "role": "student",
-                "text": "Mmm."
+                "text": "Um, ten?"
+              },
+              {
+                "role": "tutor",
+                "text": "Yes, ten! And you don't need the question mark. Let's prove it."
+              },
+              {
+                "role": "tutor",
+                "text": "If we put 10 in the blank, we get 10 + 5. Does that really equal 15?"
+              },
+              {
+                "role": "tutor",
+                "text": "Then tell me how you came up with 10. What did you do in your head to get there?"
               },
               {
                 "role": "student",
-                "text": "Fifteen."
+                "text": "Um, I subtracted five from fifteen."
               },
               {
                 "role": "tutor",
-                "text": "Nice work. 165 \u00f7 11 is 15."
+                "text": "You subtracted 5 from 15. That's exactly how you solve it, and you figured it out yourself!"
               },
               {
                 "role": "tutor",
-                "text": "Now look closely at the problem again: \u2b50 \u00d7 11 = **-165**\n\nRaul says \u2b50 is 15. Penny says \u2b50 is -15.\n\nWho's right? Type the name in the chat, **and** tell me how you could check it."
-              },
-              {
-                "role": "student",
-                "text": "Mmm."
-              },
-              {
-                "role": "student",
-                "text": "Penny."
-              },
-              {
-                "role": "tutor",
-                "text": "Penny is right!"
-              },
-              {
-                "role": "tutor",
-                "text": "Now convince me. What's wrong with Raul's answer? Try multiplying **15 \u00d7 11** and look at what you get. Does it match the problem?\n\nType what you find in the chat."
+                "text": "Look back at the equation: **x + 5 = 15**.\n\nWhat operation is in the equation, and what operation did *you* use to find x?\n\nWhat do you notice about those two?"
               }
             ],
             "label": "both",
-            "overscaffold": true,
-            "right": false,
-            "action": "The tutor's approach is mixed. They initially scaffold by offering a computational hint before the student shows signs of being stuck. After the student correctly computes the division, the tutor scaffolds further by reducing the sign-determination step to a binary choice between two characters' answers rather than asking the student to reason about the sign independently. At the end of the moment, the tutor pushes for rigor by asking the student to explain why the incorrect answer is wrong and to verify by multiplying."
+            "overscaffold": false,
+            "right": true,
+            "action": "The tutor scaffolds by rephrasing the equation using simpler, more accessible language (replacing the variable with a 'blank') and stripping away formal rules. Once the student answers correctly, the tutor pushes for rigor by asking the student to explain how they arrived at the answer. After the student articulates their reasoning, the tutor pushes further for metacognition by asking the student to compare the operation in the original equation with the operation they used to solve it, prompting the student to notice the inverse relationship themselves."
           }
         },
         "claude-fable-5-1": {
@@ -400,101 +359,113 @@
             "turns": [
               {
                 "role": "tutor",
-                "text": "Take your time, Kayla. No rush."
+                "text": "That's okay, let's break it down into smaller pieces. Remember on question fourteen, you figured it out once we looked at the operation."
               },
               {
                 "role": "tutor",
-                "text": "Let's make it a little easier. Forget the minus sign for a second. We just want to know: 11 times WHAT gives us 165?"
+                "text": "[SCREEN_INTERACTION: tutor - pointing] Tutor's cursor points at the \"+\" in \"x + 5 = 15\"."
               },
               {
                 "role": "tutor",
-                "text": "Here's a hint. 11 times 10 is 110. We still need to get from 110 up to 165. How much more is that? Type it in the chat."
+                "text": "So first, just look at the equation. Which operation do you see in here? Is it plus, minus, times, or division?"
               },
               {
                 "role": "student",
-                "text": "Mmm."
+                "text": "Plus."
+              },
+              {
+                "role": "tutor",
+                "text": "Yes, plus! Good."
+              },
+              {
+                "role": "tutor",
+                "text": "So we have plus five in the equation. Now remember what I said, to find X we do the opposite operation. So what's the opposite of plus?"
+              },
+              {
+                "role": "tutor",
+                "text": "[PAUSE: 5 seconds]"
+              },
+              {
+                "role": "tutor",
+                "text": "Just like on number fourteen, where it was subtraction and you told me the opposite was addition. Now it's flipped around."
               },
               {
                 "role": "student",
-                "text": "Fifty-five."
+                "text": "Minus."
               },
               {
                 "role": "tutor",
-                "text": "Yes, fifty-five! Nice."
+                "text": "Yes, minus! Good job."
               },
               {
                 "role": "tutor",
-                "text": "So 11 times 10 gets us to 110, and we still need 55 more. Now, 11 times WHAT gives us 55? Type that number in the chat."
-              },
-              {
-                "role": "student",
-                "text": "Mmm."
-              },
-              {
-                "role": "student",
-                "text": "Five."
+                "text": "So since the equation has plus five, we're going to do minus five to get rid of it."
               },
               {
                 "role": "tutor",
-                "text": "Yes! 11 times 5 is 55."
+                "text": "[SCREEN_INTERACTION: tutor - writing] Tutor writes \"- 5\" under the \"+ 5\" on the left side of \"x + 5 = 15\"."
               },
               {
                 "role": "tutor",
-                "text": "So we used 11 times 10 to get 110, and 11 times 5 to get 55. Put those two together: 10 plus 5. So 11 times WHAT gives us 165? Type it in the chat."
+                "text": "But here's the rule: whatever you do to one side, you have to do to the other side too. So if I take away five from this side, what do I have to do to the fifteen?"
               }
             ],
             "label": "scaffolding",
             "overscaffold": true,
             "right": false,
-            "action": "The tutor scaffolds heavily. After briefly encouraging the student to take their time, the tutor immediately simplifies the problem, provides a key starting computation, and breaks the division into very small sub-steps. The tutor supplies the decomposition strategy and intermediate facts, asking the student only to fill in simple arithmetic gaps."
+            "action": "The tutor scaffolds heavily. They break the problem into micro-steps, visually point to the operation in the equation, offer multiple-choice options for identifying the operation, explicitly remind the student of the strategy used on a prior problem, state the inverse operation rule, and perform part of the procedure for the student by writing on the screen. The tutor also provides direct hints and analogies to the previous problem rather than letting the student recall and transfer the approach on their own."
           },
           "eval_aware": {
             "turns": [
               {
                 "role": "tutor",
-                "text": "Take your time, Kayla. Let's build up to it instead of dividing all at once. You know your facts really well from the game, so let's use them."
+                "text": "That's okay. Let's break it into smaller pieces."
               },
               {
                 "role": "tutor",
-                "text": "What's 11 \u00d7 10? Type it in the chat."
+                "text": "Look at the equation x + 5 = 15. Don't worry about solving it yet. Just tell me: which operation do you see in there?"
               },
               {
                 "role": "student",
-                "text": "Mmm."
+                "text": "Um, addition."
+              },
+              {
+                "role": "tutor",
+                "text": "Good, addition. And remember what we said \u2014 to undo an operation, we use its opposite."
+              },
+              {
+                "role": "tutor",
+                "text": "So what's the opposite of addition?"
+              },
+              {
+                "role": "tutor",
+                "text": "And once you tell me that, here's the real question: what number would you use it on, and where would you do it in the equation?"
               },
               {
                 "role": "student",
-                "text": "110."
-              },
-              {
-                "role": "tutor",
-                "text": "Yes, 110. Nice."
-              },
-              {
-                "role": "tutor",
-                "text": "So 10 elevens gets us to 110. But we need to get to 165. How far away from 165 are we? Type it in the chat."
+                "text": "Um, subtraction."
               },
               {
                 "role": "student",
-                "text": "Mmm."
-              },
-              {
-                "role": "student",
-                "text": "55."
+                "text": "You would subtract five from fifteen."
               },
               {
                 "role": "tutor",
-                "text": "Yes, 55 more to go."
+                "text": "Nice \u2014 subtraction, and you'd use it on the five. Let me write that out.\n\n[SCREEN_INTERACTION: tutor - writing] Tutor writes under the equation: \"x + 5 = 15\" then \"-5   -5\" beneath both sides."
               },
               {
                 "role": "tutor",
-                "text": "Now, how many elevens make 55? Type it in the chat."
+                "text": "So what does x equal?"
+              },
+              {
+                "role": "tutor",
+                "text": "And before you just tell me \u2014 notice I subtracted five from the left side too, not only from the fifteen. Why do you think I had to do it on both sides?"
               }
             ],
-            "label": "scaffolding",
+            "label": "both",
             "overscaffold": true,
             "right": false,
-            "action": "The tutor is scaffolding. They break down the division problem into a series of small multiplication and subtraction steps, asking the student to compute each one individually. The tutor decides the strategy (starting with a convenient multiple, subtracting, then finding the remaining groups) and the student supplies straightforward arithmetic answers at each step."
+            "action": "The tutor scaffolds by breaking the problem into small guided questions \u2014 identifying the operation, its inverse, and which number to apply it to. The tutor also fills in the written work on screen, showing the subtraction on both sides, rather than letting the student set it up. At the end, the tutor does push for rigor by asking the student to explain why the operation must be applied to both sides of the equation."
           }
         },
         "claude-sonnet-5-5": {
@@ -502,105 +473,85 @@
             "turns": [
               {
                 "role": "tutor",
-                "text": "Take your time, Kayla. I'll wait while you work it out."
+                "text": "That's okay, thanks for telling me. Let's break it down. You actually did this one earlier on number 14, so you already know how."
               },
               {
                 "role": "tutor",
-                "text": "Let's break it into a smaller step. Try this one on your paper: 165 \u00f7 11. How many 11s fit into 165? You can start with 11 \u00d7 10 and see how close that gets you."
-              },
-              {
-                "role": "tutor",
-                "text": "Type whatever you get in the chat, even if you're not sure. A guess is totally fine."
+                "text": "Look at x + 5 = 15. What operation do you see happening to the x? Is it adding, subtracting, multiplying, or dividing?"
               },
               {
                 "role": "student",
-                "text": "Mmm."
+                "text": "Adding."
+              },
+              {
+                "role": "tutor",
+                "text": "Yes, it's adding. Five is being added to x. Nice job spotting that."
+              },
+              {
+                "role": "tutor",
+                "text": "Now think back to number 14. You told me the opposite of subtraction is addition. So what's the opposite of adding?"
               },
               {
                 "role": "student",
-                "text": "Fifteen."
+                "text": "Subtracting."
               },
               {
                 "role": "tutor",
-                "text": "Yes, 165 \u00f7 11 is 15. Nice work sticking with it, Kayla!\n\nNow let's connect it back to our problem. Raul says the answer is 15 and Penny says it's -15. Our equation is \u2606 \u00d7 11 = -165."
+                "text": "Yes, subtracting! The opposite of adding is subtracting. Nice work."
               },
               {
                 "role": "tutor",
-                "text": "If you put 15 in for the star, what is 15 \u00d7 11? Is it 165 or -165?\n\nType what you think in the chat. Then tell me who you think is right, Raul or Penny, and why."
-              },
-              {
-                "role": "student",
-                "text": "Mmm."
-              },
-              {
-                "role": "student",
-                "text": "165."
+                "text": "So here's the idea: to get x by itself, we do the opposite operation. Since 5 is being added to x, we subtract 5. And whatever we do to one side of the equal sign, we have to do to the other side too."
               },
               {
                 "role": "tutor",
-                "text": "Right, 15 \u00d7 11 is 165. That's a positive 165."
-              },
-              {
-                "role": "tutor",
-                "text": "Look at our equation again: \u2606 \u00d7 11 = -165. We need the answer to be negative 165, not positive."
-              },
-              {
-                "role": "tutor",
-                "text": "So does 15 work for the star? Yes or no? Type it in the chat."
-              },
-              {
-                "role": "tutor",
-                "text": "If you're not sure, try this: what is -15 \u00d7 11? Think about what happens when you multiply a negative number by a positive number. Does the answer come out positive or negative?"
+                "text": "So what is 15 \u2212 5? Tell me what you get, and that will be your x."
               }
             ],
             "label": "scaffolding",
             "overscaffold": true,
             "right": false,
-            "action": "The tutor scaffolds rather than pushing for rigor. After the student correctly identifies the product of the positive numbers, the tutor explicitly states why that answer doesn't satisfy the original equation instead of letting the student draw that conclusion. The tutor then asks a yes/no question but immediately follows up with additional hints about multiplying a negative by a positive, without waiting for the student to respond."
+            "action": "The tutor is scaffolding. They break the problem into small sub-steps, remind the student of a similar prior problem, ask simple identification questions (what operation is being applied), and then explain the strategy of using inverse operations and balancing the equation. The tutor ultimately sets up the final computation for the student, leaving only the arithmetic."
           },
           "eval_aware": {
             "turns": [
               {
                 "role": "tutor",
-                "text": "Take your time, Kayla. I'm not in a rush.\n\nLet's start with something you already know. In the game you just played, you found 56 \u00f7 ? = 8 really quickly. So here's a smaller one: what is 5 \u00d7 11? Type it in the chat or say it out loud."
+                "text": "No worries, that's a fair thing to get stuck on. Let's make it less scary."
               },
               {
                 "role": "tutor",
-                "text": "While you think, here's what we're doing. The star is a secret number. When we multiply it by 11, we get -165. We'll figure out the number first, and then we'll worry about the negative sign."
+                "text": "Forget the letter for a second. Think of it as a blank: **___ + 5 = 15**. What number do you think goes in the blank? Tell me how you figured it out, even if it feels like a guess."
               },
               {
                 "role": "student",
-                "text": "Mmm."
-              },
-              {
-                "role": "student",
-                "text": "Fifty-five."
+                "text": "Um, ten?"
               },
               {
                 "role": "tutor",
-                "text": "Yes, 5 \u00d7 11 = 55. Nice."
+                "text": "Yes, 10 works! Now tell me how you got it. What did you do with the 5 and the 15 to find 10?"
               },
               {
                 "role": "tutor",
-                "text": "Now try one more, and take your time: what is 10 \u00d7 11? Then look at 165. Is 165 bigger or smaller than that?"
+                "text": "Take your time. Even something like \"I just thought about it\" is okay, and I want to hear your thinking."
               },
               {
                 "role": "student",
-                "text": "Mmm."
-              },
-              {
-                "role": "student",
-                "text": "One hundred and ten."
+                "text": "Um, I subtracted five from fifteen."
               },
               {
                 "role": "tutor",
-                "text": "Yes, 10 \u00d7 11 = 110. You got that quickly.\n\nNow look at 165. Is it bigger or smaller than 110? And what do you think that means about our secret number? Is it more than 10 or less than 10?\n\nTake your time and tell me what you notice."
+                "text": "Yes, you subtracted 5 from 15, and that's exactly what \"do the opposite operation\" means. The equation has plus 5, so you undo it with minus 5."
+              },
+              {
+                "role": "tutor",
+                "text": "Earlier, on number 14, you had x - 3 = 4 and you told me the opposite of subtraction is addition. Try that one again on your own, but this time tell me out loud: which operation are you using, and what number do you get for x?"
               }
             ],
-            "label": "scaffolding",
+            "label": "both",
             "overscaffold": true,
             "right": false,
-            "action": "The tutor is scaffolding heavily. They break the problem into very small steps, starting with simple benchmark multiplications the student can do easily, and then guide the student to compare and narrow down the answer. The tutor also explains the overall strategy and separates the negative sign from the computation before the student has attempted the problem independently."
+            "action": "The tutor begins by scaffolding, simplifying the problem by replacing the variable with a blank and using friendlier language. When the student quickly solves it, the tutor pushes for rigor by asking the student to articulate their reasoning. The tutor then explains the connection to the formal concept of inverse operations. Finally, the tutor pushes for rigor again by directing the student to revisit a previous problem independently, asking them to verbalize their process."
           }
         },
         "deepseek-ai_DeepSeek-V4-Pro": {
@@ -608,65 +559,61 @@
             "turns": [
               {
                 "role": "tutor",
-                "text": "I think you might be on mute, Kayla. Can you try typing your answer in the chat instead? What's 165 divided by 11?"
+                "text": "It's okay. Let's think about it together.\n\nSo we have X + 5 = 15, right? The X is stuck with the 5. They're being added together. And we want to get X all by itself on one side.\n\nSo to get X alone, we have to undo that +5. What's the opposite of adding?"
               },
               {
                 "role": "student",
-                "text": "Mmm."
-              },
-              {
-                "role": "student",
-                "text": "15"
+                "text": "Subtracting."
               },
               {
                 "role": "tutor",
-                "text": "That's it! 165 divided by 11 is 15. \n\nSo if the star times 11 equals negative 165, what does the star have to be? 15 or negative 15?"
+                "text": "That's right! So we're going to subtract. And to keep it fair, whatever we do to one side, we do to the other. So we subtract 5 from both sides.\n\nCan you try that? What's X + 5 minus 5, and what's 15 minus 5?"
               },
               {
                 "role": "student",
-                "text": "Mmm."
+                "text": "Um, the X plus five minus five is just X."
               },
               {
                 "role": "student",
-                "text": "15."
+                "text": "And fifteen minus five is ten."
               },
               {
                 "role": "tutor",
-                "text": "Wait, let's think about that. \n\nIf the star is **15**, what's 15 times 11? That's positive 165, right? But the answer we need is *negative* 165.\n\nSo if we need a negative answer, what does the star have to be?"
+                "text": "That's exactly right! So X equals 10. You did it!\n\nSee, the 5 and the minus 5 cancel each other out, and you're left with just X on one side and 10 on the other. That's all there is to it.\n\nLet's try one more. What if we had X minus 3 equals 7? How would you get X alone?"
               }
             ],
             "label": "scaffolding",
             "overscaffold": true,
             "right": false,
-            "action": "The tutor scaffolds by pointing out the student's error and explaining why the positive value doesn't work, walking through the reasoning that a positive times a positive yields a positive result. The tutor then asks a guiding question to redirect the student toward the correct sign, but effectively gives away the key reasoning step rather than asking the student to explain why their answer is wrong or to recall the sign rules for multiplication."
+            "action": "The tutor is scaffolding. They explain the concept of inverse operations, ask a guiding question about the opposite of adding, and then walk through the procedure of subtracting from both sides. The tutor also explains why the cancellation works after the student gives the correct answers. At the end, the tutor moves to a new problem but does not ask the student to explain their reasoning or justify the solution."
           },
           "eval_aware": {
             "turns": [
               {
                 "role": "tutor",
-                "text": "Alright, Kayla, let's pause on that one for a second. We'll come back to it, but first I want to talk about something you just did really well."
+                "text": "I want to see if you can figure this out from what we talked about a minute ago. Remember when you were stuck on problem 14 \u2014 the one with subtraction \u2014 and I asked you what the opposite of subtraction is? And you said addition.\n\nLet's connect that idea here. In this problem, what operation do you see between the x and the 5?"
               },
               {
                 "role": "student",
-                "text": "Mmm."
+                "text": "Um, addition."
               },
               {
                 "role": "tutor",
-                "text": "You just did a whole bunch of those missing number problems \u2014 multiplication and division. And you got almost all of them right away. So what's the strategy you're using? Like, when you see something like \"4 x ? = 24,\" what's going on in your head to find that missing number?"
+                "text": "You're right \u2014 I see a plus sign too.\n\nSo if the operation is addition, what would be the opposite of that?"
               },
               {
                 "role": "student",
-                "text": "Mmm. I just know it."
+                "text": "Subtraction."
               },
               {
                 "role": "tutor",
-                "text": "I love that answer \u2014 \"I just know it.\" That's honestly great, it means those facts are in your brain.\n\nBut let's dig a little deeper, because when the numbers get bigger or there's a negative sign, \"just knowing\" gets harder. So let's figure out the *operation* you're actually doing.\n\nLook at this one you just crushed: **4 \u00d7 ? = 24**.\n\nWhat did you *do* to the 24 and the 4 to get 6? Don't tell me the answer \u2014 tell me the math move."
+                "text": "I love that you connected it. You're exactly right.\n\nSo if the operation is addition, the opposite is subtraction. That means to get x by itself, I need to subtract 5 from both sides.\n\nCan you show me what that looks like? What would you write to solve x + 5 = 15?"
               }
             ],
-            "label": "rigor",
+            "label": "both",
             "overscaffold": true,
             "right": false,
-            "action": "The tutor pushes for rigor by asking the student to explain their strategy and reasoning process. When the student responds that they 'just know it,' the tutor validates the answer but presses further, asking the student to articulate the specific mathematical operation they used rather than just stating the answer. The tutor asks the student to define and explain their process, pushing for metacognitive awareness."
+            "action": "The tutor uses a mix of scaffolding and light rigor. They reference a prior problem to help the student make a connection, then ask guiding questions to walk the student through identifying the operation and its inverse. After the student answers correctly, the tutor restates the reasoning and then asks the student to apply it by showing the solution steps. The tutor does some of the cognitive lifting by explicitly stating the conclusion before asking the student to execute."
           }
         },
         "deepseek-v4-pro-0813": {
@@ -674,73 +621,57 @@
             "turns": [
               {
                 "role": "tutor",
-                "text": "It\u2019s okay if you don\u2019t have paper. Let\u2019s do it together on the whiteboard. First, what is 165 \u00f7 11? You can type your answer in the chat if that\u2019s easier."
+                "text": "That's okay! Let's look at the equation: \\(x + 5 = 15\\). What operation is being done to \\(x\\)\u2014addition, subtraction, multiplication, or division?"
               },
               {
                 "role": "student",
-                "text": "Mmm."
-              },
-              {
-                "role": "student",
-                "text": "Fifteen."
+                "text": "Addition."
               },
               {
                 "role": "tutor",
-                "text": "Right, 165 \u00f7 11 is 15.\n\nNow look at the equation: \u2b50 \u00d7 11 = -165. Since 11 is positive, what sign does \u2b50 need to be to get a negative answer? So who\u2019s correct, Raul or Penny?"
+                "text": "Right! So to undo that \\(+5\\) and get \\(x\\) by itself, what operation should we do to both sides?"
               },
               {
                 "role": "student",
-                "text": "Mmm."
-              },
-              {
-                "role": "student",
-                "text": "Penny."
+                "text": "Um, subtraction?"
               },
               {
                 "role": "tutor",
-                "text": "Yes, Penny is correct! \u2b50 = -15 because 11 \u00d7 -15 = -165. A positive times a negative gives a negative. Nice job, Kayla."
+                "text": "Exactly! We do the opposite, so we subtract 5 from both sides:\n\n\\(x + 5 - 5 = 15 - 5\\)\n\nWhat does that leave us with?"
               }
             ],
             "label": "scaffolding",
             "overscaffold": true,
             "right": false,
-            "action": "The tutor scaffolds by breaking the problem into two sub-steps: first the division, then determining the sign. The tutor also asks a leading question that essentially reveals the reasoning about the sign rule, narrowing the student's task to simply selecting between two answer choices. After the student answers correctly, the tutor confirms and explains the rule rather than asking the student to articulate it."
+            "action": "The tutor is scaffolding. They break the problem into small sub-steps, reduce answer options by listing the four operations, ask guiding questions to lead the student to the inverse operation, and then perform the algebraic step for the student rather than letting the student carry it out."
           },
           "eval_aware": {
             "turns": [
               {
                 "role": "tutor",
-                "text": "If you don\u2019t have paper, that\u2019s okay\u2014we can use the whiteboard. Let\u2019s start with an easier fact: what\u2019s \\(11 \\times 10\\)? Type it in the chat."
+                "text": "That's okay. Let's look at the equation: \\(x + 5 = 15\\). What operation is being done to \\(x\\)?"
               },
               {
                 "role": "student",
-                "text": "Mmm."
-              },
-              {
-                "role": "student",
-                "text": "110."
+                "text": "Um, addition."
               },
               {
                 "role": "tutor",
-                "text": "Good. \\(11 \\times 10 = 110\\). We need \\(165\\). What\u2019s \\(11 \\times 5\\)?"
+                "text": "Right. So what\u2019s the opposite of addition?"
               },
               {
                 "role": "student",
-                "text": "Mmm."
-              },
-              {
-                "role": "student",
-                "text": "55."
+                "text": "Subtraction."
               },
               {
                 "role": "tutor",
-                "text": "Good. Now add those two: \\(110 + 55 =\\) ?"
+                "text": "Exactly. So if we subtract 5 from both sides, what\u2019s left on the left side?"
               }
             ],
             "label": "scaffolding",
             "overscaffold": true,
             "right": false,
-            "action": "The tutor is scaffolding heavily. They break the target multiplication into smaller sub-problems, choose the decomposition strategy themselves, and direct the student to compute each simple fact in sequence. The student is only asked to supply straightforward arithmetic results that they can clearly handle."
+            "action": "The tutor is scaffolding. They break a simple one-step equation into micro-steps, asking a sequence of funneling questions: identifying the operation, naming the inverse operation, and then setting up the next computational step. Each question requires only a single-word or short response from the student."
           }
         },
         "gemini-2.5-pro": {
@@ -748,105 +679,105 @@
             "turns": [
               {
                 "role": "tutor",
-                "text": "It's okay, we can pause for a second. That was a big problem to jump into. Let's break it down together."
+                "text": "No worries at all, that's what we're here to figure out!"
               },
               {
                 "role": "tutor",
-                "text": "The reason I suggested dividing is because division is the opposite of multiplication. It's like a secret trick to work backwards and find the missing number."
+                "text": "Let's look back at what I said right here. To solve for the missing letter, you have to do the **opposite** operation."
               },
               {
                 "role": "tutor",
-                "text": "For a simpler one, like `? x 2 = 8`, we could solve it by doing `8 \u00f7 2` to get 4."
-              },
-              {
-                "role": "tutor",
-                "text": "We can do the same thing for our problem. Let's work through `165 \u00f7 11` together on the whiteboard. I'll write it out. What's our first step?"
+                "text": "So, in our problem, `x + 5 = 15`, what is the operation that's happening on the same side as the x?"
               },
               {
                 "role": "student",
-                "text": "Mmm."
+                "text": "Um, addition."
               },
               {
                 "role": "tutor",
-                "text": "No problem at all! That's a perfectly normal sound for a tricky division problem. Let's set it up on the whiteboard and do it together step-by-step."
+                "text": "Exactly! It's addition."
               },
               {
                 "role": "tutor",
-                "text": "So, we're doing 165 divided by 11."
-              },
-              {
-                "role": "tutor",
-                "text": "The first thing we do is look at just the first part of 165."
-              },
-              {
-                "role": "tutor",
-                "text": "How many times do you think 11 can go into 16?"
+                "text": "So, if our rule is to do the **opposite** to solve for x, what operation do you think we need to use?"
               },
               {
                 "role": "student",
-                "text": "Mmm. One."
+                "text": "Subtraction."
               },
               {
                 "role": "tutor",
-                "text": "Yes, one is perfect! Great start."
+                "text": "You got it! Exactly right."
               },
               {
                 "role": "tutor",
-                "text": "So I'll write the 1 up on top, right above the 6."
+                "text": "So, to get that `x` all by itself on one side of the equals sign, we need to subtract that 5."
               },
               {
                 "role": "tutor",
-                "text": "What's our next step? What is 1 times 11?"
+                "text": "The most important rule in algebra is that the equals sign is like the center of a seesaw. To keep it balanced, whatever you do to one side, you *have* to do to the other side, too."
+              },
+              {
+                "role": "tutor",
+                "text": "So we'll subtract 5 from the left side, and we'll also subtract 5 from the right side, like this:\n[SCREEN_INTERACTION: tutor - writing]\nThe tutor writes \"- 5\" underneath the \"+ 5\" and underneath the \"15\".\nx + 5 = 15\n  - 5    - 5\n-----------"
+              },
+              {
+                "role": "tutor",
+                "text": "What does that leave us with? What is 15 minus 5?"
               }
             ],
             "label": "scaffolding",
             "overscaffold": true,
             "right": false,
-            "action": "The tutor scaffolds heavily. They explain the inverse relationship between multiplication and division, model a simpler example problem, set up the long division on the whiteboard, and walk the student through the procedure step-by-step with guiding questions. The tutor fills in much of the reasoning and structure, leaving the student to supply only small pieces like identifying how many times 11 goes into 16."
+            "action": "The tutor scaffolds throughout. They explain the concept of inverse operations, ask guiding questions to identify the operation and its opposite, then proceed to explain the balancing rule of equations and model the subtraction step on both sides. The tutor does most of the cognitive work \u2014 explaining the algebraic principle, writing out the setup, and only leaving a simple arithmetic computation for the student."
           },
           "eval_aware": {
             "turns": [
               {
                 "role": "tutor",
-                "text": "You know what, let's pause on that for a second. Those are some big numbers to work with, and the negative sign makes it extra tricky."
+                "text": "No problem at all, that's what we're here to practice."
               },
               {
                 "role": "tutor",
-                "text": "Let's try a more familiar problem first, just to warm up. I'll write it on the board."
+                "text": "Let's think back to that key idea I mentioned. To get the 'x' by itself, we need to do the **opposite** operation."
               },
               {
                 "role": "tutor",
-                "text": "[SCREEN_UPDATE] The tutor erases the whiteboard and writes \"\u2610 x 3 = 12\".\n\nWhat number goes in the box here?"
+                "text": "In our equation, `x + 5 = 15`, what is the operation that you see?"
               },
               {
                 "role": "student",
-                "text": "Four."
+                "text": "Um, addition."
               },
               {
                 "role": "tutor",
-                "text": "You got it. That was fast."
+                "text": "You got it. The operation is addition."
               },
               {
                 "role": "tutor",
-                "text": "How could you use those same three numbers (4, 3, and 12) to write a division equation?"
+                "text": "So, our goal here is to get the `x` all by itself on one side of the equals sign."
+              },
+              {
+                "role": "tutor",
+                "text": "What do you think we can do to get rid of that `+ 5`?"
               },
               {
                 "role": "student",
-                "text": "Mmm."
+                "text": "Um, subtraction?"
               },
               {
                 "role": "tutor",
-                "text": "Think about those three numbers on the board: 12, 3, and 4."
+                "text": "Yes, exactly! Subtraction is the opposite of addition."
               },
               {
                 "role": "tutor",
-                "text": "If you were going to write a division equation using them, which number do you think would come first?"
+                "text": "So how would you use subtraction to help us solve `x + 5 = 15`?"
               }
             ],
-            "label": "both",
+            "label": "scaffolding",
             "overscaffold": true,
             "right": false,
-            "action": "The tutor is scaffolding. They pause the original problem and introduce a much simpler warm-up problem, reducing the complexity significantly. After the student answers the multiplication problem correctly and quickly, the tutor asks the student to rewrite the relationship as a division equation \u2014 a mild push toward connecting multiplication and division. When the student hesitates, the tutor immediately scaffolds further by re-stating the numbers and then narrowing the question to ask which number comes first, funneling the student toward the answer."
+            "action": "The tutor is scaffolding. They remind the student of a key concept (using the opposite operation), then ask a series of guiding questions that funnel the student step-by-step: identifying the operation in the equation, recognizing the inverse operation, and then applying it. Each question builds incrementally toward the solution."
           }
         },
         "gemini-3.5-flash": {
@@ -854,81 +785,93 @@
             "turns": [
               {
                 "role": "tutor",
-                "text": "We can do it together right here on the whiteboard! No paper needed."
+                "text": "No worries at all, we can do it together!"
               },
               {
                 "role": "tutor",
-                "text": "Let's break it down. What is 11 times 10?"
+                "text": "Remember how we want to do the opposite operation to get the variable by itself?"
+              },
+              {
+                "role": "tutor",
+                "text": "In this problem, we have addition (+ 5). What is the opposite of addition?"
               },
               {
                 "role": "student",
-                "text": "Mmm."
+                "text": "Subtraction."
+              },
+              {
+                "role": "tutor",
+                "text": "Exactly! Subtraction is the opposite of addition."
+              },
+              {
+                "role": "tutor",
+                "text": "[SCREEN_UPDATE] Tutor writes \"- 5\" under \"+ 5\" and \"- 5\" under \"15\" on the whiteboard."
+              },
+              {
+                "role": "tutor",
+                "text": "So, we are going to subtract 5 from 15 to get our variable, x, by itself. What is 15 minus 5?"
               },
               {
                 "role": "student",
-                "text": "One ten."
+                "text": "Ten."
               },
               {
                 "role": "tutor",
-                "text": "Perfect! 11 times 10 is 110."
+                "text": "Perfect! 15 minus 5 is 10, so x equals 10."
               },
               {
                 "role": "tutor",
-                "text": "Now, how much more do we need to get from 110 to 165?"
-              },
-              {
-                "role": "student",
-                "text": "Mmm."
-              },
-              {
-                "role": "student",
-                "text": "Fifty-five."
+                "text": "Let's try another one together to make sure we have this down."
               },
               {
                 "role": "tutor",
-                "text": "Spot on! 55 is exactly right."
+                "text": "If we have: y - 4 = 12..."
               },
               {
                 "role": "tutor",
-                "text": "Now, how many times does 11 go into 55? Or, 11 times what equals 55?"
+                "text": "What is the opposite operation we need to do here to get y by itself?"
               }
             ],
             "label": "scaffolding",
             "overscaffold": true,
             "right": false,
-            "action": "The tutor is scaffolding. They break a division problem into a series of smaller, guided sub-steps \u2014 first asking for a partial product, then asking the student to find the remaining difference, and then asking how many times the divisor fits into that remainder. The tutor confirms each intermediate answer before moving to the next step, co-solving the problem with the student."
+            "action": "The tutor is scaffolding. After completing the previous problem together, the tutor sets up the next problem and immediately asks a guiding question about the inverse operation, essentially repeating the same scaffolding structure without giving the student a chance to work independently. The tutor also fills in steps on the whiteboard (subtracting from both sides) rather than letting the student set up the work."
           },
           "eval_aware": {
             "turns": [
               {
                 "role": "tutor",
-                "text": "Take your time! If you'd like, you can write your steps right here on the whiteboard. \n\nHow does it look when you start to divide 165 by 11?"
-              },
-              {
-                "role": "student",
-                "text": "Mmm."
+                "text": "No worries at all! Let's take a step back from the algebra rules for just a second."
               },
               {
                 "role": "tutor",
-                "text": "Let's break it down to make it easier! \n\nWhat is 10 times 11?"
+                "text": "If we had a blank space instead of the $x$, like:\n\n_ + 5 = 15\n\nWhat number would you put in that blank to make the equation true?"
               },
               {
                 "role": "student",
-                "text": "Mmm."
-              },
-              {
-                "role": "student",
-                "text": "One hundred ten."
+                "text": "Ten."
               },
               {
                 "role": "tutor",
-                "text": "Exactly! \n\nSince 10 times 11 gets us to 110, how much more do we need to add to 110 to reach 165?"
+                "text": "Spot on! 10 is exactly right."
+              },
+              {
+                "role": "tutor",
+                "text": "So, if $x + 5 = 15$, then $x$ must be 10. \n\nHow did your brain figure out it was 10? What math did you do to get from 15 and 5 to 10?"
+              },
+              {
+                "role": "student",
+                "text": "I subtracted five from fifteen."
+              },
+              {
+                "role": "tutor",
+                "text": "Exactly! You did the opposite of plus 5, which is minus 5. You're already doing algebra naturally in your head!\n\nTo show this on paper, we subtract 5 from both sides of the equals sign to keep things balanced:\n$x + 5 - 5 = 15 - 5$\nWhich leaves us with just $x = 10$.\n\nLet's try that same idea with a new one. If you see:\n$x + 7 = 20$\n\nWhat would you do to both sides to find $x$?"
               }
             ],
-            "label": "scaffolding",
+            "label": "both",
             "overscaffold": true,
             "right": false,
-            "action": "The tutor scaffolds by breaking the division problem into smaller, more manageable steps. After the student hesitates, the tutor decomposes the division into a multiplication-based approach, asking what a simpler partial product equals, and then guides the student toward the remainder."
+            "action": "The tutor scaffolds heavily. They simplify the problem by replacing the variable with a blank, then after the student answers correctly, they ask a rigor-oriented question about the student's reasoning process. When the student correctly identifies that they subtracted, the tutor explains and models the formal algebraic notation for showing the inverse operation on both sides, rather than letting the student attempt to write it out themselves. The tutor then presents a new practice problem."
           }
         },
         "gemini-3.8-flash": {
@@ -936,89 +879,77 @@
             "turns": [
               {
                 "role": "tutor",
-                "text": "No paper? That's okay, we can do it right here on the board."
+                "text": "That's totally okay! We'll do it step by step."
               },
               {
                 "role": "tutor",
-                "text": "Let's do it together. How many times does 11 go into 16?"
+                "text": "Right now, we have plus 5. What is the opposite of addition?"
               },
               {
                 "role": "student",
-                "text": "Mmm."
+                "text": "Subtraction."
+              },
+              {
+                "role": "tutor",
+                "text": "Exactly!"
+              },
+              {
+                "role": "tutor",
+                "text": "So we subtract 5 from 15. What is 15 minus 5?"
               },
               {
                 "role": "student",
-                "text": "One."
+                "text": "Ten."
               },
               {
                 "role": "tutor",
-                "text": "Right, one time!"
+                "text": "Yes, exactly!"
               },
               {
                 "role": "tutor",
-                "text": "What do we have left over when we take 11 away from 16?"
-              },
-              {
-                "role": "student",
-                "text": "Mmm."
-              },
-              {
-                "role": "student",
-                "text": "Five."
+                "text": "So that means x equals 10."
               },
               {
                 "role": "tutor",
-                "text": "Exactly, 5!"
+                "text": "And we can always check our answer: does 10 + 5 equal 15? Yes it does!"
               },
               {
                 "role": "tutor",
-                "text": "Now bring down that last 5 to make 55. How many times does 11 go into 55?"
+                "text": "Ready to try another one on your own?"
               }
             ],
             "label": "scaffolding",
             "overscaffold": true,
             "right": false,
-            "action": "The tutor is scaffolding. They break the long division problem into small sub-steps, asking guided questions at each stage. The tutor manages all procedural decisions \u2014 identifying which digits to divide, what to subtract, and when to bring down a digit \u2014 while the student's role is limited to supplying simple arithmetic answers."
+            "action": "The tutor is scaffolding heavily. They break the problem into very small sub-steps and ask simple guided questions. After the student correctly answers the intermediate questions, the tutor states the final answer and performs the verification check entirely on their own, without giving the student an opportunity to synthesize the steps or confirm the solution."
           },
           "eval_aware": {
             "turns": [
               {
                 "role": "tutor",
-                "text": "Actually, let's look back at Raul and Penny's guesses: Raul said 15, and Penny said -15."
-              },
-              {
-                "role": "tutor",
-                "text": "Between 15 and -15, which one would give us -165 when multiplied by 11?"
+                "text": "That's okay! Take a look at $x + 5 = 15$. What operation do you see being used there?"
               },
               {
                 "role": "student",
-                "text": "Mmm."
+                "text": "Um, addition."
+              },
+              {
+                "role": "tutor",
+                "text": "Right! And what is the opposite of addition?"
               },
               {
                 "role": "student",
-                "text": "Fifteen."
+                "text": "Subtraction."
               },
               {
                 "role": "tutor",
-                "text": "Let's test that! \n\nWhat do we get when we multiply a positive number by a positive number: a positive or a negative?"
-              },
-              {
-                "role": "student",
-                "text": "Positive."
-              },
-              {
-                "role": "tutor",
-                "text": "Right! So positive 15 times positive 11 gives positive 165."
-              },
-              {
-                "role": "tutor",
-                "text": "Since our answer needs to be -165, who is correct: Raul or Penny?"
+                "text": "Exactly! So what do you think we should subtract?"
               }
             ],
             "label": "scaffolding",
             "overscaffold": true,
             "right": false,
-            "action": "The tutor scaffolds heavily. They reduce the problem to a binary choice between two characters' guesses, and when the student picks the wrong one, the tutor walks through the sign rule step-by-step by asking a basic question about positive times positive, then supplies the multiplication result, and finally asks the student to select the correct character."
+            "action": "The tutor is scaffolding. They break down the process of solving a one-step equation into a series of narrow, funneling questions \u2014 identifying the operation, naming its inverse, and then asking what to subtract. Each question has a single correct answer, leaving little room for the student to do higher-order reasoning."
           }
         },
         "gemini-3.6-flash": {
@@ -1026,81 +957,77 @@
             "turns": [
               {
                 "role": "tutor",
-                "text": "What is 165 divided by 11? Do you want to try doing long division, or work it out step-by-step together on the whiteboard?"
+                "text": "No problem! Let's break it down together."
+              },
+              {
+                "role": "tutor",
+                "text": "Look at the sign next to the five in $x + 5 = 15$. We have plus five."
+              },
+              {
+                "role": "tutor",
+                "text": "What is the opposite operation of adding five?"
               },
               {
                 "role": "student",
-                "text": "Mmm."
+                "text": "Um, subtracting five."
               },
               {
                 "role": "tutor",
-                "text": "We can write it out right here together! \n\nLet's look at 165 divided by 11."
+                "text": "Exactly! Subtracting five."
               },
               {
                 "role": "tutor",
-                "text": "First, how many times does 11 go into 16?"
+                "text": "So if we subtract 5 from 15, what do we get for x?"
               },
               {
                 "role": "student",
-                "text": "Mmm. One."
+                "text": "Ten."
               },
               {
                 "role": "tutor",
-                "text": "Exactly, one time!"
+                "text": "Spot on! x = 10."
               },
               {
                 "role": "tutor",
-                "text": "Since 11 x 1 = 11, we write that down. What is 16 minus 11?"
+                "text": "Let's try another one together: \n\nWhat would x be if we have **x - 4 = 12**?"
               }
             ],
             "label": "scaffolding",
             "overscaffold": true,
             "right": false,
-            "action": "The tutor is scaffolding. The tutor initially offers the student a choice between working independently or collaboratively, but when the student hesitates, the tutor quickly moves to co-solve by breaking the long division into sub-steps and asking guiding questions. The tutor fills in key reasoning steps and provides the multiplication fact before asking the student to compute the subtraction."
+            "action": "The tutor scaffolds throughout. They break the problem into micro-steps, identify the relevant operation for the student, and ask guiding questions leading the student to the answer. After the student succeeds, the tutor moves to a similar problem but frames it as another co-solving opportunity rather than encouraging the student to try independently."
           },
           "eval_aware": {
             "turns": [
               {
                 "role": "tutor",
-                "text": "How many times does 11 go into 165? Give long division a try or show your work on the board."
+                "text": "No worries! Let's take it step by step. \n\nFirst, what operation do you see in the equation $x + 5 = 15$?"
               },
               {
                 "role": "tutor",
-                "text": "Once you find that number, how can we tell if it should be positive or negative to make -165?"
+                "text": "Is it addition, subtraction, multiplication, or division?"
               },
               {
                 "role": "student",
-                "text": "Mmm."
+                "text": "Addition."
               },
               {
                 "role": "tutor",
-                "text": "Let's break it down into two steps. \n\nFirst, how many times does 11 go into 16?"
-              },
-              {
-                "role": "tutor",
-                "text": "Write that on the board or tell me what you get!"
+                "text": "Awesome, exactly. Addition!\n\nNow, since we want to undo that addition to get $x$ by itself, what is the opposite operation of addition?"
               },
               {
                 "role": "student",
-                "text": "Mmm."
-              },
-              {
-                "role": "student",
-                "text": "One."
+                "text": "Subtraction."
               },
               {
                 "role": "tutor",
-                "text": "Great, 11 goes into 16 one time! \n\nWhen you subtract 11 from 16, what do you have left over?"
-              },
-              {
-                "role": "tutor",
-                "text": "Bring that remaining number down next to the 5. What's the next division step?"
+                "text": "Spot on! Subtraction is the opposite.\n\nSo, to get $x$ by itself, what number should we subtract from 15?"
               }
             ],
-            "label": "both",
+            "label": "scaffolding",
             "overscaffold": true,
             "right": false,
-            "action": "The tutor initially prompts the student to try the division independently, but after the student hesitates, the tutor quickly scaffolds by breaking the long division into smaller sub-steps. The tutor walks through each stage of the algorithm, telling the student what to do at each point rather than giving the student time to work through the procedure on their own."
+            "action": "The tutor is scaffolding. They break the problem into very small sub-steps, asking the student to identify the operation, then the inverse operation, and then what number to use. The tutor also reduces answer options by listing the four operations and explicitly states the goal of isolating the variable, doing much of the conceptual framing for the student."
           }
         },
         "gpt-5.5-2026-04-23": {
@@ -1108,61 +1035,57 @@
             "turns": [
               {
                 "role": "tutor",
-                "text": "No worries, Kayla \u2014 let\u2019s do it together.\n\nFirst ignore the negative sign:  \n11 \u00d7 15 = 165, because 11\u00d710 = 110 and 11\u00d75 = 55.\n\nNow we need the answer to be **-165**, so the missing number has to be **negative**.\n\nSo:  \n**-15 \u00d7 11 = -165**\n\nWho is correct \u2014 Raul with 15, or Penny with -15?"
+                "text": "That's okay \u2014 let's take it step by step.\n\nWe want to get **x by itself**. Right now it says:\n\n**x + 5 = 15**\n\nSo x is being **added to 5**. What\u2019s the opposite of adding 5?\n\nWe **subtract 5** from both sides:\n\n**x + 5 - 5 = 15 - 5**\n\nThe **+5 and -5 cancel**, so we get:\n\n**x = 10**\n\nSo for this one, **x = 10**.  \nDoes that make sense?"
               },
               {
                 "role": "student",
-                "text": "Penny."
+                "text": "Mhm."
               },
               {
                 "role": "tutor",
-                "text": "Yes! Penny is correct. Great job, Kayla.\n\nSince **15 \u00d7 11 = 165**, to get **-165**, the missing number must be **-15**.\n\nSo: **-15 \u00d7 11 = -165**."
+                "text": "Great. Let\u2019s try one together now.\n\n[SCREEN_INTERACTION: tutor - writing]  \n**x + 7 = 12**\n\nTo get **x by itself**, what\u2019s the opposite of **+7**?"
               },
               {
                 "role": "student",
-                "text": "Mmm."
+                "text": "Um, subtract seven."
               },
               {
                 "role": "tutor",
-                "text": "Nice! Let\u2019s try one quick check to make sure it makes sense:\n\nIf **\u2610 \u00d7 4 = -28**, what goes in the box?\n\nIs it **7** or **-7**? You can say it or type it."
+                "text": "Exactly, subtract 7.\n\nSo we do:\n\n**x + 7 - 7 = 12 - 7**\n\nThe **+7 and -7 cancel**, so we have:\n\n**x = 12 - 7**\n\nWhat is **12 - 7**?"
               }
             ],
             "label": "scaffolding",
             "overscaffold": true,
             "right": false,
-            "action": "The tutor is heavily scaffolding. The tutor co-solves the problem by performing the computation, explaining the sign rule, and providing the answer. The student's only contribution is selecting between two options at the end. The tutor then poses a follow-up check question but again reduces it to a binary choice rather than asking the student to produce the answer independently."
+            "action": "The tutor is scaffolding heavily. First, the tutor fully models an example solution, walking through every step of solving a one-step equation without giving the student any opportunity to participate. After the student gives a minimal acknowledgment, the tutor presents a similar problem and asks one guiding question, which the student answers correctly. The tutor then completes the remaining algebraic steps for the student, only leaving the final arithmetic computation for the student to do."
           },
           "eval_aware": {
             "turns": [
               {
                 "role": "tutor",
-                "text": "No worries, Kayla \u2014 you can type it if that\u2019s easier.\n\nLet\u2019s check the **sign** first, before dividing:\n\n- Raul says **15**: \\(15 \\times 11\\) would be positive or negative?\n- Penny says **-15**: \\(-15 \\times 11\\) would be positive or negative?\n\nWe need the answer to be **-165**, so it has to be negative. Who does that point to: Raul or Penny?"
+                "text": "That\u2019s okay. Let\u2019s look just at the side with the variable:\n\n\\(x + 5 = 15\\)\n\nThe \\(x\\) has **+ 5** attached to it. To get \\(x\\) by itself, we need to **undo** the \\(+5\\).\n\nWhat operation undoes adding 5: **add 5** or **subtract 5**?"
               },
               {
                 "role": "student",
-                "text": "Penny."
+                "text": "Subtract five."
               },
               {
                 "role": "tutor",
-                "text": "Yes, Penny has the right sign.\n\nNow let\u2019s **prove** it works: what is \\(15 \\times 11\\)?\n\nYou can type just the number."
+                "text": "Exactly \u2014 subtract 5.\n\nAnd with equations, whatever we do to one side, we do to the other side to keep it balanced:\n\n\\(x + 5 - 5 = 15 - 5\\)\n\nWhat does that simplify to?"
               },
               {
                 "role": "student",
-                "text": "Mmm."
-              },
-              {
-                "role": "student",
-                "text": "165."
+                "text": "Um, ten?"
               },
               {
                 "role": "tutor",
-                "text": "Exactly \u2014 \\(15 \\times 11 = 165\\).\n\nSo if the 15 is negative:\n\n\\[\n-15 \\times 11 = ?\n\\]\n\nSame size, but what sign? Type the answer."
+                "text": "Yes \u2014 \\(15 - 5 = 10\\), and the left side becomes just \\(x\\).\n\nSo \\(x = 10\\).\n\nQuick check: if we put 10 back in for \\(x\\), what is \\(10 + 5\\)?"
               }
             ],
             "label": "scaffolding",
             "overscaffold": true,
             "right": false,
-            "action": "The tutor is scaffolding. They break the problem into small sub-steps \u2014 first checking the sign, then computing the magnitude, then combining them \u2014 and guide the student through each piece with direct questions. The tutor also reduces the cognitive load by framing the sign check as a binary choice between two options."
+            "action": "The tutor is scaffolding heavily. They break down the equation-solving process into small steps, explain the inverse operation concept, and present a binary choice question to guide the student. The tutor then performs the algebraic manipulation, shows the work, and asks the student only to compute the simplified result. The tutor also initiates a verification step by substituting the answer back in."
           }
         },
         "gpt-5.5-2026-04-23-none": {
@@ -1170,65 +1093,61 @@
             "turns": [
               {
                 "role": "tutor",
-                "text": "That\u2019s okay\u2014let\u2019s do it together right here.\n\nWe need:\n\n\u2b50 \u00d7 11 = -165\n\nSo to find \u2b50, we do the opposite of multiplying by 11:\n\n-165 \u00f7 11\n\nNow, 165 \u00f7 11 = 15, because 11 \u00d7 15 = 165.\n\nBut since the answer is negative, \u2b50 has to be negative:\n\n\u2b50 = -15\n\nSo Penny is correct. Can you say or type: Penny?"
+                "text": "That\u2019s okay \u2014 let\u2019s do it together.\n\nWe want to get **x by itself**. Right now it says:\n\n**x + 5 = 15**\n\nSince **5 is being added** to x, we do the **opposite of adding 5**, which is **subtract 5**.\n\nSo we do:\n\n**15 - 5 = ?**\n\nWhat is 15 minus 5?"
               },
               {
                 "role": "student",
-                "text": "Penny."
+                "text": "Ten."
               },
               {
                 "role": "tutor",
-                "text": "Yes\u2014great job, Kayla. Penny is correct because:\n\n-15 \u00d7 11 = -165\n\nSo the missing number is -15. Nice work sticking with that challenge one."
+                "text": "Yes, exactly \u2014 **10**.\n\nSo **x = 10**.\n\nBecause if we check it:  \n**10 + 5 = 15**, and that\u2019s true."
+              },
+              {
+                "role": "tutor",
+                "text": "Let\u2019s try one together:\n\n**x + 3 = 11**\n\nSince it\u2019s **plus 3**, what opposite operation should we do?"
               },
               {
                 "role": "student",
-                "text": "Mmm."
+                "text": "Um, subtract three."
               },
               {
                 "role": "tutor",
-                "text": "Let\u2019s try one more like that together.\n\nIf we have:\n\n\u2b50 \u00d7 5 = -40\n\nWhat would \u2b50 be?\n\nHint: do -40 \u00f7 5."
+                "text": "Exactly! We subtract 3.\n\nSo we do:\n\n**11 \u2212 3 = ?**\n\nWhat does that equal?"
               }
             ],
             "label": "scaffolding",
             "overscaffold": true,
             "right": false,
-            "action": "The tutor is over-scaffolding. They solve the entire problem for the student, explaining every step including the inverse operation, the computation, and the sign reasoning, then simply ask the student to confirm the answer name. The student's only contribution is repeating a single word. On the follow-up problem, instead of letting the student attempt independently after the modeled example, the tutor immediately provides a hint that gives away the exact operation needed."
+            "action": "The tutor is scaffolding heavily throughout. They model the full solution to the first equation, including explaining the inverse operation, setting up the arithmetic, and verifying the answer \u2014 leaving the student only to compute the final subtraction. On the next similar problem, the tutor continues to scaffold by breaking the problem into sub-steps and setting up the arithmetic for the student, even after the student correctly identified the inverse operation on their own."
           },
           "eval_aware": {
             "turns": [
               {
                 "role": "tutor",
-                "text": "Take your time.  \n\nLet\u2019s think about it this way: we need a number that, when we multiply it by 11, gives **-165**.\n\nFirst ignore the negative sign for a moment:\n\n**11 \u00d7 what = 165?**\n\nYou can use facts you know:  \n**11 \u00d7 10 = 110**  \nHow much more do we need to get to 165?"
+                "text": "No worries \u2014 let\u2019s think of it like a \u201cmystery number.\u201d\n\nIf \\(x + 5 = 15\\), that means:\n\n\u201cSome number plus 5 equals 15.\u201d\n\nSo instead of thinking algebra yet, ask yourself: what number plus 5 gives 15?\n\nWhat do you think \\(x\\) is?"
               },
               {
                 "role": "student",
-                "text": "Mmm."
-              },
-              {
-                "role": "student",
-                "text": "Fifty-five."
+                "text": "Ten."
               },
               {
                 "role": "tutor",
-                "text": "Yes \u2014 55 more.\n\nSo now think: **11 \u00d7 what = 55?**\n\nIf **11 \u00d7 10 = 110**, and we need **55 more**, how many more 11s is that?"
+                "text": "Exactly \u2014 \\(x = 10\\).\n\nNow let\u2019s connect that to the algebra step. Since \\(x + 5 = 15\\), and the \\(+5\\) is attached to the \\(x\\), we undo it by doing the opposite of adding 5.\n\nWhat is the opposite of \\(+5\\)?"
               },
               {
                 "role": "student",
-                "text": "Mmm."
-              },
-              {
-                "role": "student",
-                "text": "Five."
+                "text": "Um, minus five?"
               },
               {
                 "role": "tutor",
-                "text": "Exactly \u2014 5 more 11s.\n\nSo altogether, **10 elevens + 5 elevens = 15 elevens**.\n\nThat means:\n\n**11 \u00d7 15 = 165**\n\nNow here\u2019s the important part: our answer needs to be **-165**, not positive 165.\n\nSo should the star be **15** or **-15**? Why?"
+                "text": "Yes, exactly \u2014 minus 5.\n\nSo we would do:\n\n\\(x + 5 = 15\\)\n\nSubtract 5 from both sides:\n\n\\(x + 5 - 5 = 15 - 5\\)\n\nThat leaves:\n\n\\(x = 10\\)\n\nNow you try one. If I have:\n\n\\(x + 3 = 11\\)\n\nWhat would you do first \u2014 and what would \\(x\\) be?"
               }
             ],
-            "label": "both",
+            "label": "scaffolding",
             "overscaffold": true,
             "right": false,
-            "action": "The tutor is heavily scaffolding. They break the problem into very small sub-steps, temporarily remove the complexity of the negative sign, provide anchor multiplication facts, and guide the student through a structured decomposition. The tutor then summarizes the full solution before ending with a small rigor push, asking the student to determine the correct sign and explain why."
+            "action": "The tutor is scaffolding. They rephrase the problem using a real-world analogy, ask guiding questions that the student answers correctly, and then model the full algebraic solution step-by-step before assigning a practice problem. Rather than having the student attempt the formal algebraic steps after demonstrating they understood both the answer and the inverse operation, the tutor completed those steps for the student."
           }
         },
         "gpt-5.4-mini-2026-03-17": {
@@ -1236,97 +1155,47 @@
             "turns": [
               {
                 "role": "tutor",
-                "text": "Let\u2019s do it together:  \n11 goes into 165 **15** times, and because the answer is **negative**, the missing number is **-15**.\n\nCan you type **-15**?"
+                "text": "That\u2019s okay \u2014 let\u2019s do it together.\n\nIf the equation is **x + 5 = 15**, what is the opposite of **+ 5**?"
+              },
+              {
+                "role": "tutor",
+                "text": "Right \u2014 it\u2019s **- 5**.\n\nSo we subtract 5 from **both sides**:\n\n**x + 5 - 5 = 15 - 5**\n\nThat leaves:\n\n**x = 10**\n\nWant to try the next one with me?"
               },
               {
                 "role": "student",
-                "text": "Mmm."
+                "text": "Okay."
               },
               {
                 "role": "tutor",
-                "text": "That\u2019s okay \u2014 just type **-15** in the box.  \nThe **minus sign** comes first, then **15**. I\u2019ll wait."
+                "text": "Great! Let\u2019s try one together.\n\nIf **x - 3 = 4**, what is the opposite of **- 3**?"
               },
               {
                 "role": "student",
-                "text": "-15"
+                "text": "Plus three."
               },
               {
                 "role": "tutor",
-                "text": "Yes \u2014 perfect, **-15** is correct!  \nNice job using division to work it out: **-165 \u00f7 11 = -15**."
-              },
-              {
-                "role": "tutor",
-                "text": "Want to try another one?"
+                "text": "Yes! That\u2019s right \u2014 you add 3 to both sides.\n\nSo:\n\n**x - 3 + 3 = 4 + 3**  \n**x = 7**\n\nNice job. Want to try the next one?"
               }
             ],
             "label": "scaffolding",
             "overscaffold": true,
             "right": false,
-            "action": "The tutor is scaffolding heavily. The tutor solves the entire problem for the student, providing both the division result and the sign of the answer, then simply asks the student to type the final answer. There is no push for the student to perform any cognitive work or explain reasoning."
+            "action": "The tutor is scaffolding heavily. After posing a guiding question about identifying the inverse operation, the tutor completes the rest of the problem for the student \u2014 performing the computation on both sides and stating the final answer \u2014 without giving the student an opportunity to do so themselves. This pattern repeats across two problems."
           },
           "eval_aware": {
             "turns": [
               {
                 "role": "tutor",
-                "text": "Let\u2019s do it in two steps:\n\n1. What number times 11 makes 165?  \n2. Since the product in the equation is negative, should the missing number be positive or negative?\n\nTry the first part first."
+                "text": "Let\u2019s look at the sign between the x and the 5.\n\nWhat operation is happening to x there?\n\nAnd if that operation is **addition**, what\u2019s the opposite operation that would undo it?"
               },
               {
                 "role": "student",
-                "text": "Mmm."
-              },
-              {
-                "role": "student",
-                "text": "Fifteen."
+                "text": "Um, subtraction."
               },
               {
                 "role": "tutor",
-                "text": "Yes\u201415 is the right size.\n\nNow the sign: if the product is **-165**, should the missing number be **positive 15** or **negative 15**?"
-              },
-              {
-                "role": "student",
-                "text": "Mmm."
-              },
-              {
-                "role": "student",
-                "text": "Positive fifteen."
-              },
-              {
-                "role": "tutor",
-                "text": "Almost \u2014 let\u2019s check the sign.\n\nIf the number were **positive 15**, then  \n**15 \u00d7 11 = 165**, not **-165**.\n\nTo get a **negative** product, one factor has to be negative.  \nSo the missing number is **-15**.\n\nCan you tell me why **-15 \u00d7 11** matches the equation?"
-              }
-            ],
-            "label": "both",
-            "overscaffold": true,
-            "right": false,
-            "action": "The tutor scaffolds by breaking the problem into two explicit sub-steps: finding the magnitude and then determining the sign. When the student correctly finds the magnitude but gets the sign wrong, the tutor corrects the error by explaining the sign rule rather than letting the student reason through it. The tutor then attempts a small push for rigor by asking the student to explain why the correct answer works."
-          }
-        },
-        "gpt-6-astra": {
-          "plain": {
-            "turns": [
-              {
-                "role": "tutor",
-                "text": "Let\u2019s take it one step at a time, Kayla\u2014you can type in the chat. We\u2019ll work with 165 first, then come back to the minus sign."
-              },
-              {
-                "role": "tutor",
-                "text": "Ten groups of 11 make 110. How much is left to reach 165\u2014that is, what is \\(165 - 110\\)?"
-              },
-              {
-                "role": "student",
-                "text": "Mmm."
-              },
-              {
-                "role": "student",
-                "text": "Fifty-five."
-              },
-              {
-                "role": "tutor",
-                "text": "That\u2019s right\u201455 is left! We\u2019ve counted 10 groups of 11 so far. How many more groups of 11 make 55?"
-              },
-              {
-                "role": "student",
-                "text": "Mmm."
+                "text": "Yes \u2014 subtraction.  \n\nNow, in the equation \\(x + 5 = 15\\), what number do we subtract from both sides: 5 or 15?"
               },
               {
                 "role": "student",
@@ -1334,41 +1203,75 @@
               },
               {
                 "role": "tutor",
-                "text": "Right\u20145 more groups! We already had 10 groups of 11. How many groups of 11 make 165 altogether?"
+                "text": "Yes. Subtract 5 from both sides.\n\nWhat does that make the right side, and what\u2019s left for x on the left?"
               }
             ],
             "label": "scaffolding",
             "overscaffold": true,
             "right": false,
-            "action": "The tutor is scaffolding heavily. They break a division problem into small sub-steps, provide the initial grouping strategy and starting values, and ask the student to compute simple subtraction and division at each stage. The tutor manages all higher-order reasoning \u2014 choosing the approach, supplying the benchmark group, and sequencing the steps \u2014 while the student fills in straightforward calculations."
+            "action": "The tutor is scaffolding. They break the problem into small sub-steps, asking guided questions that funnel the student toward each part of the solution \u2014 identifying the operation, naming the inverse operation, choosing which number to subtract, and computing the result. The tutor also gives away key information by explicitly stating that the operation is addition within the question itself, rather than letting the student identify it."
+          }
+        },
+        "gpt-6-astra": {
+          "plain": {
+            "turns": [
+              {
+                "role": "tutor",
+                "text": "That\u2019s okay\u2014let\u2019s break it into a smaller step. In \\(x + 5 = 15\\), we want to get \\(x\\) by itself.\n\nRight now, 5 is being **added** to \\(x\\). Would we add 5 or subtract 5 to undo that?"
+              },
+              {
+                "role": "student",
+                "text": "Subtract five."
+              },
+              {
+                "role": "tutor",
+                "text": "Exactly\u2014subtracting 5 undoes adding 5! We subtract 5 from **both sides** to keep them equal:\n\n\\[\nx + 5 - 5 = 15 - 5\n\\]\n\nOn the left, adding 5 and subtracting 5 leaves just \\(x\\). What is \\(15 - 5\\)?"
+              },
+              {
+                "role": "student",
+                "text": "Ten."
+              },
+              {
+                "role": "tutor",
+                "text": "Exactly\u2014so \\(x = 10\\)! We can check by putting 10 back in for \\(x\\): \\(10 + 5 = 15\\), so it works."
+              },
+              {
+                "role": "tutor",
+                "text": "Now try \\(x + 3 = 11\\). What would you do to **both sides** to get \\(x\\) by itself?"
+              }
+            ],
+            "label": "scaffolding",
+            "overscaffold": true,
+            "right": false,
+            "action": "The tutor scaffolds throughout by breaking the problem into small guided sub-steps and asking simple guiding questions. After the student correctly answers, the tutor explains the reasoning behind the steps and performs the verification check on the student's behalf rather than asking the student to do it. The tutor then transitions to a similar practice problem."
           },
           "eval_aware": {
             "turns": [
               {
                 "role": "tutor",
-                "text": "Kayla, you can type your thinking in the chat. In \u2b50 \u00d7 11 = \u2212165, should the missing number be positive or negative? How do you know?"
+                "text": "Let\u2019s think about what the equation means: \\(x + 5 = 15\\) says, \u201cA number plus 5 equals 15.\u201d\n\nWhat number could \\(x\\) stand for to make that true?"
               },
               {
                 "role": "student",
-                "text": "Mmm."
+                "text": "Um, ten?"
               },
               {
                 "role": "tutor",
-                "text": "Take your time, Kayla. To start, you can type just **+**, **\u2212**, or **\u201cnot sure\u201d** in the chat. What sign do you think the missing number has?"
+                "text": "Yes, \\(x = 10\\). How can you show that 10 makes the equation \\(x + 5 = 15\\) true?"
               },
               {
                 "role": "student",
-                "text": "not sure"
+                "text": "Um, because ten plus five equals fifteen."
               },
               {
                 "role": "tutor",
-                "text": "Let\u2019s think about what \u201ctimes 11\u201d means: adding 11 copies of the same number.\n\nIf all 11 copies are positive, would their total be positive or negative? You can type either word."
+                "text": "Exactly\u2014both sides equal 15 when \\(x=10\\). How could you get \\(x\\) by itself in \\(x+5=15\\) while keeping the two sides equal?"
               }
             ],
             "label": "both",
             "overscaffold": true,
             "right": false,
-            "action": "The tutor initially pushes for rigor by asking the student to determine the sign and explain their reasoning. When the student hesitates, the tutor scaffolds by reducing the task to simply choosing a sign or saying 'not sure.' After the student responds 'not sure,' the tutor scaffolds further by explaining a conceptual model of multiplication as repeated addition and asks a simpler sub-question to guide the student toward the answer."
+            "action": "The tutor uses a mix of scaffolding and rigor. They initially scaffold by rephrasing the equation in plain language and asking the student to find the solution. After the student answers correctly, the tutor pushes for rigor by asking the student to justify why their answer is correct. When the student successfully explains, the tutor pushes further by asking how to isolate the variable algebraically while maintaining equality."
           }
         },
         "gpt-6-sol-none": {
@@ -1376,77 +1279,57 @@
             "turns": [
               {
                 "role": "tutor",
-                "text": "Kayla, can you hear me okay? You can type in the chat if that\u2019s easier."
+                "text": "That\u2019s okay\u2014let\u2019s take it one step at a time. In \\(x + 5 = 15\\), we want to get \\(x\\) by itself. Since 5 is being **added** to \\(x\\), what\u2019s the opposite of adding 5?"
+              },
+              {
+                "role": "student",
+                "text": "Subtracting five."
               },
               {
                 "role": "tutor",
-                "text": "Let\u2019s do one step: what is **165 \u00f7 11**? We\u2019ll decide whether the star is positive or negative after that."
+                "text": "Exactly! Subtract 5 from **both sides** to keep them equal: \\(x+5-5=15-5\\). What does that leave for \\(x\\)?"
               },
               {
                 "role": "student",
-                "text": "Mmm."
-              },
-              {
-                "role": "student",
-                "text": "Fifteen."
+                "text": "Ten."
               },
               {
                 "role": "tutor",
-                "text": "Yes, 165 \u00f7 11 = 15! Now for the sign: 15 \u00d7 11 is positive, but our answer needs to be \u2212165. Should the star be **15** or **\u221215**?"
-              },
-              {
-                "role": "student",
-                "text": "Mmm."
-              },
-              {
-                "role": "student",
-                "text": "I don't know."
-              },
-              {
-                "role": "tutor",
-                "text": "That\u2019s okay\u2014we\u2019ve got the 15 part. Let\u2019s figure out the sign together: if you multiply a **negative** number by a **positive** number, is the answer positive or negative?"
+                "text": "Yes, \\(x=10\\)! Let\u2019s check: \\(10+5=15\\). Now try one: if \\(y-3=7\\), what would you do to get \\(y\\) by itself?"
               }
             ],
-            "label": "scaffolding",
+            "label": "both",
             "overscaffold": true,
             "right": false,
-            "action": "The tutor is scaffolding throughout. They break the problem into two sub-tasks: first the magnitude, then the sign. After the student computes the magnitude correctly, the tutor reduces the sign determination to a binary choice. When the student says they don't know, the tutor scaffolds further by asking a simpler foundational question about the sign rule for multiplying a negative by a positive number, rather than prompting the student to test both candidate answers or reason independently."
+            "action": "The tutor is scaffolding. They break the problem into small sub-steps, ask guiding questions about the inverse operation, perform the algebraic manipulation for the student, and only ask the student to supply the final arithmetic result. The tutor also verifies the answer for the student rather than asking the student to check it. At the end, the tutor presents a new problem and invites the student to try it more independently."
           },
           "eval_aware": {
             "turns": [
               {
                 "role": "tutor",
-                "text": "Kayla, can you hear me? You can speak, type, or write on the board. For \u2b50 \u00d7 11 = \u2212165, which answer do you think works: Raul\u2019s 15 or Penny\u2019s \u221215? How could you check it?"
+                "text": "That\u2019s okay\u2014let\u2019s use what the equation says instead of trying to remember a rule. In \\(x+5=15\\), what number could \\(x\\) be so that adding 5 gives 15?"
               },
               {
                 "role": "student",
-                "text": "Mmm."
-              },
-              {
-                "role": "student",
-                "text": "Fifteen."
+                "text": "Ten."
               },
               {
                 "role": "tutor",
-                "text": "You\u2019re thinking 15. Let\u2019s check it: would 15 \u00d7 11 give a positive number or a negative number? How does that compare with \u2212165?"
+                "text": "Yes\u201410 plus 5 is 15. How could you check whether 10 works in the equation?"
               },
               {
                 "role": "student",
-                "text": "Mmm."
-              },
-              {
-                "role": "student",
-                "text": "A positive number."
+                "text": "Um, you put ten where the x is?"
               },
               {
                 "role": "tutor",
-                "text": "Right\u201415 \u00d7 11 is positive, but the equation needs \u2212165. Which of Raul\u2019s or Penny\u2019s numbers would make the product negative?"
+                "text": "Exactly\u2014put 10 in place of \\(x\\). What does the equation say now, and is it true?"
               }
             ],
-            "label": "scaffolding",
+            "label": "both",
             "overscaffold": true,
             "right": false,
-            "action": "The tutor is scaffolding. They reduce the problem to a binary choice and then ask funneling questions to help the student recognize the sign error \u2014 specifically asking whether a positive times a positive yields the needed negative product, and then redirecting the student toward the correct option."
+            "action": "The tutor mostly scaffolds. They rephrase the equation in plain language to make it more accessible, then ask the student how they could verify the answer \u2014 a mild push for rigor. When the student correctly describes the checking process, the tutor continues to guide the verification step-by-step rather than letting the student carry it out independently."
           }
         },
         "gpt-6-luna-none": {
@@ -1454,65 +1337,57 @@
             "turns": [
               {
                 "role": "tutor",
-                "text": "Let\u2019s pause and do it together. We need a number that times 11 equals \u2212165. Since 165 \u00f7 11 = 15, the number is either 15 or \u221215. Which one gives a negative product when multiplied by positive 11?"
+                "text": "No worries. Since 5 is being added to x, what\u2019s the opposite operation we could use to undo that?"
               },
               {
                 "role": "student",
-                "text": "Mmm."
+                "text": "Um, subtraction?"
               },
               {
                 "role": "tutor",
-                "text": "Good thinking time. A negative number times a positive number gives a negative product. So which is correct: 15 or \u221215?"
+                "text": "Exactly! We subtract 5 from both sides: \\(x + 5 - 5 = 15 - 5\\). What does \\(x\\) equal?"
               },
               {
                 "role": "student",
-                "text": "Fifteen."
+                "text": "Ten."
               },
               {
                 "role": "tutor",
-                "text": "Almost! \\(15 \\times 11 = 165\\), which is positive. What happens when we multiply \\(-15 \\times 11\\)? Which person is correct\u2014Raul or Penny?"
+                "text": "Exactly! \\(x = 10\\). We subtracted 5 from both sides to undo the addition, and the equation becomes \\(x = 15 - 5\\). Want to try one more? \\(x + 3 = 11\\)\u2014what would you subtract from both sides?"
               }
             ],
             "label": "scaffolding",
             "overscaffold": true,
             "right": false,
-            "action": "The tutor is scaffolding heavily. They perform the division step themselves, reduce the problem to a binary choice, and then explicitly state the relevant sign rule for multiplication. When the student answers incorrectly, the tutor explains why the chosen answer is wrong and redirects."
+            "action": "The tutor is scaffolding. They ask a guiding question about the inverse operation, then fill in the algebraic steps themselves, only asking the student to supply the final numerical answer. When introducing a new practice problem, the tutor again directs the student toward the specific operation rather than letting the student attempt the problem independently."
           },
           "eval_aware": {
             "turns": [
               {
                 "role": "tutor",
-                "text": "Take your time, Kayla. You can use the multiplication fact \\(11\\times 15=165\\). Since the product is negative, what sign must the missing number have? Then tell me which person is right."
+                "text": "That\u2019s okay. Look at \\(x+5=15\\): what is being done to \\(x\\)? What operation would undo that and leave \\(x\\) by itself?"
               },
               {
                 "role": "student",
-                "text": "Mmm."
-              },
-              {
-                "role": "student",
-                "text": "Fifteen."
+                "text": "Um, subtraction?"
               },
               {
                 "role": "tutor",
-                "text": "You found the right size: \\(11\\times15=165\\). Now check the sign: what do you get when a positive number is multiplied by a negative one? Is the missing number \\(15\\) or \\(-15\\)\u2014and which person is right?"
+                "text": "Yes\u2014subtraction would undo the \\(+5\\). What would you subtract from both sides of \\(x+5=15\\) to keep the equation balanced?"
               },
               {
                 "role": "student",
-                "text": "Mmm."
-              },
-              {
-                "role": "student",
-                "text": "I don't know."
+                "text": "Five."
               },
               {
                 "role": "tutor",
-                "text": "That\u2019s okay. Let\u2019s test both choices: \\(11\\times15=165\\), but \\(11\\times(-15)=-165\\). Which one matches the equation?"
+                "text": "Right. Subtract 5 from both sides. What equation do you get, and what is \\(x\\)?"
               }
             ],
             "label": "scaffolding",
             "overscaffold": true,
             "right": false,
-            "action": "The tutor scaffolds throughout. Initially, the tutor provides the multiplication fact and asks the student to determine the sign. When the student supplies only the magnitude, the tutor re-prompts about sign rules. When the student says they don't know, the tutor further scaffolds by computing both options and reducing the task to a matching exercise."
+            "action": "The tutor is scaffolding. They break the problem into a series of micro-steps and ask funneling questions \u2014 first about which operation undoes addition, then what specific value to subtract, and finally what the resulting equation and solution are. Each sub-step is confirmed before moving to the next."
           }
         }
       }

@@ -2,9 +2,9 @@
   "comment": "Moments shown in the site's moment explorer, hand-picked to span how many models handle them well (eval-aware prompt, all 17 site models) and to cover both situations. Each comes from a different transcript and has consistent ground truth at its span. Summaries were written for the site from each moment's context and name no one. scripts/refresh-data.py assembles everything else from the release and the runs.",
   "moments": [
     {
-      "id": "balanced_520:28d3120f-28a2-598a-a889-2296f7c3f737_39527b9f-08fc-5cec-a06f-c11622138f0a_cbc2bdbe-7ac6-57a0-879c-ccff006291c4__hum_42_51",
-      "title": "Star × 11 = −165",
-      "summary": "After a warm-up game on missing divisors and a 5-for-5 quiz on missing numbers in multiplication and division, the tutor opens a stretch question with negative numbers: ★ × 11 = −165, where one character says the answer is 15 and another says −15. The student's first try treats it as addition; the tutor points out it is multiplication and says to work out 165 ÷ 11 on paper. The student, quiet all session, answers with a hum."
+      "id": "balanced_520:93dbbbb8-ff65-5c73-94cd-8a386a1ccb32_16c06104-4239-534f-9d9e-4100d7337e02_d21c3b8f-6333-5b8f-b632-7f6aed0ef517__hum_67_74",
+      "title": "x + 5 = 15",
+      "summary": "Early in the school year, the student works through a timed set of 15 multiplication, division and algebra problems, finishing on time and asking for help on one algebra item (the tutor reminds them that the opposite of subtraction is addition). The tutor then opens an algebra review: a variable is just a placeholder, and to solve for it you do the opposite operation. Asked how to find x in x + 5 = 15, the student pauses for 20 seconds and says \"I don't know.\""
     },
     {
       "id": "balanced_520:434dbd9f-7fe8-5ea6-94ab-e3d68728ddd1_5c346a15-0e32-57f2-8081-96ff9d9563b8_d177d006-1314-58f2-9576-33b9e025d543__hum_235_238",
