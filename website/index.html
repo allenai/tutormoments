@@ -73,12 +73,8 @@
         We ran language models ("LM") as tutors over 520 teacher-identified key moments from real math tutoring
         sessions, split evenly between moments that called for <strong>scaffolding</strong> (making the problem more
         accessible) and moments that called for a <strong>push for rigor</strong> (asking the student to do harder thinking).
-        Each score is the share of moments where the model did what the moment called for. The working paper
-        reports seven models; the other ten were run since, on the same moments with the same simulated student
-        and scorer. <em>Reasoning</em> lists the reasoning parameters each model was called with, exactly as
-        the benchmark config sends them to its provider. The <em>plain</em>
-        prompt just tells the model to tutor well; the <em>evaluation-aware</em> prompt spells out the
-        scaffolding-vs-rigor trade-off.
+        Each score is the share of moments where the model did what the moment called for, without over-scaffolding. <em>Reasoning</em> lists the thinking/effort/reasoning parameters each model was called with. The <em>plain</em>
+        prompt just tells the model to use what it knows about great tutoring to tutor well; the <em>evaluation-aware</em> prompt spells out the scaffolding-vs-rigor trade-off.
       </p>
     </div>
   </div>
@@ -100,7 +96,7 @@
     <div class="prose">
       <h2>Replaying from key learning moments</h2>
       <p>
-        Ask a good math tutor for help and you'll likely get a question back: <em>"what do you know about
+        Ask a good tutor for help and you'll likely get a question back: <em>"what do you know about
         what the problem is asking?"</em> The tutor isn't being unhelpful by asking a question back. Instead, they are diagnosing what
         type of support may be needed. Language models, though, are trained to be a "helpful assistant".
         TutorMoments-Preview assesses whether the LM's helpful assistant character traits interfere with the core
@@ -304,6 +300,6 @@
 
 <div class="chart-tooltip" id="chart-tooltip" role="status"></div>
 
-<script src="./static/js/main.js?v=22"></script>
+<script src="./static/js/main.js?v=23"></script>
 </body>
 </html>

@@ -356,14 +356,16 @@
         var html = '<div class="tt-title">' + d.name + "</div>" +
           reasoningRow(d.id) +
           ttRow("Score", d.score.toFixed(3)) +
-          ttRow("Time to first answer token", d.ttft_s.toFixed(1) + " s");
+          // Two decimals: the figures are medians stored to 0.01 s, and one
+          // decimal hid real gaps (0.80 vs 0.82 s decides the frontier).
+          ttRow("Time to first answer token", d.ttft_s.toFixed(2) + " s");
         // Split on turn position (turn 1 vs turns 3 and 5); probe rows only.
         if (typeof d.ttft_first_s === "number" && typeof d.ttft_later_s === "number") {
-          html += ttRow("First / later messages", d.ttft_first_s.toFixed(1) + " / " + d.ttft_later_s.toFixed(1) + " s");
+          html += ttRow("First / later messages", d.ttft_first_s.toFixed(2) + " / " + d.ttft_later_s.toFixed(2) + " s");
         }
         // TTLT: when the student can reply.
         if (typeof d.ttlt_s === "number") {
-          html += ttRow("Full turn, end to end", d.ttlt_s.toFixed(1) + " s");
+          html += ttRow("Full turn, end to end", d.ttlt_s.toFixed(2) + " s");
         }
         if (drawn.on[d.id]) html += ttRow("Frontier", "nothing faster scores higher");
         html += ttRow("Measured", d.ttft_source === "run"
