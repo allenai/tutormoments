@@ -181,9 +181,9 @@
       </div>
       <p class="chart-footnote" id="kl-footnote">
         KL divergence is asymmetric, so each dot is the mean of the two directions, KL(S‖R) and KL(R‖S): how
-        far a tutor's moves in scaffolding moments are from its moves in rigor moments, and the reverse. The
-        two differ by at most 0.07 for any series here; hover a row for both. Every series is at full sample,
-        about 260 moments per situation, so these values are not comparable to the working paper's KL table,
+        far a tutor's moves in scaffolding moments are from its moves in rigor moments, and the reverse. 
+        Every series is at full sample,
+        about 260 moments per situation, so these values are not comparable to the July working paper's KL table,
         whose add-one smoothing over ~50 moments per situation pulls every value toward zero (human tutors
         0.18 there). Paper models from the action-taxonomy release's classifications of their full replays;
         later models from their own runs.
@@ -194,14 +194,12 @@
     <div class="chart-block" id="latency-block">
       <h3 class="chart-title">Latency has improved</h3>
       <p class="chart-sub">
-        Overall performance (mean of appropriate scaffolding and appropriate rigor, evaluation-aware prompt)
-        against median time to first answer token (TTFAT). TTFAT runs until the first token of the reply the
-        student sees. A reasoning model's thinking counts toward it, unlike the time to first token (TTFT) many
-        latency trackers report, which stops at the first token of any kind. Among the working paper's models,
-        the two strongest tutors left a student looking at nothing for 8.5 to 9 seconds. Since then, Claude
-        Sonnet 5.5 and GPT-6 Sol outscore every paper model while starting to answer in about 0.8 seconds, close
-        to the 0.5–1 second of a person on a video call (face-to-face speech is around 100–200 ms). The top
-        scorer, GPT-6 Astra, still takes 10. Switch to p95 to see the slowest turn in twenty.
+        In the time since the benchmark was introduced, new low latency-high performance models have emerged. 
+        A human has a latency of 0.5–1 second on a video call, and face-to-face speech latency is around 100–200 ms.
+        We measure overall performance (mean of appropriate scaffolding and appropriate rigor, evaluation-aware prompt)
+        against median time to first answer token (TTFAT). TTFAT is the time until the first token of the reply that the
+        student actually sees. The time to first token (TTFT), which many
+        latency trackers report, stops at the first token of any kind, including reasoning tokens. 
       </p>
       <div class="chart-controls">
         <div class="chart-tabs" role="tablist" aria-label="Latency statistic" data-stats>
@@ -220,11 +218,11 @@
     <div class="chart-block" id="cost-block" hidden>
       <h3 class="chart-title">More high performance, low cost models are needed</h3>
       <p class="chart-sub">
-        Overall performance (the same score as above) against what each tutor response costs at the model's
-        list prices, from the tokens each tutor actually used. The cost is uncached: every prompt token is priced at
-        the full input rate, as at the start of every session and after every cache expiry, and reasoning
+        Education technology is a highly price sensitive industry. We measure overall performance (the same score as above) against model cost by multiplying the model's list price against the actual tokens generated. 
+        The cost is uncached: every prompt token is priced at
+        the full input rate and reasoning
         tokens count at the output rate. Provider prompt caching can cut the input share substantially, so
-        read this as a ceiling. GPT-6 Sol scores level with Claude Fable 5.1 at about a ninth of the cost.
+        read this as a ceiling.
       </p>
       <div class="chart-card">
         <div id="cost-chart"></div>
@@ -241,10 +239,11 @@
       <span class="kicker">Moment explorer</span>
     </div>
     <p class="explorer-intro">
-      Ten moments from the benchmark, chosen to run from ones no model handles well to ones every model does.
+      The explorer shows ten moments selected from the benchmark.
       Each shows the session up to the cut point, then what the human tutor actually did next beside a model's
       replay of the same moment. The human tutor's actions are as the expert annotators labelled them; each
-      model's are as the benchmark's scorer judged them, by the same rule as the leaderboard.
+      model's are as the benchmark's scorer judged them, by the same rule as the leaderboard. The moments are 
+      all de-identified and any names used are random surrogates.
     </p>
     <div class="explorer-controls">
       <div class="ex-nav">
