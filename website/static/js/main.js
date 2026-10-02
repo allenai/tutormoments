@@ -459,8 +459,9 @@
     var promptTabs = block.querySelectorAll(".chart-tabs button[data-prompt]");
     var providerTabs = block.querySelectorAll(".chart-tabs button[data-provider]");
     var current = "plain";
-    // One provider at a time: seventeen series in one strip are unreadable.
-    var currentProvider = providerTabs.length ? providerTabs[0].getAttribute("data-provider") : null;
+    // "all" (the default) or one provider, so a crowded strip can be read
+    // a few series at a time.
+    var currentProvider = "all";
     function providerOf(d) { return (MODEL_STYLE[d.id] || {}).provider; }
 
     var chartHighlight = null; // reassigned by draw(); legend hovers call the current one
@@ -468,7 +469,7 @@
     function draw() {
       mount.innerHTML = "";
       var models = data.models.filter(function (d) {
-        return !currentProvider || providerOf(d) === currentProvider;
+        return currentProvider === "all" || providerOf(d) === currentProvider;
       });
       var offsets = models.map(function (_, i) {
         return models.length > 1 ? -0.4 + (0.8 * i) / (models.length - 1) : 0;
