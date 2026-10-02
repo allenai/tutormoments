@@ -288,109 +288,143 @@
   function fmtSec(v) { return v < 1 ? v.toFixed(1) : String(Math.round(v)); }
 
   function renderLatency(data) {
+    var block = document.getElementById("latency-block");
     var mount = document.getElementById("latency-chart");
-    // A model with no TTFAT figure cannot be placed on this axis. Omitted
-    // rather than zero-filled: "not measured" is not "fast".
-    var models = data.models.filter(function (d) { return typeof d.ttft_s === "number" && d.ttft_s > 0; });
-    var missing = data.models.filter(function (d) { return models.indexOf(d) < 0; })
-      .map(function (d) { return d.name; });
-    if (!models.length) {
-      document.getElementById("latency-block").hidden = true;
+    var tabs = block.querySelectorAll(".chart-tabs button[data-stat]");
+    var STAT = {
+      p50: { key: "ttft_s", ttlt: "ttlt_s", axis: "median" },
+      p95: { key: "ttft_p95_s", ttlt: "ttlt_p95_s", axis: "95th percentile" }
+    };
+    var current = "p50";
+    var has = function (d, k) { return typeof d[k] === "number" && d[k] > 0; };
+    if (!data.models.some(function (d) { return has(d, "ttft_s"); })) {
+      block.hidden = true;
       return;
     }
-
-    var W = 920, H = 480;
-    var m = { top: 24, right: 120, bottom: 58, left: 74 };
-    var iw = W - m.left - m.right, ih = H - m.top - m.bottom;
-
-    // Log scale: TTFAT spans more than an order of magnitude across models,
-    // and a linear axis piles the sub-second tutors on top of each other.
-    var secs = models.map(function (d) { return d.ttft_s; });
-    var ticks = logTicks(Math.min.apply(null, secs) / 1.2, Math.max.apply(null, secs) * 1.2);
-    var lMin = Math.log10(ticks[0]), lMax = Math.log10(ticks[ticks.length - 1]);
-    var yMin = SCORE_MIN, yMax = SCORE_MAX;
-    var x = function (v) { return m.left + ((Math.log10(v) - lMin) / (lMax - lMin)) * iw; };
-    var y = function (v) { return m.top + (1 - (v - yMin) / (yMax - yMin)) * ih; };
-
-    var svg = el("svg", { viewBox: "0 0 " + W + " " + H, role: "img",
-      "aria-label": "Scatter plot of tutoring performance against median time to first answer token, log scale, for "
-        + models.length + " language models" });
-
-    var yi;
-    ticks.forEach(function (t, i) {
-      if (i > 0) el("line", { x1: x(t), y1: m.top, x2: x(t), y2: m.top + ih, stroke: GRID, "stroke-width": 1 }, svg);
-      el("text", { x: x(t), y: m.top + ih + 22, "text-anchor": "middle", "font-size": 12, fill: INK_MUTED }, svg)
-        .textContent = fmtSec(t);
-    });
-    for (yi = yMin; yi <= yMax + 0.001; yi += 0.1) {
-      el("line", { x1: m.left, y1: y(yi), x2: m.left + iw, y2: y(yi), stroke: GRID, "stroke-width": 1 }, svg);
-      el("text", { x: m.left - 10, y: y(yi) + 4, "text-anchor": "end", "font-size": 12, fill: INK_MUTED }, svg)
-        .textContent = yi.toFixed(1);
+    if (!data.models.some(function (d) { return has(d, "ttft_p95_s"); })) {
+      block.querySelector(".chart-tabs[data-stats]").hidden = true;
     }
-    el("line", { x1: m.left, y1: m.top + ih, x2: m.left + iw, y2: m.top + ih, stroke: INK_MUTED, "stroke-width": 1 }, svg);
 
-    el("text", { x: m.left + iw / 2, y: H - 12, "text-anchor": "middle", "font-size": 13, fill: INK }, svg)
-      .textContent = "Time to first answer token (TTFAT), median seconds (log scale)";
-    var yl = el("text", { x: 18, y: m.top + ih / 2, "text-anchor": "middle", "font-size": 13, fill: INK,
-      transform: "rotate(-90 18 " + (m.top + ih / 2) + ")" }, svg);
-    yl.textContent = "Appropriate scaffolding & rigor (mean)";
+    // One log x-axis for both views, so switching to p95 shows each point
+    // moving into its tail rather than the axis rescaling. Log: TTFAT spans
+    // more than an order of magnitude, and a linear axis piles the
+    // sub-second tutors on top of each other.
+    var allSecs = [];
+    data.models.forEach(function (d) {
+      ["ttft_s", "ttft_p95_s"].forEach(function (k) { if (has(d, k)) allSecs.push(d[k]); });
+    });
+    var ticks = logTicks(Math.min.apply(null, allSecs) / 1.2, Math.max.apply(null, allSecs) * 1.2);
 
-    // Latency-performance frontier: the models nothing faster outscores.
-    var frontier = scoreFrontier(models, function (d) { return d.ttft_s; });
-    var drawn = drawFrontier(svg, frontier, function (d) { return x(d.ttft_s); }, function (d) { return y(d.score); });
+    function draw() {
+      mount.innerHTML = "";
+      var st = STAT[current];
+      var xv = function (d) { return d[st.key]; };
+      // A model with no figure for this statistic cannot be placed. Omitted
+      // rather than zero-filled: "not measured" is not "fast".
+      var models = data.models.filter(function (d) { return has(d, st.key); });
+      var missing = data.models.filter(function (d) { return models.indexOf(d) < 0; })
+        .map(function (d) { return d.name; });
 
-    var points = models.map(function (d) { return { d: d, cx: x(d.ttft_s), cy: y(d.score) }; });
-    var labeler = makeLabeler(points, drawn.segments, { left: m.left, right: W - 4, top: 0, bottom: m.top + ih }, {});
+      var W = 920, H = 480;
+      var m = { top: 24, right: 120, bottom: 58, left: 74 };
+      var iw = W - m.left - m.right, ih = H - m.top - m.bottom;
+      var lMin = Math.log10(ticks[0]), lMax = Math.log10(ticks[ticks.length - 1]);
+      var yMin = SCORE_MIN, yMax = SCORE_MAX;
+      var x = function (v) { return m.left + ((Math.log10(v) - lMin) / (lMax - lMin)) * iw; };
+      var y = function (v) { return m.top + (1 - (v - yMin) / (yMax - yMin)) * ih; };
 
-    points.forEach(function (p) {
-      var d = p.d, cx = p.cx, cy = p.cy;
-      var s = MODEL_STYLE[d.id] || { color: INK, marker: "square" };
-      markerNode(s.marker, cx, cy, 8, s.color, svg);
-      var box = labeler.place(p);
-      el("text", { x: box.lx, y: box.ly, "font-size": 12.5, "font-weight": 600, fill: INK,
-        "text-anchor": box.anchor }, svg).textContent = d.name;
+      var svg = el("svg", { viewBox: "0 0 " + W + " " + H, role: "img",
+        "aria-label": "Scatter plot of tutoring performance against " + st.axis +
+          " time to first answer token, log scale, for " + models.length + " language models" });
 
-      // oversized invisible hit target for hover
-      var hit = el("circle", { cx: cx, cy: cy, r: 17, fill: "transparent", cursor: "pointer" }, svg);
-      attachHover(hit, function () {
-        var html = '<div class="tt-title">' + d.name + "</div>" +
-          reasoningRow(d.id) +
-          ttRow("Score", d.score.toFixed(3)) +
-          // Two decimals: the figures are medians stored to 0.01 s, and one
-          // decimal hid real gaps (0.80 vs 0.82 s decides the frontier).
-          ttRow("Time to first answer token", d.ttft_s.toFixed(2) + " s");
-        // Split on turn position (turn 1 vs turns 3 and 5); probe rows only.
-        if (typeof d.ttft_first_s === "number" && typeof d.ttft_later_s === "number") {
-          html += ttRow("First / later messages", d.ttft_first_s.toFixed(2) + " / " + d.ttft_later_s.toFixed(2) + " s");
-        }
-        // TTLT: when the student can reply.
-        if (typeof d.ttlt_s === "number") {
-          html += ttRow("Full turn, end to end", d.ttlt_s.toFixed(2) + " s");
-        }
-        if (drawn.on[d.id]) html += ttRow("Frontier", "nothing faster scores higher");
-        html += ttRow("Measured", d.ttft_source === "run"
-          ? "benchmark run, " + (d.ttft_concurrency || "several") + " conversations at a time"
-          : "serial probe, 112 moments");
-        return html;
+      var yi;
+      ticks.forEach(function (t, i) {
+        if (i > 0) el("line", { x1: x(t), y1: m.top, x2: x(t), y2: m.top + ih, stroke: GRID, "stroke-width": 1 }, svg);
+        el("text", { x: x(t), y: m.top + ih + 22, "text-anchor": "middle", "font-size": 12, fill: INK_MUTED }, svg)
+          .textContent = fmtSec(t);
+      });
+      for (yi = yMin; yi <= yMax + 0.001; yi += 0.1) {
+        el("line", { x1: m.left, y1: y(yi), x2: m.left + iw, y2: y(yi), stroke: GRID, "stroke-width": 1 }, svg);
+        el("text", { x: m.left - 10, y: y(yi) + 4, "text-anchor": "end", "font-size": 12, fill: INK_MUTED }, svg)
+          .textContent = yi.toFixed(1);
+      }
+      el("line", { x1: m.left, y1: m.top + ih, x2: m.left + iw, y2: m.top + ih, stroke: INK_MUTED, "stroke-width": 1 }, svg);
+
+      el("text", { x: m.left + iw / 2, y: H - 12, "text-anchor": "middle", "font-size": 13, fill: INK }, svg)
+        .textContent = "Time to first answer token (TTFAT), " + st.axis + " seconds (log scale)";
+      var yl = el("text", { x: 18, y: m.top + ih / 2, "text-anchor": "middle", "font-size": 13, fill: INK,
+        transform: "rotate(-90 18 " + (m.top + ih / 2) + ")" }, svg);
+      yl.textContent = "Appropriate scaffolding & rigor (mean)";
+
+      // Latency-performance frontier: the models nothing faster outscores.
+      var frontier = scoreFrontier(models, xv);
+      var drawn = drawFrontier(svg, frontier, function (d) { return x(xv(d)); }, function (d) { return y(d.score); });
+
+      var points = models.map(function (d) { return { d: d, cx: x(xv(d)), cy: y(d.score) }; });
+      var labeler = makeLabeler(points, drawn.segments, { left: m.left, right: W - 4, top: 0, bottom: m.top + ih }, {});
+
+      var pair = function (d, a, b) {
+        return (has(d, a) ? d[a].toFixed(2) : "–") + " / " + (has(d, b) ? d[b].toFixed(2) : "–") + " s";
+      };
+
+      points.forEach(function (p) {
+        var d = p.d, cx = p.cx, cy = p.cy;
+        var s = MODEL_STYLE[d.id] || { color: INK, marker: "square" };
+        markerNode(s.marker, cx, cy, 8, s.color, svg);
+        var box = labeler.place(p);
+        el("text", { x: box.lx, y: box.ly, "font-size": 12.5, "font-weight": 600, fill: INK,
+          "text-anchor": box.anchor }, svg).textContent = d.name;
+
+        // oversized invisible hit target for hover
+        var hit = el("circle", { cx: cx, cy: cy, r: 17, fill: "transparent", cursor: "pointer" }, svg);
+        attachHover(hit, function () {
+          // Two decimals: the figures are stored to 0.01 s, and one decimal
+          // hid real gaps (0.80 vs 0.82 s decides the p50 frontier).
+          var html = '<div class="tt-title">' + d.name + "</div>" +
+            reasoningRow(d.id) +
+            ttRow("Score", d.score.toFixed(3)) +
+            ttRow("First answer token, p50 / p95", pair(d, "ttft_s", "ttft_p95_s"));
+          // Split on turn position (turn 1 vs turns 3 and 5); probe rows only.
+          if (has(d, "ttft_first_s") && has(d, "ttft_later_s")) {
+            html += ttRow("First / later messages (p50)", pair(d, "ttft_first_s", "ttft_later_s"));
+          }
+          // TTLT: when the student can reply.
+          if (has(d, "ttlt_s")) html += ttRow("Full turn, p50 / p95", pair(d, "ttlt_s", "ttlt_p95_s"));
+          if (drawn.on[d.id]) html += ttRow("Frontier", "nothing faster scores higher");
+          html += ttRow("Measured", d.ttft_source === "run"
+            ? "benchmark run, " + (d.ttft_concurrency || "several") + " conversations at a time"
+            : "serial probe, 112 moments");
+          return html;
+        });
+      });
+
+      nameFrontier(svg, drawn.segments, labeler.clear);
+      mount.appendChild(svg);
+
+      var notes = [];
+      if (missing.length) notes.push("Not measured, so not shown: " + missing.join(", ") + ".");
+      if (current === "p95") notes.push("p95: the slowest one turn in twenty is at least this slow.");
+      if (frontier.length > 1) {
+        notes.push("Dashed line: the latency-performance frontier, joining the models that nothing faster outscores.");
+      }
+      if (models.some(function (d) { return d.ttft_source === "run"; })) {
+        notes.push("The working paper's models were timed by a serial probe over 112 moments (August 2026); " +
+          "models added since are timed from their benchmark runs (September–October 2026), four conversations " +
+          "at a time over all 520 moments. Measured both ways, four of the newer models were between 26% faster " +
+          "and 1% slower in their runs than in a serial probe days later: a latency figure is a snapshot of the " +
+          "provider on the day it was taken.");
+      }
+      document.getElementById("latency-footnote").textContent = notes.join(" ");
+    }
+
+    tabs.forEach(function (btn) {
+      btn.addEventListener("click", function () {
+        current = btn.getAttribute("data-stat");
+        tabs.forEach(function (b) { b.setAttribute("aria-selected", String(b === btn)); });
+        draw();
       });
     });
-
-    nameFrontier(svg, drawn.segments, labeler.clear);
-    mount.appendChild(svg);
-
-    var notes = [];
-    if (missing.length) notes.push("Not measured, so not shown: " + missing.join(", ") + ".");
-    if (frontier.length > 1) {
-      notes.push("Dashed line: the latency-performance frontier, joining the models that nothing faster outscores.");
-    }
-    if (models.some(function (d) { return d.ttft_source === "run"; })) {
-      notes.push("The working paper's models were timed by a serial probe over 112 moments (August 2026); " +
-        "models added since are timed from their benchmark runs (September–October 2026), four conversations " +
-        "at a time over all 520 moments. Measured both ways, four of the newer models were between 26% faster " +
-        "and 1% slower in their runs than in a serial probe days later: a latency figure is a snapshot of the " +
-        "provider on the day it was taken.");
-    }
-    document.getElementById("latency-footnote").textContent = notes.join(" ");
+    draw();
   }
 
   /* ---------- cost vs performance scatter ----------

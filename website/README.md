@@ -161,7 +161,11 @@ run probes for new models**; see `docs/latency.md` for the comparison behind thi
   with neither a probe nor a run figure has no `ttft_s` key and is left off the chart rather
   than plotted at zero.
 - **`ttlt_s`**: median time to last token from the same source, which is when the student can
-  actually reply. Shown in the tooltip as "Full turn, end to end".
+  actually reply. Shown in the tooltip as "Full turn".
+- **`ttft_p95_s` / `ttlt_p95_s`**: the same two figures at the 95th percentile, from the same
+  pooled aggregate (`probe_figures` for probes, `latency.tutor_streamed` for runs). The chart's
+  p50 / p95 toggle switches its x-axis between `ttft_s` and `ttft_p95_s` on one fixed log axis,
+  recomputing the frontier; the tooltip shows both.
 - **`latency_s`** — end-to-end seconds per tutor turn from a benchmark run, which replays
   moments under `--concurrency`. Rate-limit tiers differ per model, so this compares a model
   against its own history but not against another model. It is kept in the JSON for

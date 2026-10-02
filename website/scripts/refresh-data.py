@@ -257,6 +257,8 @@ def probe_ttft(repo: Path, probe_root: Path, prompt: str) -> tuple[dict, dict]:
         row = {"ttft_s": round(figs["ttft_p50"], 2)}
         for src, key in (
             ("ttlt_p50", "ttlt_s"),
+            ("ttft_p95", "ttft_p95_s"),
+            ("ttlt_p95", "ttlt_p95_s"),
             ("ttft_first_p50", "ttft_first_s"),
             ("ttft_later_p50", "ttft_later_s"),
         ):
@@ -447,6 +449,8 @@ def apply_ttft(rows: list, figures: dict) -> int:
 TTFT_KEYS = (
     "ttft_s",
     "ttlt_s",
+    "ttft_p95_s",
+    "ttlt_p95_s",
     "ttft_first_s",
     "ttft_later_s",
     "ttft_source",
@@ -476,9 +480,14 @@ def run_ttft(runs: dict, prompt: str = "scaffolding_rigor") -> tuple[dict, dict]
         if ttft is None:
             continue
         row = {"ttft_s": round(ttft, 2), "ttft_source": "run"}
-        ttlt = ((streamed.get("ttlt") or {}).get("all") or {}).get("p50_seconds")
-        if ttlt is not None:
-            row["ttlt_s"] = round(ttlt, 2)
+        for metric, pct, key in (
+            ("ttlt", "p50_seconds", "ttlt_s"),
+            ("ttft", "p95_seconds", "ttft_p95_s"),
+            ("ttlt", "p95_seconds", "ttlt_p95_s"),
+        ):
+            v = ((streamed.get(metric) or {}).get("all") or {}).get(pct)
+            if v is not None:
+                row[key] = round(v, 2)
         if lat.get("concurrency") is not None:
             row["ttft_concurrency"] = lat["concurrency"]
         figures[site_id] = row

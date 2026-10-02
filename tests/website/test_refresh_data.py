@@ -352,6 +352,7 @@ def test_build_takes_later_models_ttfat_from_runs_and_paper_models_from_probes(
     assert (sol["ttft_s"], sol["ttlt_s"]) == (1.38, 1.88), (
         "the run, not the 4.0 s probe"
     )
+    assert (sol["ttft_p95_s"], sol["ttlt_p95_s"]) == (2.76, 3.26)
     assert (sol["ttft_source"], sol["ttft_concurrency"]) == ("run", 4)
     assert lat["ttft"]["runs"] == {
         "gpt-6-sol-none": "gpt-6-sol-none_scaffolding_rigor_tutormoments-preview_20261001"
@@ -479,8 +480,13 @@ def _bench_run(
             **(
                 {
                     "tutor_streamed": {
-                        "ttft": {"all": {"p50_seconds": ttft}},
-                        "ttlt": {"all": {"p50_seconds": ttft + 0.5}},
+                        "ttft": {"all": {"p50_seconds": ttft, "p95_seconds": ttft * 2}},
+                        "ttlt": {
+                            "all": {
+                                "p50_seconds": ttft + 0.5,
+                                "p95_seconds": ttft * 2 + 0.5,
+                            }
+                        },
                     }
                 }
                 if ttft is not None
