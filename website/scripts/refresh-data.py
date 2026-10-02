@@ -435,14 +435,7 @@ def apply_ttft(rows: list, figures: dict) -> int:
         # ttft_cold_s / ttft_warm_s are legacy: the split published under
         # those names keyed on cache state and is superseded by the turn-based
         # first/later one. Popped so a refreshed row cannot carry both.
-        for key in (
-            "ttft_s",
-            "ttlt_s",
-            "ttft_first_s",
-            "ttft_later_s",
-            "ttft_cold_s",
-            "ttft_warm_s",
-        ):
+        for key in (*TTFT_KEYS, "ttft_cold_s", "ttft_warm_s"):
             row.pop(key, None)
         figs = figures.get(row["id"])
         if figs:
@@ -451,7 +444,46 @@ def apply_ttft(rows: list, figures: dict) -> int:
     return n
 
 
-TTFT_KEYS = ("ttft_s", "ttlt_s", "ttft_first_s", "ttft_later_s")
+TTFT_KEYS = (
+    "ttft_s",
+    "ttlt_s",
+    "ttft_first_s",
+    "ttft_later_s",
+    "ttft_source",
+    "ttft_concurrency",
+)
+
+
+def run_ttft(runs: dict, prompt: str = "scaffolding_rigor") -> tuple[dict, dict]:
+    """TTFAT figures for the models added since the paper, from their full
+    benchmark runs (allenai/tutormoments#76).
+
+    Returns ``({site_id: row}, {site_id: run_id})``. Each row is the run's
+    streamed-tutor medians (`summary.json` -> `latency.tutor_streamed`) and
+    is marked ``ttft_source: "run"`` with the run's concurrency. Measured
+    side by side, concurrency 4 did not inflate these against a serial probe
+    (the run was the same or faster on all four models compared); what moves
+    the figure is the day it was taken. The paper's models keep their probe
+    figures: their runs predate streamed timing.
+    """
+    figures, sources = {}, {}
+    for (site_id, mode), cell in runs.items():
+        if mode != prompt or site_id in PAPER_THINKING:
+            continue
+        lat = cell["summary"].get("latency") or {}
+        streamed = lat.get("tutor_streamed") or {}
+        ttft = ((streamed.get("ttft") or {}).get("all") or {}).get("p50_seconds")
+        if ttft is None:
+            continue
+        row = {"ttft_s": round(ttft, 2), "ttft_source": "run"}
+        ttlt = ((streamed.get("ttlt") or {}).get("all") or {}).get("p50_seconds")
+        if ttlt is not None:
+            row["ttlt_s"] = round(ttlt, 2)
+        if lat.get("concurrency") is not None:
+            row["ttft_concurrency"] = lat["concurrency"]
+        figures[site_id] = row
+        sources[site_id] = cell["run_id"]
+    return figures, sources
 
 
 def reasoning_label(thinking: dict) -> str:
@@ -663,29 +695,57 @@ def build_benchmark_json(repo: Path, probe_root: Path) -> None:
         },
     )
 
-    # ttft_s is only present for models with a probe run -- omitted rather
-    # than zero-filled, so the chart can tell "not measured" from "fast". A
-    # checkout with no probe runs at all keeps the published figures.
-    figures, provenance = probe_ttft(repo, probe_root, "scaffolding_rigor")
-    if figures:
-        apply_ttft(lat_models, figures)
+    # TTFAT: the paper's models from their `tutormoments latency` probe runs,
+    # every later model from its full benchmark run (#76) -- probes of later
+    # models are ignored even if a checkout has them. ttft_s is omitted
+    # rather than zero-filled where neither exists, so the chart can tell
+    # "not measured" from "fast". Whatever this checkout cannot rebuild keeps
+    # its published figure.
+    probe_figs, provenance = probe_ttft(repo, probe_root, "scaffolding_rigor")
+    probe_figs = {k: v for k, v in probe_figs.items() if k in PAPER_THINKING}
+    run_figs, run_ids = run_ttft(runs)
+    if probe_figs:
+        provenance["measured_at"] = {
+            k: v
+            for k, v in (provenance.get("measured_at") or {}).items()
+            if k in probe_figs
+        }
     else:
-        print("  no probe runs — keeping the published ttft figures", file=sys.stderr)
-        provenance = prior_lat.get("ttft")
-        for row in lat_models:
+        provenance = (prior_lat.get("ttft") or {}).copy()
+        print(
+            "  no paper-model probe runs — keeping their published TTFAT",
+            file=sys.stderr,
+        )
+    provenance["runs"] = {
+        **((prior_lat.get("ttft") or {}).get("runs") or {}),
+        **run_ids,
+    }
+    for row in lat_models:
+        is_paper = row["id"] in PAPER_THINKING
+        fresh = probe_figs if is_paper else run_figs
+        if (is_paper and probe_figs) or row["id"] in run_figs:
+            apply_ttft([row], fresh)
+        else:
             prior = prior_lat_rows.get(row["id"]) or {}
+            for k in TTFT_KEYS:
+                row.pop(k, None)
             row.update({k: prior[k] for k in TTFT_KEYS if k in prior})
     write_json(
         "latency.json",
         {
             "source": (
                 "score = mean of evaluation-aware Appropriate Scaffolding and "
-                "Appropriate Rigor, from leaderboard.json. ttft_s / ttlt_s "
-                "measured by `tutormoments latency`, a serial probe: ttft_s is "
-                "time to the first *answer* token (reasoning excluded), which "
-                "the site calls TTFAT. ttft_first_s / ttft_later_s split it by "
+                "Appropriate Rigor, from leaderboard.json. ttft_s is the median "
+                "time to the first token of the visible answer, so reasoning "
+                "time counts toward it; the site calls it TTFAT. ttlt_s is the "
+                "median time to the last token. Paper models: measured by "
+                "`tutormoments latency`, a serial probe over a frozen 112-moment "
+                "subsample, with ttft_first_s / ttft_later_s splitting it by "
                 "turn position (the first message of a session vs turns 3 and "
-                "5). See the ttft block for mode, subsample and timestamps. "
+                "5); see the ttft block for subsample and timestamps. Later "
+                "models (ttft_source: run): their full benchmark runs, at "
+                "ttft_concurrency conversations at a time; run ids in "
+                "ttft.runs. See allenai/tutormoments#76. "
                 "latency_s is end-to-end seconds per tutor turn from benchmark "
                 "runs under --concurrency, kept for correspondence with the "
                 "paper's Figure 7 but not displayed; read off that figure to "

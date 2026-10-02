@@ -270,7 +270,7 @@ def test_build_without_probe_runs_keeps_the_published_ttfat(refresh, site):
     lat = _read(site["out"], "latency.json")
     assert lat["models"][0]["ttft_s"] == 9.04
     assert lat["models"][0]["ttlt_s"] == 10.52
-    assert lat["ttft"] == ttft
+    assert {k: v for k, v in lat["ttft"].items() if k != "runs"} == ttft
 
 
 def test_build_scores_a_later_model_from_its_full_runs(refresh, site):
@@ -315,6 +315,48 @@ def test_build_scores_a_later_model_from_its_full_runs(refresh, site):
     assert [m["id"] for m in cost["models"]] == ["gpt-6-sol-none"]
     assert cost["models"][0]["score"] == 0.875, "the latency chart's y value"
     assert cost["omitted"] == ["Claude Opus 4.8"]
+
+
+def test_build_takes_later_models_ttfat_from_runs_and_paper_models_from_probes(
+    refresh, site
+):
+    """#76: a model added since the paper is timed by its benchmark run, even
+    when the checkout also holds a probe of it; the paper's models keep
+    their probe figures."""
+    _write_site(site["out"], [PAPER_OPUS], [PAPER_OPUS_LAT])
+    for mode in ("plain", "scaffolding_rigor"):
+        _bench_run(
+            site["results"],
+            f"gpt-6-sol-none_{mode}_tutormoments-preview_20261001",
+            tutor="gpt-6-sol-none",
+            mode=mode,
+            ttft=1.38,
+        )
+    _probe_dir(
+        site["results"], "a_scaffolding_rigor_latency_20260818", tutor="claude-opus-4-8"
+    )
+    _probe_dir(
+        site["results"],
+        "sol_scaffolding_rigor_latency_20261002",
+        tutor="gpt-6-sol-none",
+        p50_all=4.0,
+    )
+
+    refresh.build_benchmark_json(site["repo"], site["results"])
+
+    lat = _read(site["out"], "latency.json")
+    rows = {m["id"]: m for m in lat["models"]}
+    assert rows["claude-opus-4-8"]["ttft_s"] == 9.0
+    assert "ttft_source" not in rows["claude-opus-4-8"]
+    sol = rows["gpt-6-sol-none"]
+    assert (sol["ttft_s"], sol["ttlt_s"]) == (1.38, 1.88), (
+        "the run, not the 4.0 s probe"
+    )
+    assert (sol["ttft_source"], sol["ttft_concurrency"]) == ("run", 4)
+    assert lat["ttft"]["runs"] == {
+        "gpt-6-sol-none": "gpt-6-sol-none_scaffolding_rigor_tutormoments-preview_20261001"
+    }
+    assert list(lat["ttft"]["measured_at"]) == ["claude-opus-4-8"]
 
 
 def test_build_needs_both_prompts_before_replacing_a_carried_row(refresh, site):
@@ -410,6 +452,7 @@ def _bench_run(
     thinking: dict | None = None,
     sample: int | None = None,
     failed: int = 0,
+    ttft: float | None = None,
 ) -> None:
     """A benchmark run directory: summary.json + config.json, as cli.py writes.
     ``scores`` is (scaffold score, rigor score, overscaffold rate)."""
@@ -429,7 +472,21 @@ def _bench_run(
         "scaffold_calibrated": {"score": scores[0]},
         "rigor_calibrated": {"score": scores[1]},
         "overscaffold": {"rate": scores[2]},
-        "latency": {"source": "run", "tutor": {"n": n_calls, "mean_seconds": 1.469}},
+        "latency": {
+            "source": "run",
+            "concurrency": 4,
+            "tutor": {"n": n_calls, "mean_seconds": 1.469},
+            **(
+                {
+                    "tutor_streamed": {
+                        "ttft": {"all": {"p50_seconds": ttft}},
+                        "ttlt": {"all": {"p50_seconds": ttft + 0.5}},
+                    }
+                }
+                if ttft is not None
+                else {}
+            ),
+        },
         "tokens": {"tutor": usage},
         "cost": {"n_conversations": 520},
     }

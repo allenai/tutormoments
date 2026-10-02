@@ -187,16 +187,16 @@
 
     <!-- Performance vs. time to first answer token (TTFAT) -->
     <div class="chart-block" id="latency-block">
-      <h3 class="chart-title">The best models would keep students waiting</h3>
+      <h3 class="chart-title">Strong tutors no longer have to keep students waiting</h3>
       <p class="chart-sub">
         Overall performance (mean of appropriate scaffolding and appropriate rigor, evaluation-aware prompt)
-        against median time to first answer token (TTFAT), measured one request at a time over 112 moments.
-        TTFAT runs until the first token of the reply the student sees. A reasoning model's thinking counts
-        toward it, unlike the time to first token (TTFT) many latency trackers report, which stops at the
-        first token of any kind. Of the models probed so far, the two strongest tutors leave a student looking
-        at nothing for 8.5 to 9 seconds, and Gemini 2.5 Pro for 14 —
-        a long time for production education technology deployments. Human speech latency is around 100-200 ms,
-        while humans on Zoom are around 500-1000ms. Fast, pedagogically sound tutors are an open target.
+        against median time to first answer token (TTFAT). TTFAT runs until the first token of the reply the
+        student sees. A reasoning model's thinking counts toward it, unlike the time to first token (TTFT) many
+        latency trackers report, which stops at the first token of any kind. Among the working paper's models,
+        the two strongest tutors left a student looking at nothing for 8.5 to 9 seconds. Since then, Claude
+        Sonnet 5.5 and GPT-6 Sol outscore every paper model while starting to answer in about 0.8 seconds, close
+        to the 0.5–1 second of a person on a video call (face-to-face speech is around 100–200 ms). The top
+        scorer, GPT-6 Astra, still takes 10.
       </p>
       <div class="chart-card">
         <div id="latency-chart"></div>
@@ -304,6 +304,6 @@
 
 <div class="chart-tooltip" id="chart-tooltip" role="status"></div>
 
-<script src="./static/js/main.js?v=20"></script>
+<script src="./static/js/main.js?v=21"></script>
 </body>
 </html>

@@ -145,27 +145,31 @@ the models, since those are different judges.
 `static/data/latency.json` carries both, from different sources, and they are not
 interchangeable:
 
-- **`ttft_s`** — median time to first *answer* token, from `tutormoments latency`. The site
+**Source per model (#76):** the working paper's seven models take these figures from their
+`tutormoments latency` probe runs (they are what `PAPER_THINKING` lists). Every model added
+since takes `ttft_s` / `ttlt_s` from its full benchmark run's `summary.json` (`run_ttft`),
+marked `ttft_source: "run"` with `ttft_concurrency`; a probe of such a model is ignored. **Do not
+run probes for new models**; see `docs/latency.md` for the comparison behind this.
+
+- **`ttft_s`**: median time to first *answer* token, from the probe or the run as above. The site
   labels it **TTFAT** (time to first answer token). The clock stops at the first visible token
   of the reply, so a reasoning model's thinking time counts toward it. That differs from the
   "TTFT" many latency trackers publish, which stops at the first token of any kind, reasoning
-  included (allenai/tutormoments#39). The JSON key keeps the runtime's `ttft` name. That probe
-  runs strictly serially, so this is the figure that is comparable across models, and it is
-  what the chart's x-axis plots. `ttft_first_s` / `ttft_later_s` split it by turn position —
-  the first message of a session against turns 3 and 5 — which the probe recorded itself, so
-  every probed model gets the split regardless of what its provider reports about caching.
-  A model with no probe run has no `ttft_s` key and is left off the chart rather than
-  plotted at zero.
-- **`ttlt_s`** — median time to last token from the same probe: when the student can actually
-  reply. Shown in the tooltip as "Full turn, end to end".
+  included (allenai/tutormoments#39). The JSON key keeps the runtime's `ttft` name. It is what
+  the chart's x-axis plots, on a log scale. `ttft_first_s` / `ttft_later_s` (probe rows only)
+  split it by turn position, the first message of a session against turns 3 and 5. A model
+  with neither a probe nor a run figure has no `ttft_s` key and is left off the chart rather
+  than plotted at zero.
+- **`ttlt_s`**: median time to last token from the same source, which is when the student can
+  actually reply. Shown in the tooltip as "Full turn, end to end".
 - **`latency_s`** — end-to-end seconds per tutor turn from a benchmark run, which replays
   moments under `--concurrency`. Rate-limit tiers differ per model, so this compares a model
   against its own history but not against another model. It is kept in the JSON for
   correspondence with the paper's Figure 7 but is **not displayed** — the tooltip's
   end-to-end row is the probe's `ttlt_s`.
 
-`ttft_s` values are read from probe runs under `<checkout>/results` (override with
-`--probe-root`), taking the newest run per model that measured the frozen subsample in full.
+Paper models' `ttft_s` values are read from probe runs under `<checkout>/results` (override
+with `--probe-root`), taking the newest run per model that measured the frozen subsample in full.
 The `ttft.subsample_id` recorded in the JSON is what makes the series auditable: a different
 hash means different prompts were measured, and the script warns rather than charting two
 samples together. See `docs/latency.md` in the main repo.

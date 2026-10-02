@@ -235,16 +235,64 @@
      the model. That figure is kept in the tooltip rather than on the axis.
      See docs/latency.md in allenai/tutormoments. */
 
-  function niceMax(v) {
-    return Math.max(2, Math.ceil((v * 1.06) / 2) * 2);
+  /* Direct labels for a scatter: each point's label takes the first side
+     (right, left, above, below; `prefer[id]` goes first) whose box clears
+     the plot's edges, any line segments, every other marker and the labels
+     already placed. Returns {place(point) -> box, clear(box)}. */
+  function makeLabeler(points, segments, bounds, prefer) {
+    var placed = [];
+
+    function labelBox(side, cx, cy, w) {
+      if (side === "right") return { x0: cx + 14, x1: cx + 14 + w, y0: cy - 7, y1: cy + 7, lx: cx + 14, ly: cy + 4, anchor: "start" };
+      if (side === "left") return { x0: cx - 14 - w, x1: cx - 14, y0: cy - 7, y1: cy + 7, lx: cx - 14, ly: cy + 4, anchor: "end" };
+      if (side === "above") return { x0: cx - w / 2, x1: cx + w / 2, y0: cy - 24, y1: cy - 10, lx: cx, ly: cy - 14, anchor: "middle" };
+      return { x0: cx - w / 2, x1: cx + w / 2, y0: cy + 12, y1: cy + 26, lx: cx, ly: cy + 22, anchor: "middle" };
+    }
+
+    function clear(b, self) {
+      if (b.x0 < bounds.left || b.x1 > bounds.right || b.y0 < bounds.top || b.y1 > bounds.bottom) return false;
+      var hitsSegment = segments.some(function (g) {
+        for (var t = 0; t <= 1; t += 0.02) {
+          var px = g[0] + (g[2] - g[0]) * t, py = g[1] + (g[3] - g[1]) * t;
+          if (px > b.x0 - 2 && px < b.x1 + 2 && py > b.y0 - 2 && py < b.y1 + 2) return true;
+        }
+        return false;
+      });
+      if (hitsSegment) return false;
+      var hitsMarker = points.some(function (p) {
+        return p !== self && p.cx + 9 > b.x0 && p.cx - 9 < b.x1 && p.cy + 9 > b.y0 && p.cy - 9 < b.y1;
+      });
+      if (hitsMarker) return false;
+      return !placed.some(function (o) { return o.x0 < b.x1 && o.x1 > b.x0 && o.y0 < b.y1 && o.y1 > b.y0; });
+    }
+
+    function place(p) {
+      var w = p.d.name.length * 7;
+      var sides = ["right", "left", "above", "below"];
+      var first = (prefer || {})[p.d.id];
+      if (first) sides = [first].concat(sides.filter(function (v) { return v !== first; }));
+      var box = null;
+      for (var si = 0; si < sides.length && !box; si++) {
+        var cand = labelBox(sides[si], p.cx, p.cy, w);
+        if (clear(cand, p)) box = cand;
+      }
+      box = box || labelBox(sides[0], p.cx, p.cy, w); // nothing clear: the first choice
+      placed.push(box);
+      return box;
+    }
+
+    return { place: place, clear: clear };
   }
+
+  // Seconds on a log axis: "0.5", "1", "2", "5", "10", "20".
+  function fmtSec(v) { return v < 1 ? v.toFixed(1) : String(Math.round(v)); }
 
   function renderLatency(data) {
     var mount = document.getElementById("latency-chart");
-    // Models without a probe run carry no ttft_s and cannot be placed on this
-    // axis. Omitted rather than zero-filled: "not measured" is not "fast".
-    var models = data.models.filter(function (d) { return typeof d.ttft_s === "number"; });
-    var missing = data.models.filter(function (d) { return typeof d.ttft_s !== "number"; })
+    // A model with no TTFAT figure cannot be placed on this axis. Omitted
+    // rather than zero-filled: "not measured" is not "fast".
+    var models = data.models.filter(function (d) { return typeof d.ttft_s === "number" && d.ttft_s > 0; });
+    var missing = data.models.filter(function (d) { return models.indexOf(d) < 0; })
       .map(function (d) { return d.name; });
     if (!models.length) {
       document.getElementById("latency-block").hidden = true;
@@ -255,23 +303,25 @@
     var m = { top: 24, right: 120, bottom: 58, left: 74 };
     var iw = W - m.left - m.right, ih = H - m.top - m.bottom;
 
-    var xMin = 0, yMin = SCORE_MIN, yMax = SCORE_MAX;
-    var xMax = niceMax(Math.max.apply(null, models.map(function (d) { return d.ttft_s; })));
-    var xStep = xMax > 24 ? 4 : 2;
-    var x = function (v) { return m.left + ((v - xMin) / (xMax - xMin)) * iw; };
+    // Log scale: TTFAT spans more than an order of magnitude across models,
+    // and a linear axis piles the sub-second tutors on top of each other.
+    var secs = models.map(function (d) { return d.ttft_s; });
+    var ticks = logTicks(Math.min.apply(null, secs) / 1.2, Math.max.apply(null, secs) * 1.2);
+    var lMin = Math.log10(ticks[0]), lMax = Math.log10(ticks[ticks.length - 1]);
+    var yMin = SCORE_MIN, yMax = SCORE_MAX;
+    var x = function (v) { return m.left + ((Math.log10(v) - lMin) / (lMax - lMin)) * iw; };
     var y = function (v) { return m.top + (1 - (v - yMin) / (yMax - yMin)) * ih; };
 
     var svg = el("svg", { viewBox: "0 0 " + W + " " + H, role: "img",
-      "aria-label": "Scatter plot of tutoring performance against median time to first answer token for "
+      "aria-label": "Scatter plot of tutoring performance against median time to first answer token, log scale, for "
         + models.length + " language models" });
 
-    // gridlines + ticks
-    var xi, yi;
-    for (xi = xStep; xi <= xMax - 0.001; xi += xStep) {
-      el("line", { x1: x(xi), y1: m.top, x2: x(xi), y2: m.top + ih, stroke: GRID, "stroke-width": 1 }, svg);
-      el("text", { x: x(xi), y: m.top + ih + 22, "text-anchor": "middle", "font-size": 12, fill: INK_MUTED }, svg)
-        .textContent = xi;
-    }
+    var yi;
+    ticks.forEach(function (t, i) {
+      if (i > 0) el("line", { x1: x(t), y1: m.top, x2: x(t), y2: m.top + ih, stroke: GRID, "stroke-width": 1 }, svg);
+      el("text", { x: x(t), y: m.top + ih + 22, "text-anchor": "middle", "font-size": 12, fill: INK_MUTED }, svg)
+        .textContent = fmtSec(t);
+    });
     for (yi = yMin; yi <= yMax + 0.001; yi += 0.1) {
       el("line", { x1: m.left, y1: y(yi), x2: m.left + iw, y2: y(yi), stroke: GRID, "stroke-width": 1 }, svg);
       el("text", { x: m.left - 10, y: y(yi) + 4, "text-anchor": "end", "font-size": 12, fill: INK_MUTED }, svg)
@@ -279,28 +329,22 @@
     }
     el("line", { x1: m.left, y1: m.top + ih, x2: m.left + iw, y2: m.top + ih, stroke: INK_MUTED, "stroke-width": 1 }, svg);
 
-    // axis titles
     el("text", { x: m.left + iw / 2, y: H - 12, "text-anchor": "middle", "font-size": 13, fill: INK }, svg)
-      .textContent = "Time to first answer token (TTFAT), median seconds";
+      .textContent = "Time to first answer token (TTFAT), median seconds (log scale)";
     var yl = el("text", { x: 18, y: m.top + ih / 2, "text-anchor": "middle", "font-size": 13, fill: INK,
       transform: "rotate(-90 18 " + (m.top + ih / 2) + ")" }, svg);
     yl.textContent = "Appropriate scaffolding & rigor (mean)";
 
-    // points + direct labels
-    var labelLeft = { "gemini-2.5-pro": true, "claude-sonnet-4-6": true };
-    var labelBelow = { "gpt-5.5-2026-04-23": true };
-    models.forEach(function (d) {
-      var s = MODEL_STYLE[d.id] || { color: INK, marker: "square" };
-      var cx = x(d.ttft_s), cy = y(d.score);
-      markerNode(s.marker, cx, cy, 8, s.color, svg);
+    var points = models.map(function (d) { return { d: d, cx: x(d.ttft_s), cy: y(d.score) }; });
+    var labeler = makeLabeler(points, [], { left: m.left, right: W - 4, top: 0, bottom: m.top + ih }, {});
 
-      var lx = labelLeft[d.id] ? cx - 14 : cx + 14;
-      var ly = labelBelow[d.id] ? cy + 22 : cy + 4;
-      if (labelBelow[d.id]) lx = cx;
-      el("text", {
-        x: lx, y: ly, "font-size": 12.5, "font-weight": 600, fill: INK,
-        "text-anchor": labelBelow[d.id] ? "middle" : (labelLeft[d.id] ? "end" : "start")
-      }, svg).textContent = d.name;
+    points.forEach(function (p) {
+      var d = p.d, cx = p.cx, cy = p.cy;
+      var s = MODEL_STYLE[d.id] || { color: INK, marker: "square" };
+      markerNode(s.marker, cx, cy, 8, s.color, svg);
+      var box = labeler.place(p);
+      el("text", { x: box.lx, y: box.ly, "font-size": 12.5, "font-weight": 600, fill: INK,
+        "text-anchor": box.anchor }, svg).textContent = d.name;
 
       // oversized invisible hit target for hover
       var hit = el("circle", { cx: cx, cy: cy, r: 17, fill: "transparent", cursor: "pointer" }, svg);
@@ -309,25 +353,33 @@
           reasoningRow(d.id) +
           ttRow("Score", d.score.toFixed(3)) +
           ttRow("Time to first answer token", d.ttft_s.toFixed(1) + " s");
-        // Split on turn position (turn 1 vs turns 3 and 5), so every model
-        // with a probe run has it -- no dependence on cache reporting.
+        // Split on turn position (turn 1 vs turns 3 and 5); probe rows only.
         if (typeof d.ttft_first_s === "number" && typeof d.ttft_later_s === "number") {
           html += ttRow("First / later messages", d.ttft_first_s.toFixed(1) + " / " + d.ttft_later_s.toFixed(1) + " s");
         }
-        // TTLT from the same serial probe: when the student can reply.
+        // TTLT: when the student can reply.
         if (typeof d.ttlt_s === "number") {
           html += ttRow("Full turn, end to end", d.ttlt_s.toFixed(1) + " s");
         }
+        html += ttRow("Measured", d.ttft_source === "run"
+          ? "benchmark run, " + (d.ttft_concurrency || "several") + " conversations at a time"
+          : "serial probe, 112 moments");
         return html;
       });
     });
 
     mount.appendChild(svg);
 
-    if (missing.length) {
-      document.getElementById("latency-footnote").textContent =
-        "Not yet probed, so not shown: " + missing.join(", ") + ".";
+    var notes = [];
+    if (missing.length) notes.push("Not measured, so not shown: " + missing.join(", ") + ".");
+    if (models.some(function (d) { return d.ttft_source === "run"; })) {
+      notes.push("The working paper's models were timed by a serial probe over 112 moments (August 2026); " +
+        "models added since are timed from their benchmark runs (September–October 2026), four conversations " +
+        "at a time over all 520 moments. Measured both ways, four of the newer models were between 26% faster " +
+        "and 1% slower in their runs than in a serial probe days later: a latency figure is a snapshot of the " +
+        "provider on the day it was taken.");
     }
+    document.getElementById("latency-footnote").textContent = notes.join(" ");
   }
 
   /* ---------- cost vs performance scatter ----------
@@ -447,47 +499,14 @@
     // `prefer` tries that side first.
     var prefer = { "claude-opus-5-5": "below", "claude-sonnet-5-5": "above" };
     var points = models.map(function (d) { return { d: d, cx: x(per1k(d)), cy: y(d.score) }; });
-    var placed = [];
-
-    function labelBox(side, cx, cy, w) {
-      if (side === "right") return { x0: cx + 14, x1: cx + 14 + w, y0: cy - 7, y1: cy + 7, lx: cx + 14, ly: cy + 4, anchor: "start" };
-      if (side === "left") return { x0: cx - 14 - w, x1: cx - 14, y0: cy - 7, y1: cy + 7, lx: cx - 14, ly: cy + 4, anchor: "end" };
-      if (side === "above") return { x0: cx - w / 2, x1: cx + w / 2, y0: cy - 24, y1: cy - 10, lx: cx, ly: cy - 14, anchor: "middle" };
-      return { x0: cx - w / 2, x1: cx + w / 2, y0: cy + 12, y1: cy + 26, lx: cx, ly: cy + 22, anchor: "middle" };
-    }
-
-    function boxClear(b, self) {
-      if (b.x0 < m.left || b.x1 > W - 4 || b.y0 < 0 || b.y1 > m.top + ih) return false;
-      var hitsSegment = segments.some(function (g) {
-        for (var t = 0; t <= 1; t += 0.02) {
-          var px = g[0] + (g[2] - g[0]) * t, py = g[1] + (g[3] - g[1]) * t;
-          if (px > b.x0 - 2 && px < b.x1 + 2 && py > b.y0 - 2 && py < b.y1 + 2) return true;
-        }
-        return false;
-      });
-      if (hitsSegment) return false;
-      var hitsMarker = points.some(function (p) {
-        return p !== self && p.cx + 9 > b.x0 && p.cx - 9 < b.x1 && p.cy + 9 > b.y0 && p.cy - 9 < b.y1;
-      });
-      if (hitsMarker) return false;
-      return !placed.some(function (o) { return o.x0 < b.x1 && o.x1 > b.x0 && o.y0 < b.y1 && o.y1 > b.y0; });
-    }
+    var labeler = makeLabeler(points, segments, { left: m.left, right: W - 4, top: 0, bottom: m.top + ih }, prefer);
+    var boxClear = labeler.clear;
 
     points.forEach(function (p) {
       var d = p.d, cx = p.cx, cy = p.cy;
       var s = MODEL_STYLE[d.id] || { color: INK, marker: "square" };
       markerNode(s.marker, cx, cy, 8, s.color, svg);
-
-      var w = d.name.length * 7;
-      var sides = ["right", "left", "above", "below"];
-      if (prefer[d.id]) sides = [prefer[d.id]].concat(sides.filter(function (v) { return v !== prefer[d.id]; }));
-      var box = null;
-      for (var si = 0; si < sides.length && !box; si++) {
-        var cand = labelBox(sides[si], cx, cy, w);
-        if (boxClear(cand, p)) box = cand;
-      }
-      box = box || labelBox(sides[0], cx, cy, w); // nothing clear: fall back to the first choice
-      placed.push(box);
+      var box = labeler.place(p);
       el("text", {
         x: box.lx, y: box.ly, "font-size": 12.5, "font-weight": 600, fill: INK,
         "text-anchor": box.anchor
