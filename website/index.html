@@ -179,12 +179,20 @@
       <div class="chart-card">
         <div id="kl-chart"></div>
       </div>
-      <p class="chart-footnote" id="kl-footnote"></p>
+      <p class="chart-footnote" id="kl-footnote">
+        KL divergence is asymmetric, so each dot is the mean of the two directions, KL(S‖R) and KL(R‖S): how
+        far a tutor's moves in scaffolding moments are from its moves in rigor moments, and the reverse. The
+        two differ by at most 0.07 for any series here; hover a row for both. Every series is at full sample,
+        about 260 moments per situation, so these values are not comparable to the working paper's KL table,
+        whose add-one smoothing over ~50 moments per situation pulls every value toward zero (human tutors
+        0.18 there). Paper models from the action-taxonomy release's classifications of their full replays;
+        later models from their own runs.
+      </p>
     </div>
 
     <!-- Performance vs. time to first answer token (TTFAT) -->
     <div class="chart-block" id="latency-block">
-      <h3 class="chart-title">Strong tutors no longer have to keep students waiting</h3>
+      <h3 class="chart-title">Latency has improved </h3>
       <p class="chart-sub">
         Overall performance (mean of appropriate scaffolding and appropriate rigor, evaluation-aware prompt)
         against median time to first answer token (TTFAT). TTFAT runs until the first token of the reply the
@@ -307,6 +315,6 @@
 
 <div class="chart-tooltip" id="chart-tooltip" role="status"></div>
 
-<script src="./static/js/main.js?v=25"></script>
+<script src="./static/js/main.js?v=24"></script>
 </body>
 </html>

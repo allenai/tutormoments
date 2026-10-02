@@ -878,14 +878,6 @@
       });
     });
 
-    document.getElementById("kl-footnote").textContent =
-      "KL divergence is asymmetric, so each dot is the mean of the two directions, KL(S‖R) and KL(R‖S): " +
-      "how far a tutor's moves in scaffolding moments are from its moves in rigor moments, and the reverse. " +
-      "The two differ by at most 0.07 for any series here; hover a row for both. " +
-      "Every series at full sample, about 260 moments per situation, so these values are not comparable to " +
-      "the working paper's KL table, whose add-one smoothing over ~50 moments per situation pulls every " +
-      "value toward zero (human tutors 0.18 there). Paper models from the action-taxonomy release's " +
-      "classifications of their full replays; later models from their own runs.";
     block.hidden = false;
     draw();
   }
