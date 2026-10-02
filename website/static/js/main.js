@@ -46,8 +46,11 @@
     return node;
   }
 
+  // Data files keep their URLs across refreshes and are served without
+  // cache headers, so a browser may reuse a stale copy heuristically.
+  // "no-cache" revalidates every load: a 304 when unchanged, cheap.
   function fetchJSON(url) {
-    return fetch(url).then(function (r) {
+    return fetch(url, { cache: "no-cache" }).then(function (r) {
       if (!r.ok) throw new Error(url + " -> " + r.status);
       return r.json();
     });
