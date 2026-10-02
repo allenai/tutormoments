@@ -149,10 +149,11 @@
           <button role="tab" aria-selected="true" data-prompt="plain">Plain prompt</button>
           <button role="tab" aria-selected="false" data-prompt="eval_aware">Evaluation-aware prompt</button>
         </div>
-        <div class="chart-tabs" role="tablist" aria-label="Models shown" data-sets>
-          <button role="tab" aria-selected="true" data-set="all">All models</button>
-          <button role="tab" aria-selected="false" data-set="paper">Paper models</button>
-          <button role="tab" aria-selected="false" data-set="later">Since the paper</button>
+        <div class="chart-tabs" role="tablist" aria-label="Model provider">
+          <button role="tab" aria-selected="true" data-provider="openai">OpenAI</button>
+          <button role="tab" aria-selected="false" data-provider="anthropic">Anthropic</button>
+          <button role="tab" aria-selected="false" data-provider="google">Google</button>
+          <button role="tab" aria-selected="false" data-provider="open_weight">Open weight</button>
         </div>
       </div>
       <div class="chart-card">
@@ -252,6 +253,6 @@
 
 <div class="chart-tooltip" id="chart-tooltip" role="status"></div>
 
-<script src="./static/js/main.js?v=12"></script>
+<script src="./static/js/main.js?v=13"></script>
 </body>
 </html>

@@ -8,25 +8,26 @@
   "use strict";
 
   var MODEL_STYLE = {
-    "claude-opus-4-8":             { color: "#D55E00", marker: "triangle-down" },
-    "claude-sonnet-4-6":           { color: "#E69F00", marker: "square" },
-    "deepseek-ai_DeepSeek-V4-Pro": { color: "#CC79A7", marker: "triangle-up" },
-    "gemini-2.5-pro":              { color: "#0072B2", marker: "diamond" },
-    "gemini-3.5-flash":            { color: "#56B4E9", marker: "pentagon" },
-    "gpt-5.5-2026-04-23":          { color: "#009E73", marker: "plus" },
-    "gpt-5.4-mini-2026-03-17":     { color: "#F0529C", marker: "cross" },
-    // Runs since the paper: the same hue per provider family, a marker no
-    // other model on the same chart uses.
-    "claude-opus-5-5":             { color: "#D55E00", marker: "circle" },
-    "claude-fable-5-1":            { color: "#D55E00", marker: "diamond" },
-    "claude-sonnet-5-5":           { color: "#E69F00", marker: "hexagon" },
-    "deepseek-v4-pro-0813":        { color: "#CC79A7", marker: "square" },
-    "gemini-3.8-flash":            { color: "#56B4E9", marker: "triangle-up" },
-    "gemini-3.6-flash":            { color: "#0072B2", marker: "triangle-down" },
-    "gpt-5.5-2026-04-23-none":     { color: "#009E73", marker: "cross" },
-    "gpt-6-astra":                 { color: "#F0529C", marker: "star" },
-    "gpt-6-sol-none":              { color: "#F0529C", marker: "pentagon" },
-    "gpt-6-luna-none":             { color: "#F0529C", marker: "plus" }
+    "claude-opus-4-8":             { provider: "anthropic", color: "#D55E00", marker: "triangle-down" },
+    "claude-sonnet-4-6":           { provider: "anthropic", color: "#E69F00", marker: "square" },
+    "deepseek-ai_DeepSeek-V4-Pro": { provider: "open_weight", color: "#CC79A7", marker: "triangle-up" },
+    "gemini-2.5-pro":              { provider: "google", color: "#0072B2", marker: "diamond" },
+    "gemini-3.5-flash":            { provider: "google", color: "#56B4E9", marker: "pentagon" },
+    "gpt-5.5-2026-04-23":          { provider: "openai", color: "#009E73", marker: "plus" },
+    "gpt-5.4-mini-2026-03-17":     { provider: "openai", color: "#F0529C", marker: "cross" },
+    // Runs since the paper: the same hue per provider family, and a marker
+    // no other model of that provider uses (the action chart shows one
+    // provider at a time) or, where possible, any other on the cost chart.
+    "claude-opus-5-5":             { provider: "anthropic", color: "#D55E00", marker: "circle" },
+    "claude-fable-5-1":            { provider: "anthropic", color: "#D55E00", marker: "diamond" },
+    "claude-sonnet-5-5":           { provider: "anthropic", color: "#E69F00", marker: "hexagon" },
+    "deepseek-v4-pro-0813":        { provider: "open_weight", color: "#CC79A7", marker: "square" },
+    "gemini-3.8-flash":            { provider: "google", color: "#56B4E9", marker: "triangle-up" },
+    "gemini-3.6-flash":            { provider: "google", color: "#0072B2", marker: "triangle-down" },
+    "gpt-5.5-2026-04-23-none":     { provider: "openai", color: "#009E73", marker: "circle" },
+    "gpt-6-astra":                 { provider: "openai", color: "#F0529C", marker: "star" },
+    "gpt-6-sol-none":              { provider: "openai", color: "#F0529C", marker: "pentagon" },
+    "gpt-6-luna-none":             { provider: "openai", color: "#F0529C", marker: "square" }
   };
 
   // Shared y-axis for the two score scatters, so a model sits at the same
@@ -456,26 +457,19 @@
     var mount = document.getElementById("actions-chart");
     var legend = document.getElementById("actions-legend");
     var promptTabs = block.querySelectorAll(".chart-tabs button[data-prompt]");
-    var setTabs = block.querySelectorAll(".chart-tabs button[data-set]");
+    var providerTabs = block.querySelectorAll(".chart-tabs button[data-provider]");
     var current = "plain";
-    var currentSet = "all";
-
-    // The paper's models carry its Fig. 4 numbers (~100 moments per model
-    // and prompt); later models their own runs' classifications over every
-    // moment. The set tabs let a reader look at either group alone.
-    var SETS = {
-      all: function () { return true; },
-      paper: function (d) { return d.source === "paper"; },
-      later: function (d) { return d.source !== "paper"; }
-    };
-    var hasLater = data.models.some(SETS.later);
-    if (!hasLater) block.querySelector(".chart-tabs[data-sets]").hidden = true;
+    // One provider at a time: seventeen series in one strip are unreadable.
+    var currentProvider = providerTabs.length ? providerTabs[0].getAttribute("data-provider") : null;
+    function providerOf(d) { return (MODEL_STYLE[d.id] || {}).provider; }
 
     var chartHighlight = null; // reassigned by draw(); legend hovers call the current one
 
     function draw() {
       mount.innerHTML = "";
-      var models = data.models.filter(SETS[currentSet]);
+      var models = data.models.filter(function (d) {
+        return !currentProvider || providerOf(d) === currentProvider;
+      });
       var offsets = models.map(function (_, i) {
         return models.length > 1 ? -0.4 + (0.8 * i) / (models.length - 1) : 0;
       });
@@ -485,11 +479,15 @@
       var m = { top: 18, right: 12, bottom: 64, left: 62 };
       var iw = W - m.left - m.right, ih = H - m.top - m.bottom;
 
+      // One y-axis for every tab: the max over both prompts and all models,
+      // so switching prompt or provider never rescales the chart.
       var yMax = 0;
       data.models.forEach(function (d) {
-        cats.forEach(function (c) {
-          var v = (d[current] && d[current][c.key] && d[current][c.key].pct) || 0;
-          if (v > yMax) yMax = v;
+        ["plain", "eval_aware"].forEach(function (p) {
+          cats.forEach(function (c) {
+            var v = (d[p] && d[p][c.key] && d[p][c.key].pct) || 0;
+            if (v > yMax) yMax = v;
+          });
         });
       });
       cats.forEach(function (c) { if (c.human.pct > yMax) yMax = c.human.pct; });
@@ -608,7 +606,7 @@
       });
     }
     bindTabs(promptTabs, "data-prompt", function (v) { current = v; });
-    bindTabs(setTabs, "data-set", function (v) { currentSet = v; });
+    bindTabs(providerTabs, "data-provider", function (v) { currentProvider = v; });
 
     block.hidden = false;
     draw();

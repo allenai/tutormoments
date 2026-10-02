@@ -86,11 +86,13 @@ classifier, the same model, prompt and scheme as the paper's), averaged per mome
 (the checkout's venv has it); without it, or without the runs, later models keep their
 committed rows. Each row records its `source` and `n_moments` per prompt, and the chart's
 tooltip shows the latter, since a 520-moment cell's interval is much narrower than a
-100-moment one. The page's set tabs show the two groups apart or together.
+100-moment one. The page shows one provider at a time (OpenAI, Anthropic, Google, open
+weight), keyed by each model's `provider` in `MODEL_STYLE`, on one y-axis shared by every
+prompt and provider tab.
 
 Add new models to the `MODELS` list in the script, and give them a `MODEL_STYLE` in
-`static/js/main.js`: one of the provider's hues and a marker no other model on the same chart
-uses.
+`static/js/main.js`: its `provider` tab, one of the provider's hues, and a marker no other
+model of that provider uses.
 
 ### The two latency figures
 
