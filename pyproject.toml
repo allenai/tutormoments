@@ -32,7 +32,7 @@ dependencies = [
 [project.optional-dependencies]
 # maintainer-only dataset construction / release tooling
 build = ["boto3", "jsonschema"]
-# analysis / figures layer: pandas for taxonomy headline tables, matplotlib/seaborn
+# analysis / figures layer: pandas for the taxonomy DataFrame helpers, matplotlib/seaborn
 # for the notebooks + benchmark_perf_cost.py (was misnamed "taxonomy")
 analysis = ["pandas", "matplotlib", "seaborn"]
 # dev alone runs the runtime tests; add build-dev (+analysis) for the full suite

@@ -251,9 +251,12 @@ def probe_figures(block: dict) -> dict:
     """The publishable TTFT/TTLT p50s from one probe's ``latency.json``.
 
     Takes the whole latency.json dict. Returns ``ttft_p50`` / ``ttlt_p50``
-    (pooled over all samples) plus ``ttft_first_p50`` / ``ttft_later_p50`` —
-    the first message of a session (turn 1) against the later ones (turns 3
-    and 5).
+    and ``ttft_p95`` / ``ttlt_p95`` (pooled over all samples) plus
+    ``ttft_first_p50`` / ``ttft_later_p50`` — the first message of a session
+    (turn 1) against the later ones (turns 3 and 5). The pooled p95 is the
+    tail a student meets about one turn in twenty; like the pooled p50 it is
+    read off the stored aggregate and needs no gate (a frozen probe pools
+    hundreds of samples).
 
     Pooled is the ranking figure: one number per model, measured identically
     on every provider. The first/later split refines it, and it keys on
@@ -284,6 +287,9 @@ def probe_figures(block: dict) -> dict:
     def _p50(metric: dict) -> float | None:
         return (metric.get("all") or {}).get("p50_seconds")
 
+    def _p95(metric: dict) -> float | None:
+        return (metric.get("all") or {}).get("p95_seconds")
+
     def _turn_p50(pred) -> float | None:
         vals = [
             s["ttft_seconds"]
@@ -296,6 +302,8 @@ def probe_figures(block: dict) -> dict:
     return {
         "ttft_p50": _p50(ttft),
         "ttlt_p50": _p50(ttlt),
+        "ttft_p95": _p95(ttft),
+        "ttlt_p95": _p95(ttlt),
         "ttft_first_p50": _turn_p50(lambda t: t == 0),
         "ttft_later_p50": _turn_p50(lambda t: isinstance(t, int) and t > 0),
     }

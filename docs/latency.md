@@ -1,5 +1,16 @@
 # Latency
 
+> **Current policy (2026-10, [#76](https://github.com/allenai/tutormoments/issues/76)):
+> do not probe new models.** A model added to the benchmark is timed from its own full
+> `tutormoments run` (`summary.json` → `latency.tutor_streamed`, p50 TTFT/TTLT). The website
+> labels those points as run-sourced with their concurrency. The serial probe below stays in
+> the runtime but is no longer part of adding a model. Its figures are published only for the
+> working paper's seven models, whose benchmark runs predate streamed timing. Why: on four
+> models measured both ways, concurrency 4 did not inflate latency (each run was between 26%
+> faster and 1% slower than a serial probe days later, and the same held on the probe's own
+> 112 moments). The swing between measurement days was larger than any concurrency effect,
+> and a probe costs 1–1.5 hours of serial calls per model.
+
 Two numbers matter for a tutoring product.
 
 **Time to first token (TTFT)** drives how responsive the tutor feels. Ed-tech partners
@@ -90,8 +101,10 @@ two `latency.json` files. Each carries its own `measured_at`, which a pooled rep
 have averaged away — see [the student as drift control](#the-student-is-a-free-drift-control)
 for a check that comes free with every run.
 
-`tutormoments run` also records TTFT/TTLT on every transcript, but those are diagnostics —
-see [Concurrency impacts latency](#concurrency-impacts-latency).
+`tutormoments run` also records TTFT/TTLT on every transcript and aggregates them into
+`summary.json`. Since #76 those run figures are what the website publishes for every model
+added after the paper. See [Concurrency impacts latency](#concurrency-impacts-latency) for the
+check that justified it.
 
 ### Where the figures surface
 
@@ -104,10 +117,13 @@ join them in ([`probe_runs`](../src/tutormoments/latency.py)):
   run-based `tutor_lat_p50` / `tutor_lat_p95` columns stay where they were, and are still
   end-to-end wall clock that compares a model against its own history rather than against
   another model.
-- **The website's latency chart** — `website/scripts/refresh-data.py` reads the same figures
-  into `static/data/latency.json` as `ttft_s` and `ttlt_s` plus the same first/later split
-  (`ttft_first_s` / `ttft_later_s`), and plots TTFT on the x-axis with TTLT and the split in
-  the tooltip. That script imports this module rather
+- **The website's latency chart**: `website/scripts/refresh-data.py` reads probe figures for
+  the paper's seven models only, into `static/data/latency.json` as `ttft_s` and `ttlt_s` plus
+  the first/later split (`ttft_first_s` / `ttft_later_s`). Every later model takes `ttft_s` /
+  `ttlt_s` from its full benchmark run instead, marked `ttft_source: "run"` with
+  `ttft_concurrency`, and a probe of such a model is ignored even if one exists (#76). The
+  chart plots TTFT on the x-axis with TTLT, the split where it exists, and the source in the
+  tooltip. That script imports this module rather
   than restating its rules; an earlier version restated them and gated on cache hit *rate*,
   which is the one thing this code deliberately refuses to do.
 - **The website's cost chart** — the probe also records usage. Every sample carries its
@@ -425,8 +441,24 @@ concurrency distorts latency by a **model-dependent** amount:
 
 The probe runs strictly serially, so its numbers mean the same thing for every model. Run
 figures are stamped `"source": "run"` with the concurrency they were gathered at, so a
-reader can tell the two apart. Only probe figures are published — see
-[where the figures surface](#where-the-figures-surface).
+reader can tell the two apart.
+
+**Measured, the distortion did not show up** (2026-10-02, #76). Four post-paper models had
+both a full benchmark run (concurrency 4, 520 moments) and a serial probe a few days later.
+Median TTFAT in seconds, probe vs. run:
+
+| Model | Probe | Run | Run, probe's 112 moments only |
+|---|---:|---:|---:|
+| GPT-6 Astra | 13.75 | 10.20 | 10.08 |
+| Gemini 3.8 Flash | 5.63 | 5.17 | 5.16 |
+| DeepSeek V4 Pro 0813 | 5.62 | 5.05 | 5.36 |
+| Gemini 3.6 Flash | 0.97 | 0.98 | 0.98 |
+
+The run is never meaningfully slower. Restricting it to the probe's moments barely moves it,
+so the gap is the day of measurement, not concurrency or sampling. Anthropic tutors were not
+compared (their runs share the student's account; see the drift control below). So the
+website now publishes run figures for every model added after the paper. Only the paper's
+models keep probe figures, see [where the figures surface](#where-the-figures-surface).
 
 Conversations also share one `ModelClient` per model
 ([`get_client`](../src/tutormoments/client.py)). Previously each moment built its own,
