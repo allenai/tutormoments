@@ -1,5 +1,6 @@
 """Tests: costing (cost computation over canonical usage vectors)."""
 
+import json
 import logging
 
 import pytest
@@ -7,9 +8,14 @@ import pytest
 from tutormoments.costing import (
     billed_cost_estimate,
     cost_usd,
+    costed_runs,
     list_cost,
     role_cost_usd,
+    role_uncached_cost_usd,
+    run_uncached_cost_figures,
     summary_cost_block,
+    uncached_cost_figures,
+    uncached_cost_usd,
 )
 from tutormoments.models import get_pricing, pricing_version
 
@@ -288,3 +294,189 @@ def test_summary_cost_block_unpriceable_roles_null_figures_not_block():
     assert empty["tutor_list_cost_usd"] is None
     assert empty["run_billed_cost_estimate_usd"] is None
     assert empty["rates"] == {}
+
+
+# ---------------------------------------------------------------------------
+# Figure (3): uncached cost -- the website cost chart's deployment ceiling.
+# ---------------------------------------------------------------------------
+
+
+def test_uncached_cost_prices_every_prompt_bucket_at_the_input_rate():
+    # Anthropic shape: the cache buckets are disjoint from input_uncached, so
+    # the full prompt is their sum -- each token priced once, at `input`.
+    usage = {
+        "input_uncached": 20,
+        "cache_read": 7924,
+        "cache_write": 1000,
+        "output": 150,
+        "reasoning": 0,
+    }
+    expected = ((20 + 7924 + 1000) * 5.00 + 150 * 25.00) / 1_000_000
+    assert uncached_cost_usd(usage, RATES) == pytest.approx(expected)
+
+
+def test_uncached_cost_bills_reasoning_at_the_output_rate():
+    # Where thinking models pay: reasoning is billed as output everywhere.
+    usage = {"input_uncached": 6000, "output": 60, "reasoning": 1500}
+    expected = (6000 * 5.00 + (60 + 1500) * 25.00) / 1_000_000
+    assert uncached_cost_usd(usage, RATES) == pytest.approx(expected)
+
+
+def test_uncached_cost_does_not_depend_on_the_cache_split():
+    # The point of the figure: the same tokens cost the same whatever cache
+    # mix the harness happened to get -- whereas the as-run figure moves.
+    cold = {"input_uncached": 9000, "output": 400}
+    warm = {
+        "input_uncached": 100,
+        "cache_read": 8000,
+        "cache_write": 900,
+        "output": 400,
+    }
+    assert uncached_cost_usd(cold, RATES) == pytest.approx(
+        uncached_cost_usd(warm, RATES)
+    )
+    assert cost_usd(cold, RATES) != pytest.approx(cost_usd(warm, RATES))
+
+
+def test_role_uncached_cost_prices_from_provenance():
+    usage = _tutor_usage(cache_read=40_000)
+    expected = (140_000 * 5.00 + 50_000 * 25.00) / 1_000_000
+    assert role_uncached_cost_usd(usage) == pytest.approx(expected)
+
+
+def test_role_uncached_cost_applies_no_batch_discount():
+    # A list-price figure: the endpoint neither discounts nor nulls it.
+    sync = role_uncached_cost_usd(_tutor_usage())
+    assert role_uncached_cost_usd(_tutor_usage(endpoint="batch")) == sync
+    assert role_uncached_cost_usd(_tutor_usage(endpoint="batch+sync")) == sync
+
+
+@pytest.mark.parametrize(
+    ("overrides", "warning"),
+    [
+        ({"total": 150_000, "total_tokens": 450_000}, "pre-vector"),
+        ({"model": None}, "no model provenance"),
+        ({"model": "claude-opus-4-8+gpt-5.5"}, "mixes models"),
+        ({"model": "claude-sonnet-5"}, "no pricing entry"),
+    ],
+)
+def test_role_uncached_cost_null_cases_match_role_cost(overrides, warning, caplog):
+    usage = _tutor_usage(**overrides)
+    if "model" in overrides and overrides["model"] is None:
+        del usage["model"]
+    with caplog.at_level(logging.WARNING, logger="tutormoments.costing"):
+        assert role_uncached_cost_usd(usage) is None
+    assert warning in caplog.text
+
+
+# ---------------------------------------------------------------------------
+# Figure (3) per call, and its benchmark-run source.
+# ---------------------------------------------------------------------------
+
+
+def test_uncached_cost_figures_divide_by_counted_calls():
+    usage = _tutor_usage(cache_read=20_000, reasoning=10_000)
+    figs = uncached_cost_figures(usage, n_calls=40)
+    assert figs["uncached_cost_per_call_usd"] == pytest.approx(
+        role_uncached_cost_usd(usage) / 40
+    )
+    assert figs["prompt_tokens_per_call"] == 3000  # (100k + 20k) / 40
+    assert figs["output_tokens_per_call"] == 1500  # (50k + 10k reasoning) / 40
+    assert figs["model"] == "claude-opus-4-8"
+    assert figs["rates"] == {"claude-opus-4-8": get_pricing("claude-opus-4-8")}
+    assert figs["pricing_version"] == pricing_version()
+
+
+def test_uncached_cost_figures_none_without_calls():
+    assert uncached_cost_figures(_tutor_usage(), n_calls=0) is None
+
+
+def test_uncached_cost_figures_keep_tokens_when_unpriceable():
+    figs = uncached_cost_figures(_tutor_usage(model="claude-sonnet-5"), n_calls=10)
+    assert figs["uncached_cost_per_call_usd"] is None
+    assert figs["prompt_tokens_per_call"] == 10_000
+    assert figs["rates"] == {}
+
+
+def _summary(**overrides):
+    summary = {
+        "tutor_model": "claude-opus-4-8",
+        "mode": "scaffolding_rigor",
+        "run_counts": {"attempted": 520, "succeeded": 520, "failed": 0},
+        "latency": {"source": "run", "tutor": {"n": 1560}},
+        "tokens": {"tutor": _tutor_usage()},
+        "cost": {"n_conversations": 520},
+    }
+    summary.update(overrides)
+    return summary
+
+
+def test_run_figures_take_the_call_count_from_the_run_latency_block():
+    # tokens.tutor and latency.tutor.n come from the same transcripts, so
+    # the latter is the exact call count behind the former.
+    figs = run_uncached_cost_figures(_summary())
+    assert figs["n_calls"] == 1560
+    assert figs["uncached_cost_per_call_usd"] == pytest.approx(
+        role_uncached_cost_usd(_tutor_usage()) / 1560
+    )
+
+
+def test_run_figures_null_on_a_pre_vector_run(caplog):
+    # A run (or resume) over transcripts from before usage capture.
+    tokens = {"tutor": _tutor_usage(total=0, total_tokens=450_000)}
+    with caplog.at_level(logging.WARNING, logger="tutormoments.costing"):
+        figs = run_uncached_cost_figures(_summary(tokens=tokens))
+    assert figs["uncached_cost_per_call_usd"] is None
+
+
+@pytest.mark.parametrize("summary", [{}, _summary(latency=None), _summary(tokens={})])
+def test_run_figures_none_without_the_blocks(summary):
+    assert run_uncached_cost_figures(summary) is None
+
+
+def _write_run(root, run_id, summary, sample=None):
+    run = root / run_id
+    run.mkdir(parents=True)
+    (run / "summary.json").write_text(json.dumps(summary), encoding="utf-8")
+    (run / "config.json").write_text(json.dumps({"sample": sample}), encoding="utf-8")
+
+
+def test_costed_runs_keys_by_arm_and_mode(tmp_path):
+    _write_run(tmp_path, "opus_scaffolding_rigor_x_20260929", _summary())
+    runs = costed_runs(str(tmp_path))
+    cell = runs[("claude-opus-4-8", "scaffolding_rigor")]
+    assert cell["run_id"] == "opus_scaffolding_rigor_x_20260929"
+    assert cell["n_conversations"] == 520
+    assert cell["n_calls"] == 1560
+
+
+def test_costed_runs_prefers_the_newest_run(tmp_path):
+    _write_run(tmp_path, "opus_scaffolding_rigor_x_20260929", _summary())
+    _write_run(tmp_path, "opus_scaffolding_rigor_x_20261015", _summary())
+    cell = costed_runs(str(tmp_path))[("claude-opus-4-8", "scaffolding_rigor")]
+    assert cell["run_id"] == "opus_scaffolding_rigor_x_20261015"
+
+
+@pytest.mark.parametrize(
+    ("summary", "sample"),
+    [
+        # --sample replayed only part of the dataset.
+        (_summary(), 10),
+        # Failed moments: not the same set of conversations as a full run.
+        (_summary(run_counts={"attempted": 520, "succeeded": 519, "failed": 1}), None),
+        # Pre-vector usage cannot be priced.
+        (_summary(tokens={"tutor": _tutor_usage(total=0, total_tokens=9)}), None),
+        # A latency probe directory has no summary.json at all.
+        (None, None),
+    ],
+)
+def test_costed_runs_skips_ineligible_runs(tmp_path, summary, sample):
+    if summary is None:
+        (tmp_path / "probe_scaffolding_rigor_latency_20261001").mkdir()
+    else:
+        _write_run(tmp_path, "opus_scaffolding_rigor_x_20260929", summary, sample)
+    assert costed_runs(str(tmp_path)) == {}
+
+
+def test_costed_runs_on_a_missing_results_root(tmp_path):
+    assert costed_runs(str(tmp_path / "nope")) == {}

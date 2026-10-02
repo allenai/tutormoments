@@ -1,16 +1,29 @@
 """Cost computation over canonical usage vectors.
 
 Turns the usage vectors that aggregation preserves (see ``usage.py``) into
-the two dollar figures the cost plan defines:
+three dollar figures:
 
-1. **Tutor list cost** (``list_cost``) -- the leaderboard/deployment figure:
-   tutor tokens only, at list rates with the actual cache mix, never
+1. **Tutor list cost** (``list_cost``) -- the leaderboard figure: tutor
+   tokens only, at list rates with the actual cache mix, never
    batch-discounted (post Phase 0, tutor usage is structurally sync, and
    ``list_cost`` asserts that rather than special-casing it).
 2. **Billed run cost estimate** (``billed_cost_estimate``) -- the
    replication figure: every role, with the batch discount applied to
    batch-tagged usage. This is the number that should reconcile against
    provider invoices.
+3. **Uncached cost** (``uncached_cost_usd`` / ``role_uncached_cost_usd``) --
+   the deployment ceiling the website's cost chart plots: every prompt token
+   priced at the full input rate, as if nothing were cached. Figure (1)
+   swings by up to ~3x with the cache mix our harness happened to get
+   (client breakpoints, provider mechanics, routing, TTLs), which describes
+   the harness rather than the model. A tutoring provider pays the uncached
+   cost at every session start and every cache expiry, and real students
+   pause longer than cache TTLs. Because every prompt bucket is priced at the
+   same rate, this figure does not depend on the recorded cache split.
+   ``uncached_cost_figures`` turns it into per-call figures; its two sources
+   are benchmark runs (``run_uncached_cost_figures`` / ``costed_runs``) and,
+   for models whose runs predate usage capture, the latency probe
+   (``latency.probe_cost_figures``).
 
 Rates come from the packaged model registry (``models.yaml``); each entry
 carries an ``as_of`` lookup date and ``source`` URL, and the registry's
@@ -33,11 +46,17 @@ after later rate updates. See docs/cost.md.
 
 import logging
 
+from tutormoments import results
 from tutormoments.models import get_pricing, pricing_version
 
 __all__ = [
     "cost_usd",
+    "uncached_cost_usd",
     "role_cost_usd",
+    "role_uncached_cost_usd",
+    "uncached_cost_figures",
+    "run_uncached_cost_figures",
+    "costed_runs",
     "list_cost",
     "billed_cost_estimate",
     "summary_cost_block",
@@ -75,6 +94,24 @@ def cost_usd(usage: dict, rates: dict, batch: bool = False) -> float:
     return cost
 
 
+def uncached_cost_usd(usage: dict, rates: dict) -> float:
+    """Figure (3) arithmetic: price one vector as if nothing were cached.
+
+    Every prompt bucket -- uncached, cache read and cache write -- is priced
+    at the base input rate, and reasoning at the output rate as in
+    ``cost_usd``. The buckets are disjoint at the capture boundary, so their
+    sum counts the full prompt exactly once on every provider. No batch
+    multiplier: this is a list-price figure.
+    """
+    prompt = (
+        usage.get("input_uncached", 0)
+        + usage.get("cache_read", 0)
+        + usage.get("cache_write", 0)
+    )
+    output = usage.get("output", 0) + usage.get("reasoning", 0)
+    return (prompt * rates["input"] + output * rates["output"]) / _MTOK
+
+
 def _endpoints(usage: dict) -> set[str]:
     """The endpoint provenance of an aggregate, as a set ("+" splits mixes)."""
     endpoint = usage.get("endpoint")
@@ -83,15 +120,13 @@ def _endpoints(usage: dict) -> set[str]:
     return set(endpoint.split("+"))
 
 
-def role_cost_usd(usage: dict) -> float | None:
-    """Price one role aggregate from its embedded provenance.
+def _priceable_rates(usage: dict) -> dict | None:
+    """The pricing entry one aggregate resolves to, or None.
 
-    Returns None (with a logged warning) when the aggregate cannot be priced
-    exactly: no model provenance, mixed models (their rates differ), an
-    unpriced model, or an endpoint mix where batch-tagged usage cannot be
-    separated from sync usage. Registered/callable tutors synthesize empty
-    usage and land in the no-provenance case -- their cost is legitimately
-    null.
+    None (with a logged warning) when the aggregate cannot be priced
+    exactly: pre-vector contributions, no model provenance, mixed models
+    (their rates differ), or an unpriced model. Shared by every figure so a
+    null means the same thing whichever figure was asked for.
     """
     # Pre-vector contamination check. At the capture boundary the canonical
     # total is >= the legacy total_tokens on every provider (equal on
@@ -120,6 +155,21 @@ def role_cost_usd(usage: dict) -> float | None:
     if not rates:
         logger.warning("model '%s' has no pricing entry; cost is null", model)
         return None
+    return rates
+
+
+def role_cost_usd(usage: dict) -> float | None:
+    """Price one role aggregate from its embedded provenance.
+
+    Returns None (with a logged warning) when the aggregate cannot be priced
+    exactly: any ``_priceable_rates`` case, or an endpoint mix where
+    batch-tagged usage cannot be separated from sync usage. Registered/
+    callable tutors synthesize empty usage and land in the no-provenance
+    case -- their cost is legitimately null.
+    """
+    rates = _priceable_rates(usage)
+    if rates is None:
+        return None
     endpoints = _endpoints(usage)
     if "batch" in endpoints and endpoints != {"batch"}:
         logger.warning(
@@ -129,6 +179,108 @@ def role_cost_usd(usage: dict) -> float | None:
         )
         return None
     return cost_usd(usage, rates, batch=endpoints == {"batch"})
+
+
+def role_uncached_cost_usd(usage: dict) -> float | None:
+    """Figure (3) for one role aggregate, priced from its provenance.
+
+    Same null rules as ``role_cost_usd`` minus the endpoint one: a list-price
+    figure applies no batch discount, so which endpoint served the usage
+    does not enter into it.
+    """
+    rates = _priceable_rates(usage)
+    if rates is None:
+        return None
+    return uncached_cost_usd(usage, rates)
+
+
+def uncached_cost_figures(usage: dict, n_calls: int) -> dict | None:
+    """Figure (3) per call, for one tutor aggregate over ``n_calls`` calls.
+
+    ``n_calls`` must be the counted calls behind ``usage``: dividing by
+    conversations times an assumed turn count breaks as soon as an ``[END]``
+    or ``[PROBLEM_CHANGE]`` ends a conversation early. Priced at the
+    registry's *current* rates -- tokens are the measurement, prices a
+    lookup. None when there are no calls; ``uncached_cost_per_call_usd`` is
+    None, with the token means kept, when the usage cannot be priced.
+
+    Output is visible output plus reasoning. On OpenAI and Together reasoning
+    already sits inside ``output`` (their ``reasoning`` bucket stays 0), so
+    the sum is the billed completion either way; a separate reasoning figure
+    would not be comparable across providers and is not reported.
+    """
+    if n_calls <= 0:
+        return None
+    cost = role_uncached_cost_usd(usage)
+    model = usage.get("model")
+    rates = get_pricing(model) if cost is not None else None
+    prompt = (
+        usage.get("input_uncached", 0)
+        + usage.get("cache_read", 0)
+        + usage.get("cache_write", 0)
+    )
+    output = usage.get("output", 0) + usage.get("reasoning", 0)
+    return {
+        "n_calls": n_calls,
+        "model": model,
+        "prompt_tokens_per_call": round(prompt / n_calls, 1),
+        "output_tokens_per_call": round(output / n_calls, 1),
+        "uncached_cost_per_call_usd": cost / n_calls if cost is not None else None,
+        "pricing_version": pricing_version(),
+        "rates": {model: rates} if rates else {},
+    }
+
+
+def run_uncached_cost_figures(summary: dict) -> dict | None:
+    """Figure (3) per tutor call from one run's ``summary.json``.
+
+    The summary's tutor token block and its tutor latency count are built
+    from the same completed transcripts (resumed ones included), so the
+    count is the exact number of hosted tutor calls behind the tokens. A run
+    whose transcripts predate usage-vector capture is caught by the
+    pre-vector check and yields a None cost.
+    """
+    tutor = (summary.get("tokens") or {}).get("tutor")
+    n_calls = ((summary.get("latency") or {}).get("tutor") or {}).get("n") or 0
+    if not isinstance(tutor, dict):
+        return None
+    return uncached_cost_figures(tutor, n_calls)
+
+
+def costed_runs(results_root: str = "results") -> dict:
+    """Latest costable full benchmark run per ``(tutor_model, mode)``.
+
+    Returns ``{(tutor_model, mode): {"run_id", "n_conversations", **figures}}``
+    with ``figures`` from ``run_uncached_cost_figures``. Eligible runs replayed
+    the whole dataset (no ``--sample``) with no failed moments, and their
+    usage prices exactly; among those the newest run id (date suffix) wins,
+    so a re-run supersedes an earlier one. Mirrors ``latency.probe_runs``,
+    which is the fallback source for models with no eligible run.
+    """
+    out: dict[tuple[str, str], dict] = {}
+    best: dict[tuple[str, str], tuple] = {}
+    for run_id in results.list_runs(results_root):
+        summary = results.read_summary(run_id, results_root=results_root)
+        if not summary or not summary.get("tokens"):
+            continue
+        config = results.read_config(run_id, results_root=results_root) or {}
+        if config.get("sample") is not None:
+            continue
+        if (summary.get("run_counts") or {}).get("failed", 0):
+            continue
+        figures = run_uncached_cost_figures(summary)
+        if not figures or figures["uncached_cost_per_call_usd"] is None:
+            continue
+        cell = (summary.get("tutor_model", ""), summary.get("mode", ""))
+        rank = (run_id.rsplit("_", 1)[-1], run_id)
+        if cell not in best or rank > best[cell]:
+            best[cell] = rank
+            out[cell] = {
+                "run_id": run_id,
+                "n_conversations": (summary.get("cost") or {}).get("n_conversations"),
+                **figures,
+            }
+    return out
 
 
 def list_cost(tokens: dict) -> float | None:

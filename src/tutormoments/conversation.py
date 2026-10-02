@@ -45,7 +45,10 @@ class Transcript:
     student_latencies: list[float] = field(default_factory=list)
     # Per-call streaming timing, one entry per LLM call in order. Shape:
     #   {ttfc_seconds, ttft_seconds, ttlt_seconds, output_tokens,
-    #    cache_read_input_tokens, output_tps, turn_index, cache_state}
+    #    cache_read_input_tokens, output_tps, turn_index, cache_state, usage}
+    # `usage` is that call's own usage vector: *_usage above is the
+    # conversation sum, which loses the per-call split (and so the exact
+    # call count behind any per-response figure).
     tutor_timings: list[dict] = field(default_factory=list)
     student_timings: list[dict] = field(default_factory=list)
     completed: bool = False
@@ -114,6 +117,9 @@ def _record_timing(timings: list[dict], response, turn_index: int) -> None:
     prefix into the prompt and depend on the provider's automatic caching, so
     a hit there need not mean this conversation was served from cache.
     Providers that report nothing get "unknown", never a guess.
+
+    The call's usage vector rides along so a per-call cost can be computed
+    from the same entry that carries its timing (see ``latency.aggregate_cost``).
     """
     timing = getattr(response, "timing", None)
     if not timing:
@@ -123,7 +129,14 @@ def _record_timing(timings: list[dict], response, turn_index: int) -> None:
         cache_state = "unknown"
     else:
         cache_state = "hit" if cache_read > 0 else "miss"
-    timings.append({**timing, "turn_index": turn_index, "cache_state": cache_state})
+    timings.append(
+        {
+            **timing,
+            "turn_index": turn_index,
+            "cache_state": cache_state,
+            "usage": dict(getattr(response, "usage", None) or {}),
+        }
+    )
 
 
 def _append_turns_to_extra(

@@ -25,8 +25,8 @@ docker run --rm -p 8080:8080 tutormoments-web
 ## Layout
 
 - `index.html` — the whole page (Ai2-brand styling in `static/css/site.css`)
-- `static/js/main.js` — renders the leaderboard table and the two interactive charts from `static/data/*.json`
-- `static/data/` — chart data, all checked in (`leaderboard.json`, `latency.json`, `action_distribution.json`). If `action_distribution.json` is ever removed, its section hides itself
+- `static/js/main.js` — renders the leaderboard table and the interactive charts from `static/data/*.json`
+- `static/data/` — chart data, all checked in (`leaderboard.json`, `latency.json`, `action_distribution.json`, `cost.json`). If `action_distribution.json` or `cost.json` is absent, its section hides itself
 - `static/paper/tutormoments-preview.pdf`, `static/animation/index.html` — published copies of the paper and pipeline animation
 - `Dockerfile`, `nginx.conf` — the nginx image Skiff2 builds and runs (serves the static files on port 8080)
 
@@ -57,7 +57,7 @@ easy one. The TTFT figures come with publishability rules that live in
 `tutormoments.latency`, and the script reads them out rather than restating them. Under a
 bare `python3` it refreshes everything else and says that it skipped `ttft_s`.
 
-This regenerates `static/data/{leaderboard,latency,action_distribution}.json`. The
+This regenerates `static/data/{leaderboard,latency,action_distribution,cost}.json`. The
 action-distribution figure reads the repo's
 `analysis/working-paper-20260630/action_taxonomy_distribution.csv` export; pass
 `--action-csv path/to/action_taxonomy_distribution.csv` to use a copy outside the checkout. Add
@@ -93,3 +93,28 @@ samples together. See `docs/latency.md` in the main repo.
 `latency_s` is still read off the paper's Figure 7 (±0.2s) for every model; a checkout with
 `results/benchmark/` present replaces those with exact values. Since nothing on the page
 renders it, that estimate no longer needs a footnote.
+
+### The cost figure
+
+`static/data/cost.json` plots the latency chart's models, at the same `score`, against
+`uncached_cost_per_response_usd`: the tutor's list cost per response with every prompt token
+priced at the full input rate (no prompt caching), output and reasoning at the output rate,
+divided by the counted tutor calls. The chart shows it per 1,000 responses on a log axis,
+with tokens per response and the list prices used in the tooltip. See `docs/cost.md` in the
+main repo for why it is uncached.
+
+Each row's `source` says where its tokens came from:
+
+- **`"run"`** — the model's newest full scaffolding_rigor benchmark run under the results root
+  (`summary.json`'s tutor tokens and call count, via `tutormoments.costing.costed_runs`). This
+  is the normal case: any run made since usage-vector capture is costable, so a new model
+  needs no extra spend to appear here.
+- **`"probe"`** — a `tutormoments latency --mode scaffolding_rigor` probe, used only for models
+  whose runs predate usage capture (via `tutormoments.latency.probe_cost_figures`).
+
+Prices are the checkout's registry rates at refresh time, whichever the source, so re-running
+this script after a price change updates the chart; `cost.pricing_version` and each row's
+`rates.as_of` record which rates were used. A site model with neither source gets no row; it
+is listed in `omitted` and counted in the footnote, never plotted at zero. The roster follows
+`latency.json`, so a model must be in `MODELS` to appear. If new points' labels collide,
+adjust the `labelLeft` / `labelBelow` maps in `renderCost`.

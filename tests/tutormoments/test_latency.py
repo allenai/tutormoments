@@ -16,9 +16,11 @@ from tutormoments.config import ArmSpec, StudentSpec
 from tutormoments.latency import (
     MIN_CACHE_HIT_SAMPLES,
     MIN_SESSION_CACHE_READ_TOKENS,
+    aggregate_cost,
     aggregate_timings,
     format_probe_summary,
     latency_stats,
+    probe_cost_figures,
     probe_figures,
     probe_runs,
     probe_subsample_ids,
@@ -27,6 +29,7 @@ from tutormoments.latency import (
     warm_figure_is_publishable,
     withheld_reason,
 )
+from tutormoments.models import get_pricing, pricing_version
 from tutormoments.moments import PROBE_IDS_FILENAME, subsample_id
 
 # ---------------------------------------------------------------------------
@@ -878,3 +881,140 @@ def test_probe_subsample_ids_exposes_a_mixed_set(tmp_path):
         "589e8acf8ac761f2",
         "84b4ad5615876a3e",
     }
+
+
+# ---------------------------------------------------------------------------
+# Cost: per-call usage -> uncached cost per response
+# ---------------------------------------------------------------------------
+
+
+def _call_usage(
+    model="gpt-5.5-2026-04-23", uncached=6000, cache_read=0, output=400, reasoning=0
+):
+    """One call's canonical usage vector, as normalize_usage emits it."""
+    total = uncached + cache_read + output + reasoning
+    return {
+        "input_tokens": uncached + cache_read,
+        "output_tokens": output + reasoning,
+        "total_tokens": total,
+        "input_uncached": uncached,
+        "cache_read": cache_read,
+        "cache_write": 0,
+        "output": output,
+        "reasoning": reasoning,
+        "total": total,
+        "provider": "openai",
+        "model": model,
+        "endpoint": "stream",
+    }
+
+
+def _cost_sample(**usage_kw):
+    return {**_timing(), "usage": _call_usage(**usage_kw)}
+
+
+def test_aggregate_cost_prices_every_prompt_token_at_the_input_rate():
+    # A warm call and a cold call with the same token counts cost the same:
+    # the figure is uncached by definition.
+    samples = [
+        _cost_sample(uncached=6000, output=300, reasoning=100),
+        _cost_sample(uncached=500, cache_read=5500, output=350, reasoning=150),
+    ]
+    cost = aggregate_cost(samples)
+    # gpt-5.5: $5 in / $30 out per MTok.
+    expected = (12_000 * 5.00 + 900 * 30.00) / 1_000_000 / 2
+    assert cost["uncached_cost_per_call_usd"] == pytest.approx(expected)
+    assert cost["n_calls"] == 2
+    assert cost["prompt_tokens_per_call"] == 6000
+    assert cost["output_tokens_per_call"] == 450, "reasoning bills as output"
+    assert cost["model"] == "gpt-5.5-2026-04-23"
+    assert cost["pricing_version"] == pricing_version()
+    assert cost["rates"] == {"gpt-5.5-2026-04-23": get_pricing("gpt-5.5-2026-04-23")}
+
+
+def test_aggregate_cost_divides_by_counted_calls_not_conversations():
+    # Three calls from two conversations (one ended early on [END]): the
+    # per-response figure divides by 3, whatever max_turns was.
+    samples = [
+        {**_cost_sample(), "moment_id": "m1", "turn_index": 0},
+        {**_cost_sample(), "moment_id": "m1", "turn_index": 1},
+        {**_cost_sample(), "moment_id": "m2", "turn_index": 0},
+    ]
+    one = aggregate_cost(samples[:1])["uncached_cost_per_call_usd"]
+    assert aggregate_cost(samples)["uncached_cost_per_call_usd"] == pytest.approx(one)
+    assert aggregate_cost(samples)["n_calls"] == 3
+
+
+@pytest.mark.parametrize(
+    "samples",
+    [
+        [],
+        # Probe written before per-call usage capture.
+        [_timing(), _timing()],
+        # One call without a vector: a partial sum would understate.
+        [_cost_sample(), _timing()],
+        # A registered tutor reports empty usage.
+        [{**_timing(), "usage": {}}],
+    ],
+)
+def test_aggregate_cost_is_not_measured_rather_than_zero(samples):
+    assert aggregate_cost(samples) is None
+
+
+def test_aggregate_cost_keeps_tokens_when_usage_cannot_be_priced():
+    cost = aggregate_cost([_cost_sample(model="an-unpriced-model")])
+    assert cost["uncached_cost_per_call_usd"] is None
+    assert cost["prompt_tokens_per_call"] == 6000
+    assert cost["rates"] == {}
+
+
+def test_probe_cost_figures_reprices_at_current_rates(monkeypatch):
+    """Tokens are the measurement, prices a lookup: a registry change moves
+    the figure without a re-probe, whatever the stored snapshot says."""
+    block = {
+        "samples": [_cost_sample()],
+        "cost": {"tutor": {"uncached_cost_per_call_usd": 123.0}},
+    }
+    before = probe_cost_figures(block)["uncached_cost_per_call_usd"]
+    halved = {**get_pricing("gpt-5.5-2026-04-23"), "input": 2.50, "output": 15.00}
+    monkeypatch.setattr("tutormoments.costing.get_pricing", lambda m: halved)
+    assert probe_cost_figures(block)["uncached_cost_per_call_usd"] == pytest.approx(
+        before / 2
+    )
+
+
+def test_probe_cost_figures_none_for_a_pre_capture_probe():
+    assert probe_cost_figures(_probe_block()) is None
+    assert probe_cost_figures({}) is None
+
+
+def test_run_probe_writes_a_cost_block_per_role(tmp_path, monkeypatch):
+    (tmp_path / "release").mkdir()
+    data_path = _write_frozen(tmp_path / "release", ["m1", "m2"])
+    _patch_load(monkeypatch, [_moment("m1"), _moment("m2")])
+
+    def _conv(moment, **kwargs):
+        return SimpleNamespace(
+            tutor_timings=[_cost_sample(), _cost_sample()],
+            student_timings=[_cost_sample(model="claude-opus-4-6")],
+        )
+
+    run_id, _ = run_probe(
+        "claude-opus-4-8",
+        "scaffolding_rigor",
+        cfg=_Cfg(data_path),
+        n=40,
+        results_root=str(tmp_path / "results"),
+        date="20260930",
+        _run_conversation=_conv,
+    )
+    written = json.loads(
+        (tmp_path / "results" / run_id / "latency.json").read_text(encoding="utf-8")
+    )
+    assert written["cost"]["tutor"]["n_calls"] == 4
+    assert written["cost"]["student"]["n_calls"] == 2
+    assert written["cost"]["student"]["model"] == "claude-opus-4-6"
+    # Samples persist each call's usage, so the reader can reprice them.
+    assert all("usage" in s for s in written["samples"])
+    assert probe_cost_figures(written) == written["cost"]["tutor"]
+    assert "Uncached $/1k responses" in format_probe_summary(written)
