@@ -335,8 +335,12 @@
       transform: "rotate(-90 18 " + (m.top + ih / 2) + ")" }, svg);
     yl.textContent = "Appropriate scaffolding & rigor (mean)";
 
+    // Latency-performance frontier: the models nothing faster outscores.
+    var frontier = scoreFrontier(models, function (d) { return d.ttft_s; });
+    var drawn = drawFrontier(svg, frontier, function (d) { return x(d.ttft_s); }, function (d) { return y(d.score); });
+
     var points = models.map(function (d) { return { d: d, cx: x(d.ttft_s), cy: y(d.score) }; });
-    var labeler = makeLabeler(points, [], { left: m.left, right: W - 4, top: 0, bottom: m.top + ih }, {});
+    var labeler = makeLabeler(points, drawn.segments, { left: m.left, right: W - 4, top: 0, bottom: m.top + ih }, {});
 
     points.forEach(function (p) {
       var d = p.d, cx = p.cx, cy = p.cy;
@@ -361,6 +365,7 @@
         if (typeof d.ttlt_s === "number") {
           html += ttRow("Full turn, end to end", d.ttlt_s.toFixed(1) + " s");
         }
+        if (drawn.on[d.id]) html += ttRow("Frontier", "nothing faster scores higher");
         html += ttRow("Measured", d.ttft_source === "run"
           ? "benchmark run, " + (d.ttft_concurrency || "several") + " conversations at a time"
           : "serial probe, 112 moments");
@@ -368,10 +373,14 @@
       });
     });
 
+    nameFrontier(svg, drawn.segments, labeler.clear);
     mount.appendChild(svg);
 
     var notes = [];
     if (missing.length) notes.push("Not measured, so not shown: " + missing.join(", ") + ".");
+    if (frontier.length > 1) {
+      notes.push("Dashed line: the latency-performance frontier, joining the models that nothing faster outscores.");
+    }
     if (models.some(function (d) { return d.ttft_source === "run"; })) {
       notes.push("The working paper's models were timed by a serial probe over 112 moments (August 2026); " +
         "models added since are timed from their benchmark runs (September–October 2026), four conversations " +
@@ -412,18 +421,54 @@
     return all.filter(function (v) { return v >= first && v <= last; });
   }
 
-  // Cost-performance frontier: the models no other model beats on both cost
-  // and score. Walking up the cost axis, a model is on it when it scores
-  // above every cheaper one.
-  function costFrontier(models, cost) {
+  // Frontier on a lower-is-better x (cost, latency): the models no other
+  // model beats on both x and score. Walking up the x axis, a model is on it
+  // when it scores above every model with a lower x.
+  function scoreFrontier(models, xOf) {
     var best = -Infinity;
     return models.slice()
-      .sort(function (a, b) { return cost(a) - cost(b) || b.score - a.score; })
+      .sort(function (a, b) { return xOf(a) - xOf(b) || b.score - a.score; })
       .filter(function (d) {
         if (d.score <= best) return false;
         best = d.score;
         return true;
       });
+  }
+
+  // Draw a frontier as straight segments between its models, the way
+  // Artificial Analysis draws it, ending at the top frontier model. Returns
+  // the segments (for label placement) and the set of frontier ids.
+  function drawFrontier(svg, frontier, px, py) {
+    var on = {}, segments = [];
+    frontier.forEach(function (d) { on[d.id] = true; });
+    for (var fi = 1; fi < frontier.length; fi++) {
+      segments.push([px(frontier[fi - 1]), py(frontier[fi - 1]), px(frontier[fi]), py(frontier[fi])]);
+    }
+    if (segments.length) {
+      el("path", {
+        d: "M" + segments[0][0].toFixed(1) + " " + segments[0][1].toFixed(1) + " " +
+          segments.map(function (g) { return "L" + g[2].toFixed(1) + " " + g[3].toFixed(1); }).join(" "),
+        fill: "none", stroke: INK_MUTED, "stroke-width": 1.5,
+        "stroke-dasharray": "5 4", "stroke-linejoin": "round"
+      }, svg);
+    }
+    return { segments: segments, on: on };
+  }
+
+  // Name a frontier once, beside its longest segment, where `clear` finds room.
+  function nameFrontier(svg, segments, clear) {
+    if (!segments.length) return;
+    var longest = segments.slice().sort(function (g, h) {
+      return Math.hypot(h[2] - h[0], h[3] - h[1]) - Math.hypot(g[2] - g[0], g[3] - g[1]);
+    })[0];
+    var mx = (longest[0] + longest[2]) / 2, my = (longest[1] + longest[3]) / 2;
+    [[0, -12], [0, 16], [-30, -12], [30, 16]].some(function (o) {
+      var b = { x0: mx + o[0] - 22, x1: mx + o[0] + 22, y0: my + o[1] - 10, y1: my + o[1] + 3 };
+      if (!clear(b, null)) return false;
+      el("text", { x: mx + o[0], y: my + o[1], "text-anchor": "middle", "font-size": 11.5,
+        "font-style": "italic", fill: INK_MUTED }, svg).textContent = "frontier";
+      return true;
+    });
   }
 
   function renderCost(data) {
@@ -475,24 +520,9 @@
       transform: "rotate(-90 18 " + (m.top + ih / 2) + ")" }, svg);
     yl.textContent = "Appropriate scaffolding & rigor (mean)";
 
-    // Frontier as straight segments between its models, the way Artificial
-    // Analysis draws it. It ends at the top frontier model.
-    var frontier = costFrontier(models, per1k);
-    var onFrontier = {};
-    frontier.forEach(function (d) { onFrontier[d.id] = true; });
-    var segments = [];
-    for (var fi = 1; fi < frontier.length; fi++) {
-      segments.push([x(per1k(frontier[fi - 1])), y(frontier[fi - 1].score),
-        x(per1k(frontier[fi])), y(frontier[fi].score)]);
-    }
-    if (segments.length) {
-      el("path", {
-        d: "M" + segments[0][0].toFixed(1) + " " + segments[0][1].toFixed(1) + " " +
-          segments.map(function (g) { return "L" + g[2].toFixed(1) + " " + g[3].toFixed(1); }).join(" "),
-        fill: "none", stroke: INK_MUTED, "stroke-width": 1.5,
-        "stroke-dasharray": "5 4", "stroke-linejoin": "round"
-      }, svg);
-    }
+    var frontier = scoreFrontier(models, per1k);
+    var drawn = drawFrontier(svg, frontier, function (d) { return x(per1k(d)); }, function (d) { return y(d.score); });
+    var segments = drawn.segments, onFrontier = drawn.on;
 
     // Labels: each model takes the first placement whose box clears the
     // frontier line, every marker and the labels already placed. A model in
@@ -535,20 +565,7 @@
       });
     });
 
-    // Name the line once, beside its longest segment, if a clear spot exists.
-    if (segments.length) {
-      var longest = segments.slice().sort(function (g, h) {
-        return Math.hypot(h[2] - h[0], h[3] - h[1]) - Math.hypot(g[2] - g[0], g[3] - g[1]);
-      })[0];
-      var mx = (longest[0] + longest[2]) / 2, my = (longest[1] + longest[3]) / 2;
-      [[0, -12], [0, 16], [-30, -12], [30, 16]].some(function (o) {
-        var b = { x0: mx + o[0] - 22, x1: mx + o[0] + 22, y0: my + o[1] - 10, y1: my + o[1] + 3 };
-        if (!boxClear(b, null)) return false;
-        el("text", { x: mx + o[0], y: my + o[1], "text-anchor": "middle", "font-size": 11.5,
-          "font-style": "italic", fill: INK_MUTED }, svg).textContent = "frontier";
-        return true;
-      });
-    }
+    nameFrontier(svg, segments, boxClear);
 
     mount.appendChild(svg);
 
