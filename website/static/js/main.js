@@ -343,6 +343,20 @@
     return all.filter(function (v) { return v >= first && v <= last; });
   }
 
+  // Cost-performance frontier: the models no other model beats on both cost
+  // and score. Walking up the cost axis, a model is on it when it scores
+  // above every cheaper one.
+  function costFrontier(models, cost) {
+    var best = -Infinity;
+    return models.slice()
+      .sort(function (a, b) { return cost(a) - cost(b) || b.score - a.score; })
+      .filter(function (d) {
+        if (d.score <= best) return false;
+        best = d.score;
+        return true;
+      });
+  }
+
   function renderCost(data) {
     var block = document.getElementById("cost-block");
     var mount = document.getElementById("cost-chart");
@@ -392,6 +406,27 @@
       transform: "rotate(-90 18 " + (m.top + ih / 2) + ")" }, svg);
     yl.textContent = "Appropriate scaffolding & rigor (mean)";
 
+    // Frontier as a step line: the best score available without spending
+    // more stays flat until the next frontier model, then rises to it. (A
+    // diagonal between two models would imply options that do not exist.)
+    var frontier = costFrontier(models, per1k);
+    var onFrontier = {};
+    frontier.forEach(function (d) { onFrontier[d.id] = true; });
+    if (frontier.length > 1) {
+      var path = frontier.map(function (d, i) {
+        var px = x(per1k(d)).toFixed(1), py = y(d.score).toFixed(1);
+        return i === 0 ? "M" + px + " " + py : "H" + px + " V" + py;
+      }).join(" ");
+      // Carry the last step to the plot's right edge: spending more than the
+      // top frontier model buys no better score among these models.
+      path += " H" + (m.left + iw).toFixed(1);
+      el("path", { d: path, fill: "none", stroke: INK_MUTED, "stroke-width": 1.5,
+        "stroke-dasharray": "5 4", "stroke-linejoin": "round" }, svg);
+      var top = frontier[frontier.length - 1];
+      el("text", { x: m.left + iw, y: y(top.score) - 7, "text-anchor": "end", "font-size": 11.5,
+        "font-style": "italic", fill: INK_MUTED }, svg).textContent = "frontier";
+    }
+
     // Per-model label placement, tuned to the measured positions: the
     // Claude 5.x cluster sits close enough to crowd side-by-side labels.
     var labelLeft = {};
@@ -402,10 +437,17 @@
       var cx = x(per1k(d)), cy = y(d.score);
       markerNode(s.marker, cx, cy, 8, s.color, svg);
 
-      var centered = labelBelow[d.id] || labelAbove[d.id];
+      // The frontier leaves each of its models rightward and arrives from
+      // below, so their labels go left -- or above, with no room on the left.
+      var above = labelAbove[d.id];
       var left = labelLeft[d.id] || cx > m.left + iw - 20; // keep the rightmost label inside
+      if (onFrontier[d.id] && !above && !labelBelow[d.id]) {
+        if (cx - 14 - d.name.length * 7 > m.left) left = true;
+        else above = true;
+      }
+      var centered = labelBelow[d.id] || above;
       var lx = centered ? cx : (left ? cx - 14 : cx + 14);
-      var ly = labelBelow[d.id] ? cy + 22 : (labelAbove[d.id] ? cy - 14 : cy + 4);
+      var ly = labelBelow[d.id] ? cy + 22 : (above ? cy - 14 : cy + 4);
       el("text", {
         x: lx, y: ly, "font-size": 12.5, "font-weight": 600, fill: INK,
         "text-anchor": centered ? "middle" : (left ? "end" : "start")
@@ -424,6 +466,7 @@
           html += ttRow("List price per MTok, in / out",
             "$" + d.rates.input_per_mtok + " / $" + d.rates.output_per_mtok + " (" + d.rates.as_of + ")");
         }
+        if (onFrontier[d.id]) html += ttRow("Frontier", "nothing cheaper scores higher");
         if (d.source && typeof d.n_calls === "number") {
           html += ttRow("Measured over", d.n_calls.toLocaleString() + " responses, " +
             (d.source.kind === "run" ? "benchmark run" : "latency probe"));
@@ -438,6 +481,9 @@
     var omitted = data.omitted || [];
     if (omitted.length) {
       notes.push("Not shown, no run with recorded token usage: " + omitted.join(", ") + ".");
+    }
+    if (frontier.length > 1) {
+      notes.push("Dashed line: the cost-performance frontier, the best score available at or below each cost.");
     }
     notes.push("Uncached list prices, a ceiling: provider prompt caching can cut the input share substantially.");
     document.getElementById("cost-footnote").textContent = notes.join(" ");

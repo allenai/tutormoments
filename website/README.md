@@ -153,3 +153,9 @@ this script after a price change updates the chart; `cost.pricing_version` and e
 is listed in `omitted` and named in the footnote, never plotted at zero. The roster follows
 `latency.json`, so a model must be in `MODELS` to appear. If new points' labels collide,
 adjust the `labelLeft` / `labelBelow` / `labelAbove` maps in `renderCost`.
+
+The dashed line is the cost-performance frontier, computed in the page from `cost.json`
+(`costFrontier`): the models no other plotted model beats on both cost and score. It is drawn
+as a step (flat to the next frontier model's cost, then up), since that is the best score
+available at or below each cost; a diagonal would imply options that do not exist. Frontier
+models' labels go left of the marker (or above, near the axis) to stay off the line.
