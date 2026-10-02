@@ -151,8 +151,18 @@
 
   /* ---------- leaderboard ---------- */
 
+  // The score the latency and cost charts plot: mean of evaluation-aware
+  // appropriate scaffolding and appropriate rigor (latency.json's `score`).
+  function overallScore(d) {
+    return (d.eval_aware.scaffolding + d.eval_aware.rigor) / 2;
+  }
+
   function renderLeaderboard(data) {
     var table = document.getElementById("leaderboard-table");
+    // Rows ranked by the charts' overall score; ties alphabetical.
+    var rows = data.models.slice().sort(function (a, b) {
+      return overallScore(b) - overallScore(a) || a.name.localeCompare(b.name);
+    });
     var metrics = ["scaffolding", "rigor", "avoids_over"];
     var metricLabels = { scaffolding: "Appropriate Scaffolding", rigor: "Appropriate Rigor", avoids_over: "Avoids Over-Scaffolding" };
     var prompts = ["plain", "eval_aware"];
@@ -177,7 +187,7 @@
     });
     html += "</tr></thead><tbody>";
 
-    data.models.forEach(function (d) {
+    rows.forEach(function (d) {
       // One provider parameter per line, as the config lists them.
       html += "<tr><td>" + d.name + '</td><td class="reasoning">' +
         (d.reasoning || "").split(", ").join("<br>") + "</td>";

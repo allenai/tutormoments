@@ -12,7 +12,7 @@
   <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
   <link href="https://fonts.googleapis.com/css2?family=Space+Grotesk:wght@500;700&family=Manrope:wght@400..800&family=Roboto+Mono:wght@400;500&display=swap" rel="stylesheet">
   <!-- bump ?v= when the stylesheet or script changes so browsers drop their cached copy -->
-  <link rel="stylesheet" href="./static/css/site.css?v=8">
+  <link rel="stylesheet" href="./static/css/site.css?v=9">
 </head>
 <body>
 
@@ -60,7 +60,8 @@
       </table>
     </div>
     <p class="table-note" id="leaderboard-note">
-      Best score per column
+      Ranked by overall performance: the mean of appropriate scaffolding and appropriate rigor under the
+      evaluation-aware prompt, the score the latency and cost charts below plot. Best score per column
       in <strong style="color: var(--pink);">pink</strong>.
       <strong>Human tutors</strong>, scored the same way at the same decision points, get 0.458 (appropriate
       scaffolding), 0.182 (appropriate rigor), and 0.496 (avoids over-scaffolding). Human tutors should be considered a naturalistic reference,
@@ -242,6 +243,6 @@
 
 <div class="chart-tooltip" id="chart-tooltip" role="status"></div>
 
-<script src="./static/js/main.js?v=10"></script>
+<script src="./static/js/main.js?v=11"></script>
 </body>
 </html>

@@ -54,8 +54,8 @@ OUT_DIR = SITE_ROOT / "static" / "data"
 
 PROMPTS = {"plain": "plain", "scaffolding_rigor": "eval_aware"}
 
-# Display label per site model id, in leaderboard row order (grouped by
-# provider). Add new models here. A paper model's id is its directory prefix
+# Display label per site model id, grouped by provider (the page itself ranks
+# the leaderboard by overall score). Add new models here. A paper model's id is its directory prefix
 # under results/benchmark/_full_combined; any other model's id is its
 # benchmark arm name (the `tutor_model` its full run's summary.json records,
 # "/" replaced by "_").

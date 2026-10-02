@@ -183,7 +183,7 @@ a:hover { color: var(--pink); text-decoration-color: var(--pink); }
   font-size: 0.95rem;
 }
 .table-card th, .table-card td {
-  padding: 12px 14px;
+  padding: 12px 10px;
   text-align: right;
   white-space: nowrap;
 }
@@ -193,10 +193,10 @@ a:hover { color: var(--pink); text-decoration-color: var(--pink); }
 }
 .table-card th:first-child, .table-card td:first-child {
   text-align: left;
-  padding-left: 24px;
+  padding-left: 20px;
   font-weight: 600;
 }
-.table-card td:last-child, .table-card th:last-child { padding-right: 24px; }
+.table-card td:last-child, .table-card th:last-child { padding-right: 20px; }
 .table-card thead th {
   font-family: var(--font-heading);
   font-weight: 500;
@@ -228,7 +228,7 @@ a:hover { color: var(--pink); text-decoration-color: var(--pink); }
 .table-card td.best { color: var(--pink); font-weight: 700; }
 .table-card th.reasoning, .table-card td.reasoning { text-align: left; }
 .table-card tbody td.reasoning {
-  font-size: 0.8rem;
+  font-size: 0.75rem;
   line-height: 1.4;
   color: var(--ink-soft);
 }
