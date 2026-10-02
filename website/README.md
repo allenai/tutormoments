@@ -26,7 +26,7 @@ docker run --rm -p 8080:8080 tutormoments-web
 
 - `index.html` — the whole page (Ai2-brand styling in `static/css/site.css`)
 - `static/js/main.js` — renders the leaderboard table and the interactive charts from `static/data/*.json`
-- `static/data/` — chart data, all checked in (`leaderboard.json`, `latency.json`, `action_distribution.json`, `cost.json`, `kl.json`). If `action_distribution.json`, `cost.json` or `kl.json` is absent, its section hides itself
+- `static/data/` — chart data, all checked in (`leaderboard.json`, `latency.json`, `action_distribution.json`, `cost.json`, `kl.json`, `moments.json`). If `action_distribution.json`, `cost.json`, `kl.json` or `moments.json` is absent, its section hides itself
 - `static/paper/tutormoments-preview.pdf`, `static/animation/index.html` — published copies of the paper and pipeline animation
 - `Dockerfile`, `nginx.conf` — the nginx image Skiff2 builds and runs (serves the static files on port 8080)
 
@@ -115,6 +115,30 @@ every series here is at full sample (about 260 moments per situation):
 The paper's own KL table (~50 moments per situation, human 0.179) is therefore *not* used and
 not comparable; the chart's footnote says so. Both downloads go through the Hugging Face cache;
 anything the checkout cannot rebuild is carried forward from the committed `kl.json`.
+
+### The moment explorer
+
+`static/data/moments.json` backs the explorer at the bottom of the page: ten moments, with
+the session up to the cut point, the human tutor's real continuation, and every model's
+replay of the same moment under both prompts.
+
+The moments themselves are curated in `scripts/explorer_moments.json`: id, title and a short
+summary of the session up to the moment (written for the site, naming no one). They were
+picked to run from moments no model handles well to ones every model does, to cover both
+situations, to come from different transcripts, and to have consistent ground truth at the
+span. Everything else is assembled by `build_moment_explorer` from data:
+
+- context (the last 8 entries before the cut), the human continuation (`student.reference`,
+  first 10 entries) and the annotator's hint from the release's `moments`;
+- the human tutor's labels from its `ground_truth`: the aggregate action direction and the
+  annotators' effectiveness ratings at the span;
+- the paper models' replays and scorer calls from its `benchmark_520` config, and later
+  models' from their full runs' `transcripts/` and `scores/`.
+
+A model's `right` is the leaderboard's rule, computed by `tutormoments.report.aggregate` over
+that one moment. The release is pinned to the same revision as the KL reference. The page
+labels the two sides by who judged them, the annotators for the human tutor and the scorer for
+the models, since those are different judges.
 
 ### The two latency figures
 

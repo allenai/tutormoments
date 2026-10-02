@@ -45,8 +45,10 @@ from __future__ import annotations
 
 import argparse
 import json
+import re
 import statistics
 import sys
+from collections import Counter
 from pathlib import Path
 
 SITE_ROOT = Path(__file__).resolve().parents[1]
@@ -1001,6 +1003,210 @@ def build_kl(repo: Path, results_root: Path) -> None:
     )
 
 
+EXPLORER_FILE = Path(__file__).with_name("explorer_moments.json")
+EXPLORER_CONTEXT = 8  # transcript entries shown above the cut
+EXPLORER_HUMAN = 10  # human-tutor continuation entries shown below it
+_REFERENCE_TURN = re.compile(r"^Turn (\d+)\. (TUTOR|STUDENT): ?(.*)$")
+
+
+def parse_reference(text: str) -> list[dict]:
+    """A moment's `student.reference` (the real transcript after the cut,
+    rendered ``Turn N. ROLE: text`` with continuation lines) as turn dicts
+    shaped like `context` entries."""
+    turns: list[dict] = []
+    for line in (text or "").splitlines():
+        hit = _REFERENCE_TURN.match(line)
+        if hit:
+            turns.append(
+                {"turn_number": int(hit[1]), "role": hit[2].lower(), "text": hit[3]}
+            )
+        elif turns:
+            turns[-1]["text"] += "\n" + line
+    return turns
+
+
+def _turns(entries: list) -> list[dict]:
+    return [
+        {"role": str(t["role"]).lower(), "text": t["text"].strip()}
+        for t in entries
+        if (t.get("text") or "").strip()
+    ]
+
+
+def _verdict(report_mod, dimension: str, ann: dict) -> dict:
+    """The scorer's call on one replay, with right/wrong by the leaderboard's
+    own rule (`tutormoments.report.aggregate` over this one moment)."""
+    from types import SimpleNamespace  # noqa: PLC0415
+
+    over = list(ann.get("overscaffold_decomposed") or [])
+    agg = report_mod.aggregate(
+        [SimpleNamespace(dimension=dimension)],
+        [
+            SimpleNamespace(
+                action_label=ann.get("action_label"), overscaffold_decomposed=over
+            )
+        ],
+    )
+    key = "scaffold_calibrated" if dimension == "scaffolding" else "rigor_calibrated"
+    return {
+        "label": ann.get("action_label"),
+        "overscaffold": bool(over),
+        "right": bool(agg[key]["n_clean_yes"]),
+        "action": ann.get("action"),
+    }
+
+
+def build_moment_explorer(repo: Path, results_root: Path) -> None:
+    """Write moments.json: the curated explorer moments with every model's
+    replay and the scorer's call on it, beside what the human tutor did.
+
+    The moments, their summaries and titles are hand-picked in
+    explorer_moments.json. Everything else comes from data: the context and
+    the human continuation from the release's moments, the annotators' read
+    of the human tutor from its ground truth, the paper models' replays and
+    scores from its benchmark_520 config, later models' from their runs.
+    The release is pinned to the same revision as the KL human reference.
+    """
+    tax = load_taxonomy_module(repo)
+    if tax is None or not EXPLORER_FILE.exists():
+        return
+    from tutormoments import report as report_mod  # noqa: PLC0415
+
+    curated = json.loads(EXPLORER_FILE.read_text("utf-8"))["moments"]
+    wanted = {c["id"] for c in curated}
+    dataset, revision = tax.HUMAN_REFERENCE
+    try:
+        fetch = {
+            name: tax._hf_download(dataset, name, revision)
+            for name in ("moments.jsonl", "ground_truth.jsonl", "benchmark_520.jsonl")
+        }
+    except Exception as exc:  # noqa: BLE001 -- keep the committed moments.json
+        print(f"  release unavailable ({exc}); keeping moments.json", file=sys.stderr)
+        return
+
+    moments = {
+        m["id"]: m
+        for m in map(json.loads, fetch["moments.jsonl"].open(encoding="utf-8"))
+        if m["id"] in wanted
+    }
+    spans = {
+        (
+            m["provenance"]["conv_id"].rsplit("_", 1)[-1],
+            m["provenance"]["turn_start"],
+            m["provenance"]["turn_end"],
+        ): mid
+        for mid, m in moments.items()
+    }
+    human: dict = {}
+    for g in map(json.loads, fetch["ground_truth.jsonl"].open(encoding="utf-8")):
+        for k in g["key_moments"]:
+            mid = spans.get((g["conversation_id"], k["turn_start"], k["turn_end"]))
+            if mid and k.get("annotation_type") == "scaffolding":
+                human.setdefault(mid, []).append(k)
+
+    prompts = {"plain": "plain", "scaffolding_rigor": "eval_aware"}
+    replays: dict = {}  # (mid, site_id, key) -> {turns, verdict}
+    for r in map(json.loads, fetch["benchmark_520.jsonl"].open(encoding="utf-8")):
+        mid = f"balanced_520:{r['scenario_id']}"
+        anns = (r.get("annotation") or {}).get("annotations") or []
+        if mid in moments and anns and r["prompt_mode"] in prompts:
+            replays[(mid, r["tutor_model"], prompts[r["prompt_mode"]])] = (
+                r["exchange"]["generated_turns"],
+                anns[0],
+            )
+    for (site_id, mode), cell in full_runs(results_root).items():
+        if site_id in PAPER_THINKING or mode not in prompts:
+            continue
+        run = results_root / cell["run_id"]
+        for mid in moments:
+            try:
+                ex = json.loads(
+                    (run / "transcripts" / f"{mid}.json").read_text("utf-8")
+                )
+                ann = json.loads((run / "scores" / f"{mid}.json").read_text("utf-8"))
+            except (OSError, json.JSONDecodeError):
+                continue
+            replays[(mid, site_id, prompts[mode])] = (ex["generated_turns"], ann)
+
+    out = []
+    for c in curated:
+        m = moments.get(c["id"])
+        if m is None:
+            print(f"  explorer moment not in the release: {c['id']}", file=sys.stderr)
+            continue
+        dim = m["dimension"]
+        anns = human.get(c["id"], [])
+        models = {}
+        for site_id, _ in MODELS:
+            cells = {}
+            for key in prompts.values():
+                hit = replays.get((c["id"], site_id, key))
+                if hit:
+                    cells[key] = {
+                        "turns": _turns(hit[0]),
+                        **_verdict(report_mod, dim, hit[1]),
+                    }
+            if cells:
+                models[site_id] = cells
+        out.append(
+            {
+                "id": c["id"],
+                "title": c["title"],
+                "summary": c["summary"],
+                "dimension": dim,
+                "hint": (m.get("rubric") or {}).get("hint"),
+                "context": _turns(m["context"][-EXPLORER_CONTEXT:]),
+                "human": {
+                    "turns": _turns(
+                        parse_reference(m["student"]["reference"])[:EXPLORER_HUMAN]
+                    ),
+                    "direction": next(
+                        (
+                            k.get("action_direction_agg")
+                            for k in anns
+                            if k.get("action_direction_agg")
+                        ),
+                        None,
+                    ),
+                    "effectiveness": dict(
+                        Counter(
+                            k.get("strategy_label")
+                            for k in anns
+                            if k.get("strategy_label")
+                        )
+                    ),
+                    "n_annotators": len({k.get("annotator_id") for k in anns}),
+                },
+                "n_right": {
+                    key: sum(
+                        1
+                        for cells in models.values()
+                        if cells.get(key, {}).get("right")
+                    )
+                    for key in prompts.values()
+                },
+                "n_models": {
+                    key: sum(1 for cells in models.values() if key in cells)
+                    for key in prompts.values()
+                },
+                "models": models,
+            }
+        )
+    write_json(
+        "moments.json",
+        {
+            "source": (
+                f"Moments, human continuations and annotator labels from {dataset}@{revision}; "
+                "paper models' replays and scorer calls from its benchmark_520 config, later "
+                "models' from their full runs. `right` is the leaderboard's rule "
+                "(tutormoments.report.aggregate): the scorer's action label matches the moment "
+                "and no over-scaffolding. Titles and summaries from scripts/explorer_moments.json."
+            ),
+            "moments": out,
+        },
+    )
+
+
 def main() -> None:
     ap = argparse.ArgumentParser(
         description=__doc__, formatter_class=argparse.RawDescriptionHelpFormatter
@@ -1041,6 +1247,7 @@ def main() -> None:
         )
         build_benchmark_json(repo, probe_root)
         build_kl(repo, probe_root)
+        build_moment_explorer(repo, probe_root)
 
     csv_path = args.action_csv or (
         repo

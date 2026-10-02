@@ -791,3 +791,156 @@ def test_build_kl_carries_rows_it_cannot_rebuild(refresh, kl_env):
     rows = {m["id"]: m for m in out["models"]}
     assert rows["gpt-6-sol-none"] == {**kept, "name": "GPT-6 Sol"}
     assert "claude-opus-4-8" in rows, "rebuilt from the release"
+
+
+# ---------------------------------------------------------------------------
+# moment explorer
+# ---------------------------------------------------------------------------
+
+
+def test_parse_reference_keeps_continuation_lines_with_their_turn(refresh):
+    text = (
+        "Turn 48. TUTOR: [PAUSE: 9 seconds] Tutor points.\n"
+        "Tutor erases the whiteboard.\n"
+        "Turn 49. STUDENT: Fifteen?\n"
+        "Turn 49. TUTOR: Why?"
+    )
+    assert refresh.parse_reference(text) == [
+        {
+            "turn_number": 48,
+            "role": "tutor",
+            "text": "[PAUSE: 9 seconds] Tutor points.\nTutor erases the whiteboard.",
+        },
+        {"turn_number": 49, "role": "student", "text": "Fifteen?"},
+        {"turn_number": 49, "role": "tutor", "text": "Why?"},
+    ]
+
+
+@pytest.mark.parametrize(
+    "dimension, label, over, right",
+    [
+        ("rigor", "rigor", [], True),
+        ("rigor", "both", [], True),
+        ("rigor", "scaffolding", [], False),
+        ("rigor", "rigor", ["The tutor gives the answer."], False),
+        ("scaffolding", "both", [], True),
+        ("scaffolding", "scaffolding", ["The tutor over-explains."], False),
+        ("scaffolding", "neither", [], False),
+    ],
+)
+def test_verdict_uses_the_leaderboard_rule(refresh, dimension, label, over, right):
+    """`right` must agree with the leaderboard's own per-moment rule: the
+    action fits the moment and nothing was over-scaffolded."""
+    from tutormoments import report
+
+    ann = {"action_label": label, "overscaffold_decomposed": over, "action": "a"}
+    got = refresh._verdict(report, dimension, ann)
+    assert got == {
+        "label": label,
+        "overscaffold": bool(over),
+        "right": right,
+        "action": "a",
+    }
+
+
+def test_build_moment_explorer_joins_release_and_runs(refresh, tmp_path, monkeypatch):
+    from tutormoments import taxonomy
+
+    mid = "balanced_520:aaa_bbb_t1__hum_10_12"
+    release = tmp_path / "release"
+    release.mkdir()
+    (release / "moments.jsonl").write_text(
+        json.dumps(
+            {
+                "id": mid,
+                "dimension": "rigor",
+                "rubric": {"hint": "Push here."},
+                "context": [
+                    {"turn_number": i, "role": "tutor", "text": f"t{i}"}
+                    for i in range(12)
+                ],
+                "student": {"reference": "Turn 12. TUTOR: How do you know?"},
+                "provenance": {
+                    "conv_id": "aaa_bbb_t1",
+                    "turn_start": 10,
+                    "turn_end": 12,
+                },
+            }
+        )
+        + "\n",
+        encoding="utf-8",
+    )
+    km = {
+        "turn_start": 10,
+        "turn_end": 12,
+        "annotation_type": "scaffolding",
+        "action_direction_agg": "rigor",
+    }
+    (release / "ground_truth.jsonl").write_text(
+        json.dumps(
+            {
+                "conversation_id": "t1",
+                "key_moments": [
+                    {**km, "annotator_id": "x", "strategy_label": "effective"},
+                    {**km, "annotator_id": "y", "strategy_label": "ineffective"},
+                ],
+            }
+        )
+        + "\n",
+        encoding="utf-8",
+    )
+    (release / "benchmark_520.jsonl").write_text(
+        json.dumps(
+            {
+                "scenario_id": mid.split(":", 1)[1],
+                "tutor_model": "claude-opus-4-8",
+                "prompt_mode": "scaffolding_rigor",
+                "exchange": {"generated_turns": [{"role": "TUTOR", "text": "Why 30?"}]},
+                "annotation": {
+                    "annotations": [
+                        {"action_label": "rigor", "overscaffold_decomposed": []}
+                    ]
+                },
+            }
+        )
+        + "\n",
+        encoding="utf-8",
+    )
+    monkeypatch.setattr(taxonomy, "_hf_download", lambda d, name, r: release / name)
+    curated = tmp_path / "explorer.json"
+    curated.write_text(
+        json.dumps({"moments": [{"id": mid, "title": "T", "summary": "S"}]}),
+        encoding="utf-8",
+    )
+    monkeypatch.setattr(refresh, "EXPLORER_FILE", curated)
+    monkeypatch.setattr(refresh, "OUT_DIR", tmp_path / "data")
+
+    results = tmp_path / "results"
+    run_id = "gpt-6-sol-none_scaffolding_rigor_tutormoments-preview_20261001"
+    _bench_run(results, run_id, tutor="gpt-6-sol-none")
+    (results / run_id / "transcripts").mkdir()
+    (results / run_id / "scores").mkdir()
+    (results / run_id / "transcripts" / f"{mid}.json").write_text(
+        json.dumps({"generated_turns": [{"role": "TUTOR", "text": "Here's how."}]}),
+        encoding="utf-8",
+    )
+    (results / run_id / "scores" / f"{mid}.json").write_text(
+        json.dumps({"action_label": "scaffolding", "overscaffold_decomposed": []}),
+        encoding="utf-8",
+    )
+
+    refresh.build_moment_explorer(REPO, results)
+
+    out = json.loads((tmp_path / "data" / "moments.json").read_text("utf-8"))
+    m = out["moments"][0]
+    assert (m["title"], m["summary"], m["dimension"]) == ("T", "S", "rigor")
+    assert [t["text"] for t in m["context"]] == [f"t{i}" for i in range(4, 12)]
+    assert m["human"]["turns"] == [{"role": "tutor", "text": "How do you know?"}]
+    assert m["human"]["direction"] == "rigor"
+    assert m["human"]["effectiveness"] == {"effective": 1, "ineffective": 1}
+    assert m["human"]["n_annotators"] == 2
+    paper = m["models"]["claude-opus-4-8"]["eval_aware"]
+    later = m["models"]["gpt-6-sol-none"]["eval_aware"]
+    assert paper["right"] and not later["right"]
+    assert later["turns"] == [{"role": "tutor", "text": "Here's how."}]
+    assert m["n_right"]["eval_aware"] == 1 and m["n_models"]["eval_aware"] == 2

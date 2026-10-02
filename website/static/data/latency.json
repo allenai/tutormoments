@@ -9,6 +9,7 @@
       "deepseek-ai_DeepSeek-V4-Pro": "2026-08-18T12:12:06",
       "gemini-2.5-pro": "2026-08-18T12:06:09",
       "gemini-3.5-flash": "2026-08-18T12:54:57",
+      "gemini-3.8-flash": "2026-10-02T12:41:08",
       "gpt-5.4-mini-2026-03-17": "2026-08-18T11:58:28",
       "gpt-5.5-2026-04-23": "2026-08-18T11:23:02"
     }
@@ -102,7 +103,11 @@
       "name": "Gemini 3.8 Flash",
       "latency_s": 6.77,
       "latency_estimated": false,
-      "score": 0.779
+      "score": 0.779,
+      "ttft_s": 5.63,
+      "ttlt_s": 5.63,
+      "ttft_first_s": 5.87,
+      "ttft_later_s": 5.35
     },
     {
       "id": "gemini-3.6-flash",

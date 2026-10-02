@@ -154,6 +154,10 @@
   // (the one place refresh-data.py writes them); filled before any chart
   // renders, so every tooltip can state what the model ran with.
   var REASONING = {};
+  // Model ids in leaderboard rank order, and their display names; the
+  // explorer lists models the same way.
+  var RANKED = [];
+  var NAMES = {};
 
   function reasoningRow(id) {
     return REASONING[id] ? ttRow("Reasoning", REASONING[id]) : "";
@@ -808,6 +812,151 @@
     draw();
   }
 
+  /* ---------- moment explorer ----------
+     Ten curated moments: the session summary and the turns just before the
+     cut, then the human tutor's real continuation beside one model's replay.
+     The human side is labelled by the expert annotators, the model side by
+     the benchmark's scorer (`right` = the leaderboard's rule). All text is
+     set with textContent: transcripts are data, never markup. */
+
+  var ACTION_TEXT = {
+    scaffolding: "Scaffolded",
+    rigor: "Pushed for rigor",
+    both: "Scaffolded and pushed for rigor",
+    neither: "Neither scaffolded nor pushed"
+  };
+
+  function h(tag, cls, text, parent) {
+    var node = document.createElement(tag);
+    if (cls) node.className = cls;
+    if (text != null) node.textContent = text;
+    if (parent) parent.appendChild(node);
+    return node;
+  }
+
+  function renderTurns(turns, parent, studentLabel) {
+    var box = h("div", "ex-turns", null, parent);
+    turns.forEach(function (t) {
+      // A bracketed line on its own is a screen or pause annotation from the
+      // transcript, not speech; show it as an event.
+      var isEvent = /^\[[A-Z_ :0-9]+/.test(t.text);
+      var div = h("div", "ex-turn " + (isEvent ? "event" : t.role), null, box);
+      if (!isEvent) h("span", "who", t.role === "student" ? studentLabel : "Tutor", div);
+      div.appendChild(document.createTextNode(t.text));
+    });
+    return box;
+  }
+
+  function renderExplorer(data) {
+    var section = document.getElementById("explorer");
+    var card = document.getElementById("ex-card");
+    var momentSel = document.getElementById("ex-moment");
+    var modelSel = document.getElementById("ex-model");
+    var prev = document.getElementById("ex-prev"), next = document.getElementById("ex-next");
+    var promptTabs = document.querySelectorAll("#ex-prompts button[data-prompt]");
+    var moments = data.moments || [];
+    if (!moments.length) return;
+
+    var state = { i: 0, prompt: "eval_aware", model: null };
+    var order = RANKED.length ? RANKED : Object.keys(moments[0].models);
+    state.model = order.filter(function (id) { return moments[0].models[id]; })[0];
+
+    moments.forEach(function (mo, i) {
+      var opt = h("option", null, (i + 1) + " of " + moments.length + " · " + mo.title, momentSel);
+      opt.value = i;
+    });
+    order.forEach(function (id) {
+      if (!moments.some(function (mo) { return mo.models[id]; })) return;
+      var opt = h("option", null, NAMES[id] || id, modelSel);
+      opt.value = id;
+    });
+
+    function draw() {
+      var mo = moments[state.i], key = state.prompt;
+      momentSel.value = state.i;
+      modelSel.value = state.model;
+      prev.disabled = state.i === 0;
+      next.disabled = state.i === moments.length - 1;
+      card.innerHTML = "";
+
+      var meta = h("div", "ex-meta", null, card);
+      h("span", "ex-chip", mo.dimension === "rigor" ? "Rigor moment" : "Scaffolding moment", meta);
+      h("span", null, mo.n_right[key] + " of " + mo.n_models[key] + " models responded appropriately with the " +
+        (key === "plain" ? "plain" : "evaluation-aware") + " prompt", meta);
+
+      h("h4", null, "The session so far", card);
+      h("p", "ex-summary", mo.summary, card);
+
+      h("h4", null, "Just before the cut", card);
+      renderTurns(mo.context, card, "Student");
+      if (mo.hint) h("p", "ex-hint", "Annotator's note on the moment: " + mo.hint.trim(), card);
+
+      h("div", "ex-cut", "Cut point", card);
+
+      var cols = h("div", "ex-columns", null, card);
+
+      var hc = h("div", "ex-col", null, cols);
+      h("h4", null, "Human tutor", hc);
+      var hv = h("div", "ex-verdict", null, hc);
+      if (mo.human.direction) h("span", "ex-chip", ACTION_TEXT[mo.human.direction] || mo.human.direction, hv);
+      var eff = mo.human.effectiveness || {}, effN = 0;
+      Object.keys(eff).forEach(function (k) { effN += eff[k]; });
+      if (effN) {
+        h("span", null, "per the annotators; " + (eff.effective || 0) + " of " + effN + " rated it effective", hv);
+      }
+      renderTurns(mo.human.turns, hc, "Student");
+
+      var mc = h("div", "ex-col", null, cols);
+      var cell = (mo.models[state.model] || {})[key];
+      var mh = h("h4", null, NAMES[state.model] || state.model, mc);
+      if (REASONING[state.model]) h("small", null, REASONING[state.model], mh);
+      if (!cell) {
+        h("p", "ex-hint", "No replay of this moment for this model and prompt.", mc);
+      } else {
+        var mv = h("div", "ex-verdict", null, mc);
+        h("span", "ex-chip " + (cell.right ? "ok" : "miss"),
+          (cell.right ? "✓ " : "✗ ") + (ACTION_TEXT[cell.label] || cell.label || "No call"), mv);
+        var why = cell.right ? "fits the moment, per the scorer"
+          : (cell.overscaffold ? "over-scaffolded, per the scorer"
+            : (mo.dimension === "rigor" ? "rigor was called for, per the scorer" : "scaffolding was called for, per the scorer"));
+        h("span", null, why, mv);
+        renderTurns(cell.turns, mc, "Student (simulated)");
+        if (cell.action) h("p", "ex-scorer", "Scorer: " + cell.action, mc);
+      }
+
+      var strip = h("div", "ex-strip", null, card);
+      h("h4", null, "Every model on this moment", strip);
+      var items = h("div", "ex-strip-items", null, strip);
+      order.forEach(function (id) {
+        var c = (mo.models[id] || {})[key];
+        if (!c) return;
+        var b = h("button", c.right ? "ok" : "miss", null, items);
+        b.type = "button";
+        b.setAttribute("aria-pressed", String(id === state.model));
+        b.title = (c.right ? "Fits the moment" : "Missed it") + " — show this model's replay";
+        b.appendChild(legendSwatch(id));
+        h("span", null, NAMES[id] || id, b);
+        h("span", "mark", c.right ? "✓" : "✗", b);
+        b.addEventListener("click", function () { state.model = id; draw(); });
+      });
+    }
+
+    momentSel.addEventListener("change", function () { state.i = +momentSel.value; draw(); });
+    modelSel.addEventListener("change", function () { state.model = modelSel.value; draw(); });
+    prev.addEventListener("click", function () { if (state.i > 0) { state.i--; draw(); } });
+    next.addEventListener("click", function () { if (state.i < moments.length - 1) { state.i++; draw(); } });
+    promptTabs.forEach(function (btn) {
+      btn.addEventListener("click", function () {
+        state.prompt = btn.getAttribute("data-prompt");
+        promptTabs.forEach(function (b) { b.setAttribute("aria-selected", String(b === btn)); });
+        draw();
+      });
+    });
+
+    section.hidden = false;
+    draw();
+  }
+
   /* ---------- animation embed ----------
      The animation page is a fixed 1280x720 stage; scale the iframe to the
      card's width (the card's CSS aspect-ratio keeps the height in step). */
@@ -843,7 +992,13 @@
   // The charts wait for the leaderboard so their tooltips have REASONING;
   // if it fails they still render, just without that row.
   var leaderboard = fetchJSON("./static/data/leaderboard.json").then(function (data) {
-    data.models.forEach(function (d) { if (d.reasoning) REASONING[d.id] = d.reasoning; });
+    data.models.forEach(function (d) {
+      if (d.reasoning) REASONING[d.id] = d.reasoning;
+      NAMES[d.id] = d.name;
+    });
+    RANKED = data.models.slice().sort(function (a, b) {
+      return overallScore(b) - overallScore(a) || a.name.localeCompare(b.name);
+    }).map(function (d) { return d.id; });
     renderLeaderboard(data);
   }).catch(function (e) { console.error("leaderboard:", e); });
 
@@ -857,6 +1012,10 @@
   // Generated by scripts/refresh-data.py; the section stays hidden until it exists.
   afterLeaderboard("./static/data/cost.json").then(renderCost)
     .catch(function () { /* data pending — leave #cost-block hidden */ });
+
+  // Generated by scripts/refresh-data.py; the section stays hidden until it exists.
+  afterLeaderboard("./static/data/moments.json").then(renderExplorer)
+    .catch(function () { /* data pending — leave #explorer hidden */ });
 
   // Generated by scripts/refresh-data.py; the section stays hidden until it exists.
   afterLeaderboard("./static/data/kl.json").then(renderKL)
