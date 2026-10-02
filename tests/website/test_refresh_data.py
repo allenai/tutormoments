@@ -562,11 +562,26 @@ def test_write_cost_without_costable_runs_leaves_cost_json_alone(
 # ---------------------------------------------------------------------------
 
 
-def test_action_distribution_skips_models_the_export_does_not_cover(
+def test_action_distribution_without_runs_shows_the_paper_models(
     refresh, tmp_path, monkeypatch
 ):
-    """The paper's export has columns for its seven models only; later rows
-    of MODELS must not make the refresh crash on a missing column."""
+    """The paper's export has columns for its seven models only; with no runs
+    and nothing committed, later rows of MODELS are left off, not a crash."""
+    monkeypatch.setattr(refresh, "OUT_DIR", tmp_path / "data")
+
+    refresh.build_action_distribution(_paper_csv(refresh, tmp_path / "v1.csv"), "test")
+
+    out = json.loads(
+        (tmp_path / "data" / "action_distribution.json").read_text("utf-8")
+    )
+    assert [m["id"] for m in out["models"]] == [
+        m for m, _ in refresh.MODELS if m in refresh.ACTION_CSV_MODELS
+    ]
+
+
+def _paper_csv(refresh, path: Path) -> Path:
+    """A v1_action_taxonomy_distribution.csv with every column the paper's
+    export carries; per-letter values are arbitrary."""
     import csv
 
     prefixes = ["human"] + [
@@ -579,8 +594,7 @@ def test_action_distribution_skips_models_the_export_does_not_cover(
         for pre in prefixes
         for k in ("n_moments", "macro_mean_pct", "ci_low", "ci_high")
     ]
-    fp = tmp_path / "action_taxonomy_distribution.csv"
-    with fp.open("w", newline="", encoding="utf-8") as fh:
+    with path.open("w", newline="", encoding="utf-8") as fh:
         w = csv.DictWriter(fh, fieldnames=fields)
         w.writeheader()
         for i, letter in enumerate("ABCDEFGHIJKLM"):
@@ -588,13 +602,73 @@ def test_action_distribution_skips_models_the_export_does_not_cover(
             for f in fields[3:]:
                 row[f] = 100 if f.endswith("n_moments") else float(i)
             w.writerow(row)
+    return path
+
+
+def test_action_distribution_scores_a_later_model_from_its_runs(
+    refresh, tmp_path, monkeypatch
+):
+    """A later model's cell is the macro mean over its run's own
+    classifications: per moment, the share of facets in each letter."""
+    pytest.importorskip("pandas")
+    from tutormoments import taxonomy
+
+    results = tmp_path / "results"
+    for mode, letters in (("plain", "AAB"), ("scaffolding_rigor", "GG")):
+        run_id = f"gpt-6-sol-none_{mode}_tutormoments-preview_20261001"
+        _bench_run(results, run_id, tutor="gpt-6-sol-none", mode=mode)
+        facets = [
+            taxonomy.Facet(
+                moment_id=f"m{j}",
+                transcript_id="t",
+                turn_start=0,
+                turn_end=1,
+                statement_index=i,
+                statement="s",
+                annotation_type="scaffolding",
+                situation_label="scaffolding",
+                category=letter,
+            )
+            for j in range(2)
+            for i, letter in enumerate(letters if j == 0 else "C")
+        ]
+        (results / run_id / "taxonomy").mkdir()
+        taxonomy.write_classified_csv(
+            facets, results / run_id / "taxonomy" / "classified.csv"
+        )
+    fp = _paper_csv(refresh, tmp_path / "v1.csv")
     monkeypatch.setattr(refresh, "OUT_DIR", tmp_path / "data")
 
-    refresh.build_action_distribution(fp, "test")
+    refresh.build_action_distribution(fp, "test", repo=REPO, results_root=results)
 
     out = json.loads(
         (tmp_path / "data" / "action_distribution.json").read_text("utf-8")
     )
-    assert [m["id"] for m in out["models"]] == [
-        m for m, _ in refresh.MODELS if m in refresh.ACTION_CSV_MODELS
-    ]
+    sol = {m["id"]: m for m in out["models"]}["gpt-6-sol-none"]
+    # moment 0 is 2/3 A, moment 1 is all C: macro A = (2/3 + 0) / 2.
+    assert sol["plain"]["A"]["pct"] == pytest.approx(33.33, abs=0.01)
+    assert sol["plain"]["C"]["pct"] == pytest.approx(50.0)
+    assert sol["eval_aware"]["G"]["pct"] == pytest.approx(50.0)
+    assert sol["n_moments"] == {"plain": 2, "eval_aware": 2}
+    assert sol["source"]["eval_aware"].startswith("gpt-6-sol-none_scaffolding_rigor")
+    paper = {m["id"]: m for m in out["models"]}["claude-opus-4-8"]
+    assert paper["source"] == "paper"
+    assert paper["n_moments"] == {"plain": 100, "eval_aware": 100}
+
+
+def test_action_distribution_carries_a_later_model_it_cannot_rebuild(
+    refresh, tmp_path, monkeypatch
+):
+    out_dir = tmp_path / "data"
+    out_dir.mkdir()
+    kept = {"id": "gpt-6-sol-none", "name": "old", "source": {"plain": "r"}}
+    (out_dir / "action_distribution.json").write_text(
+        json.dumps({"models": [kept]}), encoding="utf-8"
+    )
+    monkeypatch.setattr(refresh, "OUT_DIR", out_dir)
+
+    refresh.build_action_distribution(_paper_csv(refresh, tmp_path / "v1.csv"), "test")
+
+    out = json.loads((out_dir / "action_distribution.json").read_text("utf-8"))
+    sol = {m["id"]: m for m in out["models"]}["gpt-6-sol-none"]
+    assert sol == {**kept, "name": "GPT-6 Sol"}

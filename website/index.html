@@ -12,7 +12,7 @@
   <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
   <link href="https://fonts.googleapis.com/css2?family=Space+Grotesk:wght@500;700&family=Manrope:wght@400..800&family=Roboto+Mono:wght@400;500&display=swap" rel="stylesheet">
   <!-- bump ?v= when the stylesheet or script changes so browsers drop their cached copy -->
-  <link rel="stylesheet" href="./static/css/site.css?v=9">
+  <link rel="stylesheet" href="./static/css/site.css?v=10">
 </head>
 <body>
 
@@ -137,14 +137,23 @@
     <div class="chart-block" id="actions-block" hidden>
       <h3 class="chart-title">Models lean on fewer moves than human tutors</h3>
       <p class="chart-sub">
-        Share of tutor actions across twelve pedagogical moves, for each of the seven models in the working
-        paper and for the human tutors in the same transcripts (dashed line). Prompting for the evaluation shifts models toward asking students
+        Share of tutor actions across twelve pedagogical moves, for each model and for the human tutors in
+        the same transcripts (dashed line). Prompting for the evaluation shifts models toward asking students
         to justify their answers — while humans spread their choices across more varied strategies, including
-        stepping back and letting the student work.
+        stepping back and letting the student work. The working paper's seven models show its figures, from
+        about 100 moments per model and prompt; the ten run since were classified with the same model,
+        prompt and scheme over all 520 moments, so their intervals are narrower.
       </p>
-      <div class="chart-tabs" role="tablist" aria-label="Prompt condition">
-        <button role="tab" aria-selected="true" data-prompt="plain">Plain prompt</button>
-        <button role="tab" aria-selected="false" data-prompt="eval_aware">Evaluation-aware prompt</button>
+      <div class="chart-controls">
+        <div class="chart-tabs" role="tablist" aria-label="Prompt condition">
+          <button role="tab" aria-selected="true" data-prompt="plain">Plain prompt</button>
+          <button role="tab" aria-selected="false" data-prompt="eval_aware">Evaluation-aware prompt</button>
+        </div>
+        <div class="chart-tabs" role="tablist" aria-label="Models shown" data-sets>
+          <button role="tab" aria-selected="true" data-set="all">All models</button>
+          <button role="tab" aria-selected="false" data-set="paper">Paper models</button>
+          <button role="tab" aria-selected="false" data-set="later">Since the paper</button>
+        </div>
       </div>
       <div class="chart-card">
         <div id="actions-chart"></div>
@@ -243,6 +252,6 @@
 
 <div class="chart-tooltip" id="chart-tooltip" role="status"></div>
 
-<script src="./static/js/main.js?v=11"></script>
+<script src="./static/js/main.js?v=12"></script>
 </body>
 </html>

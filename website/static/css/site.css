@@ -326,6 +326,7 @@ a:hover { color: var(--pink); text-decoration-color: var(--pink); }
 .chart-title { font-size: 1.25rem; margin-bottom: 6px; }
 .chart-sub { color: var(--ink-soft); font-size: 0.98rem; max-width: 72ch; margin-bottom: 20px; }
 
+.chart-controls { display: flex; flex-wrap: wrap; gap: 0 12px; }
 .chart-tabs { display: inline-flex; gap: 6px; margin-bottom: 18px; background: var(--cream); border-radius: var(--radius-pill); padding: 4px; border: 1px solid var(--line); }
 .chart-tabs button {
   font-family: var(--font-heading);

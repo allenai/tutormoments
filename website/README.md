@@ -76,13 +76,21 @@ Anything the checkout cannot rebuild is carried forward from the committed JSON 
 dropped, including the TTFAT figures when there are no probe runs at all. So a refresh from a
 checkout holding only some results is safe.
 
-The action-distribution figure reads the repo's
-`analysis/working-paper-20260630/action_taxonomy_distribution.csv` export; pass
-`--action-csv path/to/action_taxonomy_distribution.csv` to use a copy outside the checkout. Add
-new models to the `MODELS` list in the script, and give them a `MODEL_STYLE` in
+The action-distribution figure takes its human baseline and the paper's seven models from
+the paper's Fig. 4 export, `analysis/working-paper-20260630/v1_action_taxonomy_distribution.csv`
+(frozen; ~100 moments per model and prompt); pass `--action-csv path/to/...csv` to use a copy
+outside the checkout. Every later model comes from its two full runs' own
+`taxonomy/classified.csv` (written by every `tutormoments run` with the config's `taxonomy:`
+classifier, the same model, prompt and scheme as the paper's), averaged per moment by
+`tutormoments.taxonomy.macro_distribution` over all the run's moments. That needs pandas
+(the checkout's venv has it); without it, or without the runs, later models keep their
+committed rows. Each row records its `source` and `n_moments` per prompt, and the chart's
+tooltip shows the latter, since a 520-moment cell's interval is much narrower than a
+100-moment one. The page's set tabs show the two groups apart or together.
+
+Add new models to the `MODELS` list in the script, and give them a `MODEL_STYLE` in
 `static/js/main.js`: one of the provider's hues and a marker no other model on the same chart
-uses. Models not in `ACTION_CSV_MODELS` (anything after the paper) are left off the
-action-distribution chart, since that export only covers the paper's models.
+uses.
 
 ### The two latency figures
 

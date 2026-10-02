@@ -124,7 +124,8 @@ ACTION_LABELS = {
     "L": "Transitioning",
 }
 
-# Site model id -> column prefix in action_taxonomy_distribution.csv.
+# Site model id -> column prefix in v1_action_taxonomy_distribution.csv (the
+# paper's Fig. 4 export; its seven models only).
 ACTION_CSV_MODELS = {
     "claude-opus-4-8": "claude_opus_4_8",
     "claude-sonnet-4-6": "claude_sonnet_4_6",
@@ -695,12 +696,73 @@ def build_benchmark_json(repo: Path, probe_root: Path) -> None:
     write_cost(repo, probe_root, lat_models)
 
 
-def build_action_distribution(csv_path: Path, source: str) -> None:
-    """Convert the repo's action_taxonomy_distribution.csv export into the site's
-    action_distribution.json. Column layout: letter,name,orientation, then
-    human__{n_moments,macro_mean_pct,ci_low,ci_high}, then per model
-    <model>__{plain,SR}__{n_moments,macro_mean_pct,ci_low,ci_high}.
-    Letter M (Other) is dropped, matching the paper figure."""
+def load_taxonomy_module(repo: Path):
+    """Import `tutormoments.taxonomy` (and pandas, which its distribution
+    functions need), or None. Same contract as `load_latency_module`: the
+    macro-mean and CI arithmetic belongs to the runtime and is not restated
+    here."""
+    src = repo / "src"
+    if src.is_dir() and str(src) not in sys.path:
+        sys.path.insert(0, str(src))
+    try:
+        from tutormoments import taxonomy  # noqa: PLC0415
+
+        taxonomy._require_analysis_extras()
+    except (ImportError, RuntimeError) as exc:
+        print(
+            f"cannot compute run action distributions ({exc}); later models "
+            "keep their committed rows. Re-run with the checkout's venv.",
+            file=sys.stderr,
+        )
+        return None
+    return taxonomy
+
+
+def run_action_cell(tax, run_dir: Path, letters: list) -> tuple[dict, int] | None:
+    """One prompt's distribution from a full run's own classifications.
+
+    ``taxonomy/classified.csv`` is written by every `tutormoments run`
+    (kept facets only, classified by the config's `taxonomy:` role), so the
+    macro mean is over all the run's moments -- the paper's cells covered
+    ~100. Returns ``({letter: {pct, ci}}, n_moments)`` or None.
+    """
+    fp = run_dir / "taxonomy" / "classified.csv"
+    if not fp.exists():
+        return None
+    df = tax.facets_to_dataframe(tax.read_classified_csv(fp))
+    if df.empty:
+        return None
+    dist = tax.macro_distribution(df)
+    by_letter = {row["letter"]: row for row in dist.to_dict("records")}
+    cell = {
+        letter: {
+            "pct": round(by_letter[letter]["mean_pct"], 2),
+            "ci": [
+                round(by_letter[letter]["ci_low"], 2),
+                round(by_letter[letter]["ci_high"], 2),
+            ],
+        }
+        for letter in letters
+    }
+    return cell, int(by_letter[letters[0]]["n_moments"])
+
+
+def build_action_distribution(
+    csv_path: Path,
+    source: str,
+    repo: Path | None = None,
+    results_root: Path | None = None,
+) -> None:
+    """Build the site's action_distribution.json.
+
+    The paper's models and the human baseline come from the paper's Fig. 4
+    export (v1_action_taxonomy_distribution.csv). Column layout:
+    letter,name,orientation, then human__{n_moments,macro_mean_pct,ci_low,
+    ci_high}, then per model <model>__{plain,SR}__{n_moments,macro_mean_pct,
+    ci_low,ci_high}. Every later model comes from its full runs' own
+    classifications (`run_action_cell`), or is carried forward from the
+    committed JSON when this checkout cannot rebuild it. Letter M (Other) is
+    dropped, matching the paper figure."""
     import csv  # noqa: PLC0415
 
     with csv_path.open(newline="", encoding="utf-8") as fh:
@@ -736,19 +798,47 @@ def build_action_distribution(csv_path: Path, source: str) -> None:
         for letter in letters
     ]
 
+    _, prior = _read_rows("action_distribution.json")
+    runs = full_runs(results_root) if results_root else {}
+    tax = load_taxonomy_module(repo) if repo and runs else None
+    run_prompts = {"plain": "plain", "scaffolding_rigor": "eval_aware"}
+
     models = []
     for model, label in MODELS:
-        # Only the paper's models have an export; later runs' taxonomy
-        # classifications are not in it.
         col = ACTION_CSV_MODELS.get(model)
-        if col is None:
-            continue
-        entry: dict = {"id": model, "name": label}
-        for csv_prompt, key in csv_prompts.items():
-            entry[key] = {
-                letter: cell(rows[letter], f"{col}__{csv_prompt}") for letter in letters
+        if col is not None:
+            entry: dict = {"id": model, "name": label, "source": "paper"}
+            entry["n_moments"] = {
+                key: int(rows[letters[0]][f"{col}__{csv_prompt}__n_moments"])
+                for csv_prompt, key in csv_prompts.items()
             }
-        models.append(entry)
+            for csv_prompt, key in csv_prompts.items():
+                entry[key] = {
+                    letter: cell(rows[letter], f"{col}__{csv_prompt}")
+                    for letter in letters
+                }
+            models.append(entry)
+            continue
+
+        entry = None
+        cells = {key: runs.get((model, prompt)) for prompt, key in run_prompts.items()}
+        if tax is not None and all(cells.values()):
+            built = {
+                key: run_action_cell(tax, results_root / c["run_id"], letters)
+                for key, c in cells.items()
+            }
+            if all(built.values()):
+                entry = {
+                    "id": model,
+                    "name": label,
+                    "source": {key: c["run_id"] for key, c in cells.items()},
+                    "n_moments": {key: b[1] for key, b in built.items()},
+                    **{key: b[0] for key, b in built.items()},
+                }
+        if entry is None and model in prior:
+            entry = {**prior[model], "name": label}
+        if entry is not None:
+            models.append(entry)
 
     write_json(
         "action_distribution.json",
@@ -783,7 +873,7 @@ def main() -> None:
         "--action-csv",
         type=Path,
         default=None,
-        help="path to action_taxonomy_distribution.csv (overrides the copy in the checkout)",
+        help="path to v1_action_taxonomy_distribution.csv, the paper's Fig. 4 export (overrides the copy in the checkout)",
     )
     args = ap.parse_args()
 
@@ -805,12 +895,17 @@ def main() -> None:
         repo
         / "analysis"
         / "working-paper-20260630"
-        / "action_taxonomy_distribution.csv"
+        / "v1_action_taxonomy_distribution.csv"
     )
     if csv_path.exists():
         build_action_distribution(
             csv_path.resolve(),
-            f"Generated by scripts/refresh-data.py from {csv_path.name}",
+            f"Paper models and human tutors: {csv_path.name} (the paper's Fig. 4, "
+            "~100 moments per model and prompt). Later models: each full "
+            "benchmark run's own taxonomy classifications (all its moments), "
+            "run ids in each row's source. Generated by scripts/refresh-data.py.",
+            repo=repo if args.tutormoments_repo else None,
+            results_root=probe_root if args.tutormoments_repo else None,
         )
     else:
         print(f"no {csv_path} — skipping action_distribution.json", file=sys.stderr)

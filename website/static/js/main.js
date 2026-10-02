@@ -455,17 +455,31 @@
     var block = document.getElementById("actions-block");
     var mount = document.getElementById("actions-chart");
     var legend = document.getElementById("actions-legend");
-    var tabs = block.querySelectorAll(".chart-tabs button");
+    var promptTabs = block.querySelectorAll(".chart-tabs button[data-prompt]");
+    var setTabs = block.querySelectorAll(".chart-tabs button[data-set]");
     var current = "plain";
+    var currentSet = "all";
 
-    var modelIds = data.models.map(function (d) { return d.id; });
-    var offsets = modelIds.map(function (_, i) {
-      return -0.33 + (0.66 * i) / (modelIds.length - 1);
-    });
+    // The paper's models carry its Fig. 4 numbers (~100 moments per model
+    // and prompt); later models their own runs' classifications over every
+    // moment. The set tabs let a reader look at either group alone.
+    var SETS = {
+      all: function () { return true; },
+      paper: function (d) { return d.source === "paper"; },
+      later: function (d) { return d.source !== "paper"; }
+    };
+    var hasLater = data.models.some(SETS.later);
+    if (!hasLater) block.querySelector(".chart-tabs[data-sets]").hidden = true;
+
     var chartHighlight = null; // reassigned by draw(); legend hovers call the current one
 
     function draw() {
       mount.innerHTML = "";
+      var models = data.models.filter(SETS[currentSet]);
+      var offsets = models.map(function (_, i) {
+        return models.length > 1 ? -0.4 + (0.8 * i) / (models.length - 1) : 0;
+      });
+      var r = models.length > 10 ? 5 : 6;
       var cats = data.categories;
       var W = 960, H = 460;
       var m = { top: 18, right: 12, bottom: 64, left: 62 };
@@ -524,13 +538,13 @@
 
       // one <g> per model so hovering any point can highlight the whole series
       var seriesGroups = {};
-      data.models.forEach(function (d) {
+      models.forEach(function (d) {
         seriesGroups[d.id] = el("g", { style: "transition: opacity 0.12s ease" }, svg);
       });
       var hitLayer = el("g", {}, svg);
 
       function highlight(id) {
-        data.models.forEach(function (d, i) {
+        models.forEach(function (d, i) {
           var dim = id && d.id !== id;
           seriesGroups[d.id].setAttribute("opacity", dim ? 0.15 : 1);
           var item = legend.children[i + 1]; // children[0] is the human entry
@@ -539,16 +553,18 @@
       }
       chartHighlight = highlight;
 
-      data.models.forEach(function (d, di) {
+      models.forEach(function (d, di) {
+        var n = d.n_moments && d.n_moments[current];
         cats.forEach(function (c, ci) {
           var v = (d[current] && d[current][c.key]) || { pct: 0 };
           var s = MODEL_STYLE[d.id] || { color: INK, marker: "square" };
           var px = cx(ci, offsets[di]), py = y(v.pct);
-          markerNode(s.marker, px, py, 6, s.color, seriesGroups[d.id]);
+          markerNode(s.marker, px, py, r, s.color, seriesGroups[d.id]);
           var hit = el("circle", { cx: px, cy: py, r: 12, fill: "transparent", cursor: "pointer" }, hitLayer);
           attachHover(hit, function () {
             return '<div class="tt-title">' + c.label + "</div>" +
               ttRow(d.name, fmtPct(v)) +
+              (n ? ttRow("Moments classified", n.toLocaleString()) : "") +
               ttRow("Human tutors", fmtPct(c.human));
           });
           hit.addEventListener("mouseenter", function () { highlight(d.id); });
@@ -560,32 +576,39 @@
         transform: "rotate(-90 16 " + (m.top + ih / 2) + ")" }, svg).textContent = "Share of tutor actions (%)";
 
       mount.appendChild(svg);
+      drawLegend(models);
     }
 
-    // legend (models + human baseline)
-    legend.innerHTML = "";
-    var humanItem = document.createElement("span");
-    humanItem.className = "item";
-    humanItem.innerHTML = '<svg viewBox="0 0 16 16"><line x1="1" y1="8" x2="15" y2="8" stroke="' + INK +
-      '" stroke-width="2" stroke-dasharray="4 2.5"/></svg>Human tutors';
-    legend.appendChild(humanItem);
-    data.models.forEach(function (d) {
-      var item = document.createElement("span");
-      item.className = "item";
-      item.appendChild(legendSwatch(d.id));
-      item.appendChild(document.createTextNode(d.name));
-      item.addEventListener("mouseenter", function () { if (chartHighlight) chartHighlight(d.id); });
-      item.addEventListener("mouseleave", function () { if (chartHighlight) chartHighlight(null); });
-      legend.appendChild(item);
-    });
-
-    tabs.forEach(function (btn) {
-      btn.addEventListener("click", function () {
-        current = btn.getAttribute("data-prompt");
-        tabs.forEach(function (b) { b.setAttribute("aria-selected", String(b === btn)); });
-        draw();
+    // legend (human baseline + the visible models)
+    function drawLegend(models) {
+      legend.innerHTML = "";
+      var humanItem = document.createElement("span");
+      humanItem.className = "item";
+      humanItem.innerHTML = '<svg viewBox="0 0 16 16"><line x1="1" y1="8" x2="15" y2="8" stroke="' + INK +
+        '" stroke-width="2" stroke-dasharray="4 2.5"/></svg>Human tutors';
+      legend.appendChild(humanItem);
+      models.forEach(function (d) {
+        var item = document.createElement("span");
+        item.className = "item";
+        item.appendChild(legendSwatch(d.id));
+        item.appendChild(document.createTextNode(d.name));
+        item.addEventListener("mouseenter", function () { if (chartHighlight) chartHighlight(d.id); });
+        item.addEventListener("mouseleave", function () { if (chartHighlight) chartHighlight(null); });
+        legend.appendChild(item);
       });
-    });
+    }
+
+    function bindTabs(tabs, attr, set) {
+      tabs.forEach(function (btn) {
+        btn.addEventListener("click", function () {
+          set(btn.getAttribute(attr));
+          tabs.forEach(function (b) { b.setAttribute("aria-selected", String(b === btn)); });
+          draw();
+        });
+      });
+    }
+    bindTabs(promptTabs, "data-prompt", function (v) { current = v; });
+    bindTabs(setTabs, "data-set", function (v) { currentSet = v; });
 
     block.hidden = false;
     draw();
