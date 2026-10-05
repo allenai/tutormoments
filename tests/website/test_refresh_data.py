@@ -1,4 +1,4 @@
-"""Unit tests for the TTFT half of website/scripts/refresh-data.py.
+"""Unit tests for website/scripts/refresh-data.py.
 
 The script previously carried its own copy of the probe's publishability rules
 and got them wrong -- it gated on cache hit *rate*, which the runtime refuses to
@@ -7,8 +7,10 @@ one shared block of system prompt. These tests pin the corrected behaviour:
 figures come from `tutormoments.latency`, the site's model ids are matched to the
 probe's, and a stale figure is never left standing next to a fresh one.
 
-Score and end-to-end-latency assembly is thin I/O over an analysis export and is
-covered by tests/analysis/test_benchmark_perf_cost.py.
+The paper models' score and end-to-end-latency assembly is thin I/O over an
+analysis export and is covered by tests/analysis/test_benchmark_perf_cost.py.
+The tests here cover the rest: later models scored from their full runs, and
+every figure the checkout cannot rebuild carried forward rather than dropped.
 """
 
 import importlib.util
@@ -173,7 +175,7 @@ def test_probe_ttft_flags_a_mixed_subsample(refresh, tmp_path, capsys):
 
 
 # ---------------------------------------------------------------------------
-# apply_ttft / refresh_ttft_only
+# apply_ttft / build_benchmark_json
 # ---------------------------------------------------------------------------
 
 
@@ -190,57 +192,230 @@ def test_apply_ttft_drops_a_stale_figure(refresh):
     assert rows[1] == {"id": "gone", "latency_s": 7.0}
 
 
-def test_refresh_ttft_only_keeps_the_scores_it_did_not_measure(
-    refresh, tmp_path, monkeypatch
-):
-    """A checkout can have probe runs without a full scored sweep. Rebuilding
-    latency.json wholesale there would discard the paper's scores."""
-    out = tmp_path / "data"
-    out.mkdir()
-    (out / "latency.json").write_text(
-        json.dumps(
-            {
-                "source": "Figure 7, paper",
-                "models": [
-                    {
-                        "id": "claude-opus-4-8",
-                        "name": "Claude Opus 4.8",
-                        "latency_s": 12.5,
-                        "latency_estimated": True,
-                        "score": 0.8445,
-                    }
-                ],
-            }
-        ),
+def _write_site(out: Path, leaderboard: list, latency: list, **extra) -> None:
+    """The committed static/data JSON a refresh starts from."""
+    out.mkdir(parents=True, exist_ok=True)
+    (out / "leaderboard.json").write_text(
+        json.dumps({"source": "paper", "n_moments": 520, "models": leaderboard}),
         encoding="utf-8",
     )
+    (out / "latency.json").write_text(
+        json.dumps({"source": "Figure 7, paper", "models": latency, **extra}),
+        encoding="utf-8",
+    )
+
+
+PAPER_OPUS = {
+    "id": "claude-opus-4-8",
+    "name": "Claude Opus 4.8",
+    "plain": {"scaffolding": 0.615, "rigor": 0.208, "avoids_over": 0.462},
+    "eval_aware": {"scaffolding": 0.858, "rigor": 0.831, "avoids_over": 0.896},
+}
+PAPER_OPUS_LAT = {
+    "id": "claude-opus-4-8",
+    "name": "Claude Opus 4.8",
+    "latency_s": 12.5,
+    "latency_estimated": True,
+    "score": 0.8445,
+}
+
+
+@pytest.fixture
+def site(refresh, tmp_path, monkeypatch):
+    """A checkout without the paper's results/benchmark, and its site data."""
+    out = tmp_path / "data"
     monkeypatch.setattr(refresh, "OUT_DIR", out)
-    probes = tmp_path / "results"
-    _probe_dir(probes, "a_scaffolding_rigor_latency_20260818", tutor="claude-opus-4-8")
+    return {"repo": tmp_path / "repo", "results": tmp_path / "results", "out": out}
 
-    refresh.refresh_ttft_only(REPO, probes)
 
-    payload = json.loads((out / "latency.json").read_text("utf-8"))
-    row = payload["models"][0]
+def _read(out: Path, name: str) -> dict:
+    return json.loads((out / name).read_text("utf-8"))
+
+
+def test_build_keeps_the_paper_rows_it_cannot_rebuild(refresh, site):
+    """Most checkouts have probe runs but not the paper's scored sweep.
+    Rebuilding there must keep the paper's scores and refresh only TTFAT."""
+    _write_site(site["out"], [PAPER_OPUS], [PAPER_OPUS_LAT])
+    _probe_dir(
+        site["results"], "a_scaffolding_rigor_latency_20260818", tutor="claude-opus-4-8"
+    )
+
+    refresh.build_benchmark_json(site["repo"], site["results"])
+
+    lb = _read(site["out"], "leaderboard.json")["models"][0]
+    assert lb["eval_aware"] == PAPER_OPUS["eval_aware"]
+    assert lb["reasoning"] == "thinking: adaptive, effort: xhigh", "as configured"
+    assert lb["source"] == "paper"
+    lat = _read(site["out"], "latency.json")
+    row = lat["models"][0]
     assert row["score"] == 0.8445
     assert row["latency_s"] == 12.5
     assert row["ttft_s"] == 9.0
-    assert payload["source"] == "Figure 7, paper"
-    assert payload["ttft"]["subsample_id"] == "589e8acf8ac761f2"
+    assert lat["ttft"]["subsample_id"] == "589e8acf8ac761f2"
 
 
-def test_refresh_ttft_only_without_probe_runs_leaves_the_file_alone(
-    refresh, tmp_path, monkeypatch
+def test_build_without_probe_runs_keeps_the_published_ttfat(refresh, site):
+    """No probe runs at all is a checkout gap, not a measurement that every
+    model lost its figure."""
+    ttft = {"mode": "scaffolding_rigor", "subsample_id": "589e8acf8ac761f2"}
+    _write_site(
+        site["out"],
+        [PAPER_OPUS],
+        [{**PAPER_OPUS_LAT, "ttft_s": 9.04, "ttlt_s": 10.52}],
+        ttft=ttft,
+    )
+
+    refresh.build_benchmark_json(site["repo"], site["results"])
+
+    lat = _read(site["out"], "latency.json")
+    assert lat["models"][0]["ttft_s"] == 9.04
+    assert lat["models"][0]["ttlt_s"] == 10.52
+    assert {k: v for k, v in lat["ttft"].items() if k != "runs"} == ttft
+
+
+def test_build_scores_a_later_model_from_its_full_runs(refresh, site):
+    _write_site(site["out"], [PAPER_OPUS], [PAPER_OPUS_LAT])
+    for mode, scores in (
+        ("plain", (0.85, 0.2, 0.425)),
+        ("scaffolding_rigor", (0.95, 0.8, 0.096)),
+    ):
+        _bench_run(
+            site["results"],
+            f"gpt-6-sol-none_{mode}_tutormoments-preview_20261001",
+            tutor="gpt-6-sol-none",
+            mode=mode,
+            scores=scores,
+            thinking={"reasoning": "none"},
+        )
+
+    refresh.build_benchmark_json(site["repo"], site["results"])
+
+    rows = {m["id"]: m for m in _read(site["out"], "leaderboard.json")["models"]}
+    sol = rows["gpt-6-sol-none"]
+    assert sol["name"] == "GPT-6 Sol"
+    assert sol["reasoning"] == "reasoning: none"
+    assert sol["plain"] == {"scaffolding": 0.85, "rigor": 0.2, "avoids_over": 0.575}
+    assert sol["eval_aware"] == {
+        "scaffolding": 0.95,
+        "rigor": 0.8,
+        "avoids_over": 0.904,
+    }
+    assert sol["source"] == {
+        "plain": "gpt-6-sol-none_plain_tutormoments-preview_20261001",
+        "eval_aware": "gpt-6-sol-none_scaffolding_rigor_tutormoments-preview_20261001",
+    }
+    assert list(rows) == ["claude-opus-4-8", "gpt-6-sol-none"], "MODELS order"
+
+    lat = {m["id"]: m for m in _read(site["out"], "latency.json")["models"]}
+    assert lat["gpt-6-sol-none"]["score"] == 0.875
+    assert lat["gpt-6-sol-none"]["latency_s"] == 1.47
+    assert "ttft_s" not in lat["gpt-6-sol-none"], "no probe: not measured, never 0"
+
+    cost = _read(site["out"], "cost.json")
+    assert [m["id"] for m in cost["models"]] == ["gpt-6-sol-none"]
+    assert cost["models"][0]["score"] == 0.875, "the latency chart's y value"
+    assert cost["omitted"] == ["Claude Opus 4.8"]
+
+
+def test_build_takes_later_models_ttfat_from_runs_and_paper_models_from_probes(
+    refresh, site
 ):
-    out = tmp_path / "data"
-    out.mkdir()
-    original = {"source": "Figure 7, paper", "models": [{"id": "x", "ttft_s": 1.0}]}
-    (out / "latency.json").write_text(json.dumps(original), encoding="utf-8")
-    monkeypatch.setattr(refresh, "OUT_DIR", out)
+    """#76: a model added since the paper is timed by its benchmark run, even
+    when the checkout also holds a probe of it; the paper's models keep
+    their probe figures."""
+    _write_site(site["out"], [PAPER_OPUS], [PAPER_OPUS_LAT])
+    for mode in ("plain", "scaffolding_rigor"):
+        _bench_run(
+            site["results"],
+            f"gpt-6-sol-none_{mode}_tutormoments-preview_20261001",
+            tutor="gpt-6-sol-none",
+            mode=mode,
+            ttft=1.38,
+        )
+    _probe_dir(
+        site["results"], "a_scaffolding_rigor_latency_20260818", tutor="claude-opus-4-8"
+    )
+    _probe_dir(
+        site["results"],
+        "sol_scaffolding_rigor_latency_20261002",
+        tutor="gpt-6-sol-none",
+        p50_all=4.0,
+    )
 
-    refresh.refresh_ttft_only(REPO, tmp_path / "empty")
+    refresh.build_benchmark_json(site["repo"], site["results"])
 
-    assert json.loads((out / "latency.json").read_text("utf-8")) == original
+    lat = _read(site["out"], "latency.json")
+    rows = {m["id"]: m for m in lat["models"]}
+    assert rows["claude-opus-4-8"]["ttft_s"] == 9.0
+    assert "ttft_source" not in rows["claude-opus-4-8"]
+    sol = rows["gpt-6-sol-none"]
+    assert (sol["ttft_s"], sol["ttlt_s"]) == (1.38, 1.88), (
+        "the run, not the 4.0 s probe"
+    )
+    assert (sol["ttft_p95_s"], sol["ttlt_p95_s"]) == (2.76, 3.26)
+    assert (sol["ttft_source"], sol["ttft_concurrency"]) == ("run", 4)
+    assert lat["ttft"]["runs"] == {
+        "gpt-6-sol-none": "gpt-6-sol-none_scaffolding_rigor_tutormoments-preview_20261001"
+    }
+    assert list(lat["ttft"]["measured_at"]) == ["claude-opus-4-8"]
+
+
+def test_build_needs_both_prompts_before_replacing_a_carried_row(refresh, site):
+    """A half-finished sweep (one prompt done) must not knock out the row."""
+    prior = {**PAPER_OPUS, "id": "gpt-6-sol-none", "name": "GPT-6 Sol"}
+    _write_site(site["out"], [prior], [])
+    _bench_run(
+        site["results"],
+        "gpt-6-sol-none_plain_tutormoments-preview_20261101",
+        tutor="gpt-6-sol-none",
+        mode="plain",
+    )
+
+    refresh.build_benchmark_json(site["repo"], site["results"])
+
+    row = _read(site["out"], "leaderboard.json")["models"][0]
+    assert row["eval_aware"] == PAPER_OPUS["eval_aware"]
+
+
+def test_full_runs_takes_the_newest_complete_unsampled_run(refresh, tmp_path):
+    kw = {"tutor": "deepseek-ai/DeepSeek-V4-Pro-0813"}
+    _bench_run(
+        tmp_path, "ds_scaffolding_rigor_x_20260901", scores=(0.5, 0.5, 0.5), **kw
+    )
+    _bench_run(
+        tmp_path, "ds_scaffolding_rigor_x_20260929", scores=(0.6, 0.6, 0.5), **kw
+    )
+    _bench_run(tmp_path, "ds_scaffolding_rigor_x_20261001", sample=10, **kw)
+    _bench_run(tmp_path, "ds_scaffolding_rigor_x_20261002", failed=3, **kw)
+    _probe_dir(tmp_path, "ds_scaffolding_rigor_latency_20261003", tutor=kw["tutor"])
+
+    runs = refresh.full_runs(tmp_path)
+
+    assert list(runs) == [("deepseek-ai_DeepSeek-V4-Pro-0813", "scaffolding_rigor")]
+    cell = runs[("deepseek-ai_DeepSeek-V4-Pro-0813", "scaffolding_rigor")]
+    assert cell["run_id"] == "ds_scaffolding_rigor_x_20260929"
+
+
+@pytest.mark.parametrize(
+    "thinking, label",
+    [
+        (
+            {"effort": "high", "thinking": {"type": "adaptive"}},
+            "thinking: adaptive, effort: high",
+        ),
+        ({"thinking": {"type": "disabled"}}, "thinking: disabled"),
+        (
+            {"thinking_level": "minimal", "include_thoughts": True},
+            "thinking_level: minimal",
+        ),
+        ({"thinking_budget": -1, "include_thoughts": True}, "thinking_budget: -1"),
+        ({"reasoning_effort": "max"}, "reasoning_effort: max"),
+        ({"reasoning": "none"}, "reasoning: none"),
+        ({}, "none sent (model default)"),
+    ],
+)
+def test_reasoning_label_states_the_configured_parameters(refresh, thinking, label):
+    assert refresh.reasoning_label(thinking) == label
 
 
 # ---------------------------------------------------------------------------
@@ -274,8 +449,14 @@ def _bench_run(
     mode: str = "scaffolding_rigor",
     n_calls: int = 1560,
     output: int = 400,
+    scores: tuple = (0.9, 0.8, 0.1),
+    thinking: dict | None = None,
+    sample: int | None = None,
+    failed: int = 0,
+    ttft: float | None = None,
 ) -> None:
-    """A benchmark run directory: summary.json + config.json, as cli.py writes."""
+    """A benchmark run directory: summary.json + config.json, as cli.py writes.
+    ``scores`` is (scaffold score, rigor score, overscaffold rate)."""
     usage = _usage(
         model=tutor,
         uncached=500 * n_calls,
@@ -287,13 +468,41 @@ def _bench_run(
     summary = {
         "tutor_model": tutor,
         "mode": mode,
-        "run_counts": {"attempted": 520, "succeeded": 520, "failed": 0},
-        "latency": {"source": "run", "tutor": {"n": n_calls}},
+        "n_scenarios": 520,
+        "run_counts": {"attempted": 520, "succeeded": 520 - failed, "failed": failed},
+        "scaffold_calibrated": {"score": scores[0]},
+        "rigor_calibrated": {"score": scores[1]},
+        "overscaffold": {"rate": scores[2]},
+        "latency": {
+            "source": "run",
+            "concurrency": 4,
+            "tutor": {"n": n_calls, "mean_seconds": 1.469},
+            **(
+                {
+                    "tutor_streamed": {
+                        "ttft": {"all": {"p50_seconds": ttft, "p95_seconds": ttft * 2}},
+                        "ttlt": {
+                            "all": {
+                                "p50_seconds": ttft + 0.5,
+                                "p95_seconds": ttft * 2 + 0.5,
+                            }
+                        },
+                    }
+                }
+                if ttft is not None
+                else {}
+            ),
+        },
         "tokens": {"tutor": usage},
         "cost": {"n_conversations": 520},
     }
+    config = {
+        "sample": sample,
+        "arm": tutor,
+        "resolved_tutors": {tutor: {"thinking": thinking or {}}},
+    }
     (run / "summary.json").write_text(json.dumps(summary), encoding="utf-8")
-    (run / "config.json").write_text(json.dumps({"sample": None}), encoding="utf-8")
+    (run / "config.json").write_text(json.dumps(config), encoding="utf-8")
 
 
 def test_measured_cost_prices_a_probe_at_current_rates(refresh, tmp_path):
@@ -398,45 +607,6 @@ def test_cost_rows_follow_the_latency_roster_and_name_the_omitted(refresh):
     assert omitted == ["Model B"]
 
 
-def test_refresh_ttft_only_also_writes_cost_json(refresh, tmp_path, monkeypatch):
-    out = tmp_path / "data"
-    out.mkdir()
-    (out / "latency.json").write_text(
-        json.dumps(
-            {
-                "source": "paper",
-                "models": [
-                    {
-                        "id": "gpt-5.4-mini-2026-03-17",
-                        "name": "GPT 5.4 mini",
-                        "score": 0.7,
-                    },
-                    {"id": "claude-opus-4-8", "name": "Claude Opus 4.8", "score": 0.84},
-                ],
-            }
-        ),
-        encoding="utf-8",
-    )
-    monkeypatch.setattr(refresh, "OUT_DIR", out)
-    probes = tmp_path / "results"
-    _probe_dir(
-        probes,
-        "mini_scaffolding_rigor_latency_20261001",
-        tutor="gpt-5.4-mini-2026-03-17",
-        usage=_usage(),
-    )
-    _probe_dir(
-        probes, "opus_scaffolding_rigor_latency_20260818", tutor="claude-opus-4-8"
-    )
-
-    refresh.refresh_ttft_only(REPO, probes)
-
-    cost = json.loads((out / "cost.json").read_text("utf-8"))
-    assert [m["id"] for m in cost["models"]] == ["gpt-5.4-mini-2026-03-17"]
-    assert cost["models"][0]["score"] == 0.7, "the latency chart's y value"
-    assert cost["omitted"] == ["Claude Opus 4.8"]
-
-
 def test_write_cost_without_costable_runs_leaves_cost_json_alone(
     refresh, tmp_path, monkeypatch
 ):
@@ -448,3 +618,392 @@ def test_write_cost_without_costable_runs_leaves_cost_json_alone(
     refresh.write_cost(REPO, tmp_path / "empty", [{"id": "a", "name": "A", "score": 1}])
 
     assert json.loads((out / "cost.json").read_text("utf-8")) == {"models": ["kept"]}
+
+
+# ---------------------------------------------------------------------------
+# build_action_distribution
+# ---------------------------------------------------------------------------
+
+
+def test_action_distribution_without_runs_shows_the_paper_models(
+    refresh, tmp_path, monkeypatch
+):
+    """The paper's export has columns for its seven models only; with no runs
+    and nothing committed, later rows of MODELS are left off, not a crash."""
+    monkeypatch.setattr(refresh, "OUT_DIR", tmp_path / "data")
+
+    refresh.build_action_distribution(_paper_csv(refresh, tmp_path / "v1.csv"), "test")
+
+    out = json.loads(
+        (tmp_path / "data" / "action_distribution.json").read_text("utf-8")
+    )
+    assert [m["id"] for m in out["models"]] == [
+        m for m, _ in refresh.MODELS if m in refresh.ACTION_CSV_MODELS
+    ]
+
+
+def _paper_csv(refresh, path: Path) -> Path:
+    """A v1_action_taxonomy_distribution.csv with every column the paper's
+    export carries; per-letter values are arbitrary."""
+    import csv
+
+    prefixes = ["human"] + [
+        f"{col}__{p}"
+        for col in refresh.ACTION_CSV_MODELS.values()
+        for p in ("plain", "SR")
+    ]
+    fields = ["letter", "name", "orientation"] + [
+        f"{pre}__{k}"
+        for pre in prefixes
+        for k in ("n_moments", "macro_mean_pct", "ci_low", "ci_high")
+    ]
+    with path.open("w", newline="", encoding="utf-8") as fh:
+        w = csv.DictWriter(fh, fieldnames=fields)
+        w.writeheader()
+        for i, letter in enumerate("ABCDEFGHIJKLM"):
+            row = {"letter": letter, "name": letter, "orientation": "neutral"}
+            for f in fields[3:]:
+                row[f] = 100 if f.endswith("n_moments") else float(i)
+            w.writerow(row)
+    return path
+
+
+def test_action_distribution_scores_a_later_model_from_its_runs(
+    refresh, tmp_path, monkeypatch
+):
+    """A later model's cell is the macro mean over its run's own
+    classifications: per moment, the share of facets in each letter."""
+    pytest.importorskip("pandas")
+    from tutormoments import taxonomy
+
+    results = tmp_path / "results"
+    for mode, letters in (("plain", "AAB"), ("scaffolding_rigor", "GG")):
+        run_id = f"gpt-6-sol-none_{mode}_tutormoments-preview_20261001"
+        _bench_run(results, run_id, tutor="gpt-6-sol-none", mode=mode)
+        facets = [
+            taxonomy.Facet(
+                moment_id=f"m{j}",
+                transcript_id="t",
+                turn_start=0,
+                turn_end=1,
+                statement_index=i,
+                statement="s",
+                annotation_type="scaffolding",
+                situation_label="scaffolding",
+                category=letter,
+            )
+            for j in range(2)
+            for i, letter in enumerate(letters if j == 0 else "C")
+        ]
+        (results / run_id / "taxonomy").mkdir()
+        taxonomy.write_classified_csv(
+            facets, results / run_id / "taxonomy" / "classified.csv"
+        )
+    fp = _paper_csv(refresh, tmp_path / "v1.csv")
+    monkeypatch.setattr(refresh, "OUT_DIR", tmp_path / "data")
+
+    refresh.build_action_distribution(fp, "test", repo=REPO, results_root=results)
+
+    out = json.loads(
+        (tmp_path / "data" / "action_distribution.json").read_text("utf-8")
+    )
+    sol = {m["id"]: m for m in out["models"]}["gpt-6-sol-none"]
+    # moment 0 is 2/3 A, moment 1 is all C: macro A = (2/3 + 0) / 2.
+    assert sol["plain"]["A"]["pct"] == pytest.approx(33.33, abs=0.01)
+    assert sol["plain"]["C"]["pct"] == pytest.approx(50.0)
+    assert sol["eval_aware"]["G"]["pct"] == pytest.approx(50.0)
+    assert sol["n_moments"] == {"plain": 2, "eval_aware": 2}
+    assert sol["source"]["eval_aware"].startswith("gpt-6-sol-none_scaffolding_rigor")
+    paper = {m["id"]: m for m in out["models"]}["claude-opus-4-8"]
+    assert paper["source"] == "paper"
+    assert paper["n_moments"] == {"plain": 100, "eval_aware": 100}
+
+
+def test_action_distribution_carries_a_later_model_it_cannot_rebuild(
+    refresh, tmp_path, monkeypatch
+):
+    out_dir = tmp_path / "data"
+    out_dir.mkdir()
+    kept = {"id": "gpt-6-sol-none", "name": "old", "source": {"plain": "r"}}
+    (out_dir / "action_distribution.json").write_text(
+        json.dumps({"models": [kept]}), encoding="utf-8"
+    )
+    monkeypatch.setattr(refresh, "OUT_DIR", out_dir)
+
+    refresh.build_action_distribution(_paper_csv(refresh, tmp_path / "v1.csv"), "test")
+
+    out = json.loads((out_dir / "action_distribution.json").read_text("utf-8"))
+    sol = {m["id"]: m for m in out["models"]}["gpt-6-sol-none"]
+    assert sol == {**kept, "name": "GPT-6 Sol"}
+
+
+# ---------------------------------------------------------------------------
+# build_kl
+# ---------------------------------------------------------------------------
+
+
+def _facet_kwargs(moment, situation, letter, i=0):
+    return dict(
+        moment_id=moment,
+        transcript_id="t",
+        turn_start=0,
+        turn_end=1,
+        statement_index=i,
+        statement="s",
+        annotation_type="scaffolding",
+        situation_label=situation,
+        category=letter,
+    )
+
+
+# Per situation: two moments' letters. S leans A, R leans G.
+KL_CELL = {"scaffolding": ("AAB", "AC"), "rigor": ("GG", "GA")}
+
+
+def _kl_facets(taxonomy, prefix=""):
+    return [
+        taxonomy.Facet(**_facet_kwargs(f"{prefix}{sit}{j}", sit, letter, i))
+        for sit, moments in KL_CELL.items()
+        for j, letters in enumerate(moments)
+        for i, letter in enumerate(letters)
+    ]
+
+
+@pytest.fixture
+def kl_env(refresh, tmp_path, monkeypatch):
+    """The runtime's taxonomy with its two network fetches stubbed: the human
+    reference and the release's action_taxonomy.jsonl."""
+    from tutormoments import taxonomy
+
+    release = tmp_path / "action_taxonomy.jsonl"
+    with release.open("w", encoding="utf-8") as fh:
+        for mode in ("plain", "scaffolding_rigor"):
+            for f in _kl_facets(taxonomy):
+                fh.write(
+                    json.dumps(
+                        {
+                            **f.to_dict(),
+                            "source": "benchmark_520",
+                            "tutor_model": "claude-opus-4-8",
+                            "prompt_mode": mode,
+                        }
+                    )
+                    + "\n"
+                )
+            # an excluded facet (no category) must not count
+            fh.write(
+                json.dumps(
+                    {
+                        **_facet_kwargs("x", "rigor", None),
+                        "source": "benchmark_520",
+                        "tutor_model": "claude-opus-4-8",
+                        "prompt_mode": mode,
+                    }
+                )
+                + "\n"
+            )
+    human = {"s_r": 0.5, "r_s": 0.6, "n_scaffolding": 260, "n_rigor": 258}
+    monkeypatch.setattr(
+        taxonomy,
+        "human_reference",
+        lambda: {"label": "h", "dataset": "d", "revision": "r", "kl": human},
+    )
+    monkeypatch.setattr(taxonomy, "_hf_download", lambda *a: release)
+    monkeypatch.setattr(refresh, "OUT_DIR", tmp_path / "data")
+    return taxonomy, tmp_path / "results"
+
+
+def test_build_kl_scores_paper_and_later_models_with_the_runtime(refresh, kl_env):
+    taxonomy, results = kl_env
+    for mode in ("plain", "scaffolding_rigor"):
+        run_id = f"gpt-6-sol-none_{mode}_tutormoments-preview_20261001"
+        _bench_run(results, run_id, tutor="gpt-6-sol-none", mode=mode)
+        (results / run_id / "taxonomy").mkdir()
+        taxonomy.write_classified_csv(
+            _kl_facets(taxonomy), results / run_id / "taxonomy" / "classified.csv"
+        )
+
+    refresh.build_kl(REPO, results)
+
+    out = json.loads((refresh.OUT_DIR / "kl.json").read_text("utf-8"))
+    want = taxonomy.kl_situation(_kl_facets(taxonomy))
+    rows = {m["id"]: m for m in out["models"]}
+    for model in ("claude-opus-4-8", "gpt-6-sol-none"):
+        cell = rows[model]["eval_aware"]
+        assert cell["s_r"] == pytest.approx(want["s_r"], abs=1e-4)
+        assert cell["r_s"] == pytest.approx(want["r_s"], abs=1e-4)
+        assert cell["mean"] == pytest.approx((want["s_r"] + want["r_s"]) / 2, abs=1e-4)
+        assert (cell["n_scaffolding"], cell["n_rigor"]) == (2, 2)
+    dataset, revision = taxonomy.HUMAN_REFERENCE
+    assert rows["claude-opus-4-8"]["source"] == {"release": f"{dataset}@{revision}"}
+    assert rows["gpt-6-sol-none"]["source"]["plain"].startswith("gpt-6-sol-none_plain")
+    assert out["human"]["mean"] == pytest.approx(0.55)
+
+
+def test_build_kl_carries_rows_it_cannot_rebuild(refresh, kl_env):
+    _, results = kl_env
+    refresh.OUT_DIR.mkdir(parents=True)
+    kept = {"id": "gpt-6-sol-none", "name": "old", "plain": {"mean": 0.2}}
+    (refresh.OUT_DIR / "kl.json").write_text(
+        json.dumps({"human": {"mean": 0.55}, "models": [kept]}), encoding="utf-8"
+    )
+
+    refresh.build_kl(REPO, results)  # no runs for gpt-6-sol-none
+
+    out = json.loads((refresh.OUT_DIR / "kl.json").read_text("utf-8"))
+    rows = {m["id"]: m for m in out["models"]}
+    assert rows["gpt-6-sol-none"] == {**kept, "name": "GPT-6 Sol"}
+    assert "claude-opus-4-8" in rows, "rebuilt from the release"
+
+
+# ---------------------------------------------------------------------------
+# moment explorer
+# ---------------------------------------------------------------------------
+
+
+def test_parse_reference_keeps_continuation_lines_with_their_turn(refresh):
+    text = (
+        "Turn 48. TUTOR: [PAUSE: 9 seconds] Tutor points.\n"
+        "Tutor erases the whiteboard.\n"
+        "Turn 49. STUDENT: Fifteen?\n"
+        "Turn 49. TUTOR: Why?"
+    )
+    assert refresh.parse_reference(text) == [
+        {
+            "turn_number": 48,
+            "role": "tutor",
+            "text": "[PAUSE: 9 seconds] Tutor points.\nTutor erases the whiteboard.",
+        },
+        {"turn_number": 49, "role": "student", "text": "Fifteen?"},
+        {"turn_number": 49, "role": "tutor", "text": "Why?"},
+    ]
+
+
+@pytest.mark.parametrize(
+    "dimension, label, over, right",
+    [
+        ("rigor", "rigor", [], True),
+        ("rigor", "both", [], True),
+        ("rigor", "scaffolding", [], False),
+        ("rigor", "rigor", ["The tutor gives the answer."], False),
+        ("scaffolding", "both", [], True),
+        ("scaffolding", "scaffolding", ["The tutor over-explains."], False),
+        ("scaffolding", "neither", [], False),
+    ],
+)
+def test_verdict_uses_the_leaderboard_rule(refresh, dimension, label, over, right):
+    """`right` must agree with the leaderboard's own per-moment rule: the
+    action fits the moment and nothing was over-scaffolded."""
+    from tutormoments import report
+
+    ann = {"action_label": label, "overscaffold_decomposed": over, "action": "a"}
+    got = refresh._verdict(report, dimension, ann)
+    assert got == {
+        "label": label,
+        "overscaffold": bool(over),
+        "right": right,
+        "action": "a",
+    }
+
+
+def test_build_moment_explorer_joins_release_and_runs(refresh, tmp_path, monkeypatch):
+    from tutormoments import taxonomy
+
+    mid = "balanced_520:aaa_bbb_t1__hum_10_12"
+    release = tmp_path / "release"
+    release.mkdir()
+    (release / "moments.jsonl").write_text(
+        json.dumps(
+            {
+                "id": mid,
+                "dimension": "rigor",
+                "rubric": {"hint": "Push here."},
+                "context": [
+                    {"turn_number": i, "role": "tutor", "text": f"t{i}"}
+                    for i in range(12)
+                ],
+                "student": {"reference": "Turn 12. TUTOR: How do you know?"},
+                "provenance": {
+                    "conv_id": "aaa_bbb_t1",
+                    "turn_start": 10,
+                    "turn_end": 12,
+                },
+            }
+        )
+        + "\n",
+        encoding="utf-8",
+    )
+    km = {
+        "turn_start": 10,
+        "turn_end": 12,
+        "annotation_type": "scaffolding",
+        "action_direction_agg": "rigor",
+    }
+    (release / "ground_truth.jsonl").write_text(
+        json.dumps(
+            {
+                "conversation_id": "t1",
+                "key_moments": [
+                    {**km, "annotator_id": "x", "strategy_label": "effective"},
+                    {**km, "annotator_id": "y", "strategy_label": "ineffective"},
+                ],
+            }
+        )
+        + "\n",
+        encoding="utf-8",
+    )
+    (release / "benchmark_520.jsonl").write_text(
+        json.dumps(
+            {
+                "scenario_id": mid.split(":", 1)[1],
+                "tutor_model": "claude-opus-4-8",
+                "prompt_mode": "scaffolding_rigor",
+                "exchange": {"generated_turns": [{"role": "TUTOR", "text": "Why 30?"}]},
+                "annotation": {
+                    "annotations": [
+                        {"action_label": "rigor", "overscaffold_decomposed": []}
+                    ]
+                },
+            }
+        )
+        + "\n",
+        encoding="utf-8",
+    )
+    monkeypatch.setattr(taxonomy, "_hf_download", lambda d, name, r: release / name)
+    curated = tmp_path / "explorer.json"
+    curated.write_text(
+        json.dumps({"moments": [{"id": mid, "title": "T", "summary": "S"}]}),
+        encoding="utf-8",
+    )
+    monkeypatch.setattr(refresh, "EXPLORER_FILE", curated)
+    monkeypatch.setattr(refresh, "OUT_DIR", tmp_path / "data")
+
+    results = tmp_path / "results"
+    run_id = "gpt-6-sol-none_scaffolding_rigor_tutormoments-preview_20261001"
+    _bench_run(results, run_id, tutor="gpt-6-sol-none")
+    (results / run_id / "transcripts").mkdir()
+    (results / run_id / "scores").mkdir()
+    (results / run_id / "transcripts" / f"{mid}.json").write_text(
+        json.dumps({"generated_turns": [{"role": "TUTOR", "text": "Here's how."}]}),
+        encoding="utf-8",
+    )
+    (results / run_id / "scores" / f"{mid}.json").write_text(
+        json.dumps({"action_label": "scaffolding", "overscaffold_decomposed": []}),
+        encoding="utf-8",
+    )
+
+    refresh.build_moment_explorer(REPO, results)
+
+    out = json.loads((tmp_path / "data" / "moments.json").read_text("utf-8"))
+    m = out["moments"][0]
+    assert (m["title"], m["summary"], m["dimension"]) == ("T", "S", "rigor")
+    assert [t["text"] for t in m["context"]] == [f"t{i}" for i in range(4, 12)]
+    assert m["human"]["turns"] == [{"role": "tutor", "text": "How do you know?"}]
+    assert m["human"]["direction"] == "rigor"
+    assert m["human"]["effectiveness"] == {"effective": 1, "ineffective": 1}
+    assert m["human"]["n_annotators"] == 2
+    paper = m["models"]["claude-opus-4-8"]["eval_aware"]
+    later = m["models"]["gpt-6-sol-none"]["eval_aware"]
+    assert paper["right"] and not later["right"]
+    assert later["turns"] == [{"role": "tutor", "text": "Here's how."}]
+    assert m["n_right"]["eval_aware"] == 1 and m["n_models"]["eval_aware"] == 2

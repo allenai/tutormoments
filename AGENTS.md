@@ -28,6 +28,10 @@ imports them.
   `moments.schema.json`, and the frozen `balanced_520_ids.json` used in the 
   June 2026 Preview paper. These determine what the benchmark *is*. 
   Changes there can change published results; treat them with care.
+- Latency for a newly added model comes from its full benchmark run
+  (`summary.json` → `latency.tutor_streamed`). Do not run `tutormoments latency` probes for
+  new models. Probe figures are published only for the working paper's seven models (#76;
+  see docs/latency.md).
 - `src/tutormoments/latency_probe_ids.json` is frozen the same way
   `balanced_520_ids.json` is: committed and never regenerated — re-picking it
   breaks comparability with every prior latency measurement.

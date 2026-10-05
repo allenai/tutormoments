@@ -694,11 +694,17 @@ def _probe_tutor_block(
         "cache_hit_rate": cache_hit_rate,
         "cache_read_p50_on_hits": cache_read,
         "ttft": {
-            "all": {"n": 112, "p50_seconds": p50_all},
+            "all": {"n": 112, "p50_seconds": p50_all, "p95_seconds": p50_all * 3},
             "miss": {"n": 40, "p50_seconds": p50_miss},
             "hit": {"n": n_hits, "p50_seconds": p50_hit},
         },
-        "ttlt": {"all": {"n": 112, "p50_seconds": p50_all + 1.0}},
+        "ttlt": {
+            "all": {
+                "n": 112,
+                "p50_seconds": p50_all + 1.0,
+                "p95_seconds": p50_all * 3 + 1.0,
+            }
+        },
     }
 
 
@@ -760,6 +766,8 @@ def test_probe_figures_always_publishes_the_pooled_number():
     )
     assert figs["ttft_p50"] == 9.0
     assert figs["ttlt_p50"] == 10.0
+    assert figs["ttft_p95"] == 27.0, "the tail, from the same pooled aggregate"
+    assert figs["ttlt_p95"] == 28.0
 
 
 def test_probe_figures_splits_on_turn_position_not_cache_state():
@@ -804,6 +812,8 @@ def test_probe_figures_tolerates_an_absent_probe():
     assert probe_figures({}) == {
         "ttft_p50": None,
         "ttlt_p50": None,
+        "ttft_p95": None,
+        "ttlt_p95": None,
         "ttft_first_p50": None,
         "ttft_later_p50": None,
     }

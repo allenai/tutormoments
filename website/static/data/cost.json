@@ -1,0 +1,208 @@
+{
+  "source": "score as in latency.json. Cost is the uncached list cost per tutor response: every prompt token at the model's input rate, output and reasoning tokens at its output rate, divided by the number of tutor calls. Measured from the model's full benchmark run, or from the `tutormoments latency` probe where that run predates usage capture (see each row's source). A ceiling -- provider prompt caching can cut the input share substantially. See docs/cost.md.",
+  "cost": {
+    "mode": "scaffolding_rigor",
+    "pricing_version": "2026-10-01"
+  },
+  "omitted": [
+    "Claude Opus 4.8",
+    "Claude Sonnet 4.6",
+    "DeepSeek V4 Pro",
+    "Gemini 2.5 Pro",
+    "Gemini 3.5 Flash",
+    "GPT 5.5",
+    "GPT 5.4 mini"
+  ],
+  "models": [
+    {
+      "id": "claude-opus-5-5",
+      "name": "Claude Opus 5.5",
+      "score": 0.883,
+      "uncached_cost_per_response_usd": 0.0502469,
+      "prompt_tokens_per_response": 10384,
+      "output_tokens_per_response": 436,
+      "n_calls": 1560,
+      "rates": {
+        "input_per_mtok": 4.0,
+        "output_per_mtok": 20.0,
+        "as_of": "2026-10-01"
+      },
+      "source": {
+        "kind": "run",
+        "run_id": "claude-opus-5-5_scaffolding_rigor_tutormoments-preview_20261001",
+        "n_conversations": 520
+      }
+    },
+    {
+      "id": "claude-fable-5-1",
+      "name": "Claude Fable 5.1",
+      "score": 0.871,
+      "uncached_cost_per_response_usd": 0.12264547,
+      "prompt_tokens_per_response": 10395,
+      "output_tokens_per_response": 374,
+      "n_calls": 1560,
+      "rates": {
+        "input_per_mtok": 10.0,
+        "output_per_mtok": 50.0,
+        "as_of": "2026-10-01"
+      },
+      "source": {
+        "kind": "run",
+        "run_id": "claude-fable-5-1_scaffolding_rigor_tutormoments-preview_20261001",
+        "n_conversations": 520
+      }
+    },
+    {
+      "id": "claude-sonnet-5-5",
+      "name": "Claude Sonnet 5.5",
+      "score": 0.902,
+      "uncached_cost_per_response_usd": 0.02228584,
+      "prompt_tokens_per_response": 10408,
+      "output_tokens_per_response": 147,
+      "n_calls": 1560,
+      "rates": {
+        "input_per_mtok": 2.0,
+        "output_per_mtok": 10.0,
+        "as_of": "2026-10-01"
+      },
+      "source": {
+        "kind": "run",
+        "run_id": "claude-sonnet-5-5_scaffolding_rigor_tutormoments-preview_20261001",
+        "n_conversations": 520
+      }
+    },
+    {
+      "id": "deepseek-v4-pro-0813",
+      "name": "DeepSeek V4 Pro 0813",
+      "score": 0.65,
+      "uncached_cost_per_response_usd": 0.01347345,
+      "prompt_tokens_per_response": 6880,
+      "output_tokens_per_response": 1109,
+      "n_calls": 1560,
+      "rates": {
+        "input_per_mtok": 1.32,
+        "output_per_mtok": 3.96,
+        "as_of": "2026-09-28"
+      },
+      "source": {
+        "kind": "run",
+        "run_id": "deepseek-v4-pro-0813_scaffolding_rigor_tutormoments-preview_20260929",
+        "n_conversations": 520
+      }
+    },
+    {
+      "id": "gemini-3.8-flash",
+      "name": "Gemini 3.8 Flash",
+      "score": 0.779,
+      "uncached_cost_per_response_usd": 0.01022199,
+      "prompt_tokens_per_response": 7295,
+      "output_tokens_per_response": 1267,
+      "n_calls": 1560,
+      "rates": {
+        "input_per_mtok": 0.75,
+        "output_per_mtok": 3.75,
+        "as_of": "2026-09-30"
+      },
+      "source": {
+        "kind": "run",
+        "run_id": "gemini-3.8-flash_scaffolding_rigor_tutormoments-preview_20260930",
+        "n_conversations": 520
+      }
+    },
+    {
+      "id": "gemini-3.6-flash",
+      "name": "Gemini 3.6 Flash",
+      "score": 0.692,
+      "uncached_cost_per_response_usd": 0.00569798,
+      "prompt_tokens_per_response": 7320,
+      "output_tokens_per_response": 55,
+      "n_calls": 1560,
+      "rates": {
+        "input_per_mtok": 0.75,
+        "output_per_mtok": 3.75,
+        "as_of": "2026-09-30"
+      },
+      "source": {
+        "kind": "run",
+        "run_id": "gemini-3.6-flash_scaffolding_rigor_tutormoments-preview_20260930",
+        "n_conversations": 520
+      }
+    },
+    {
+      "id": "gpt-5.5-2026-04-23-none",
+      "name": "GPT 5.5 (no reasoning)",
+      "score": 0.5445,
+      "uncached_cost_per_response_usd": 0.03450927,
+      "prompt_tokens_per_response": 6493,
+      "output_tokens_per_response": 68,
+      "n_calls": 1560,
+      "rates": {
+        "input_per_mtok": 5.0,
+        "output_per_mtok": 30.0,
+        "as_of": "2026-09-16"
+      },
+      "source": {
+        "kind": "run",
+        "run_id": "gpt-5.5-2026-04-23-none_scaffolding_rigor_tutormoments-preview_20260929",
+        "n_conversations": 520
+      }
+    },
+    {
+      "id": "gpt-6-astra",
+      "name": "GPT-6 Astra",
+      "score": 0.9265,
+      "uncached_cost_per_response_usd": 0.08491574,
+      "prompt_tokens_per_response": 6469,
+      "output_tokens_per_response": 404,
+      "n_calls": 1560,
+      "rates": {
+        "input_per_mtok": 10.0,
+        "output_per_mtok": 50.0,
+        "as_of": "2026-09-29"
+      },
+      "source": {
+        "kind": "run",
+        "run_id": "gpt-6-astra_scaffolding_rigor_tutormoments-preview_20260929",
+        "n_conversations": 520
+      }
+    },
+    {
+      "id": "gpt-6-sol-none",
+      "name": "GPT-6 Sol",
+      "score": 0.875,
+      "uncached_cost_per_response_usd": 0.01336039,
+      "prompt_tokens_per_response": 6468,
+      "output_tokens_per_response": 42,
+      "n_calls": 1560,
+      "rates": {
+        "input_per_mtok": 2.0,
+        "output_per_mtok": 10.0,
+        "as_of": "2026-10-01"
+      },
+      "source": {
+        "kind": "run",
+        "run_id": "gpt-6-sol-none_scaffolding_rigor_tutormoments-preview_20261001",
+        "n_conversations": 520
+      }
+    },
+    {
+      "id": "gpt-6-luna-none",
+      "name": "GPT-6 Luna",
+      "score": 0.752,
+      "uncached_cost_per_response_usd": 0.00066803,
+      "prompt_tokens_per_response": 6469,
+      "output_tokens_per_response": 42,
+      "n_calls": 1560,
+      "rates": {
+        "input_per_mtok": 0.1,
+        "output_per_mtok": 0.5,
+        "as_of": "2026-09-29"
+      },
+      "source": {
+        "kind": "run",
+        "run_id": "gpt-6-luna-none_scaffolding_rigor_tutormoments-preview_20260929",
+        "n_conversations": 520
+      }
+    }
+  ]
+}

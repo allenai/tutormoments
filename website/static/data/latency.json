@@ -1,5 +1,5 @@
 {
-  "source": "score = mean of evaluation-aware Appropriate Scaffolding and Appropriate Rigor (exact, from Table 8 of the TutorMoments-Preview working paper, 2026-06-30). ttft_s / ttlt_s measured by `tutormoments latency`, a serial probe; ttft_first_s / ttft_later_s split TTFT by turn position (the first message of a session vs turns 3 and 5). See the ttft block for mode, subsample and timestamps. latency_s is end-to-end seconds per tutor turn from benchmark runs, kept for correspondence with the paper's Figure 7 but not displayed; still read off that figure to ~\u00b10.2s until refreshed from a checkout with results/benchmark.",
+  "source": "score = mean of evaluation-aware Appropriate Scaffolding and Appropriate Rigor, from leaderboard.json. ttft_s is the median time to the first token of the visible answer, so reasoning time counts toward it; the site calls it TTFAT. ttlt_s is the median time to the last token. Paper models: measured by `tutormoments latency`, a serial probe over a frozen 112-moment subsample, with ttft_first_s / ttft_later_s splitting it by turn position (the first message of a session vs turns 3 and 5); see the ttft block for subsample and timestamps. Later models (ttft_source: run): their full benchmark runs, at ttft_concurrency conversations at a time; run ids in ttft.runs. See allenai/tutormoments#76. latency_s is end-to-end seconds per tutor turn from benchmark runs under --concurrency, kept for correspondence with the paper's Figure 7 but not displayed; read off that figure to ~\u00b10.2s where latency_estimated is true.",
   "ttft": {
     "mode": "scaffolding_rigor",
     "subsample_id": "589e8acf8ac761f2",
@@ -11,6 +11,18 @@
       "gemini-3.5-flash": "2026-08-18T12:54:57",
       "gpt-5.4-mini-2026-03-17": "2026-08-18T11:58:28",
       "gpt-5.5-2026-04-23": "2026-08-18T11:23:02"
+    },
+    "runs": {
+      "claude-fable-5-1": "claude-fable-5-1_scaffolding_rigor_tutormoments-preview_20261001",
+      "claude-opus-5-5": "claude-opus-5-5_scaffolding_rigor_tutormoments-preview_20261001",
+      "claude-sonnet-5-5": "claude-sonnet-5-5_scaffolding_rigor_tutormoments-preview_20261001",
+      "deepseek-v4-pro-0813": "deepseek-v4-pro-0813_scaffolding_rigor_tutormoments-preview_20260929",
+      "gemini-3.6-flash": "gemini-3.6-flash_scaffolding_rigor_tutormoments-preview_20260930",
+      "gemini-3.8-flash": "gemini-3.8-flash_scaffolding_rigor_tutormoments-preview_20260930",
+      "gpt-5.5-2026-04-23-none": "gpt-5.5-2026-04-23-none_scaffolding_rigor_tutormoments-preview_20260929",
+      "gpt-6-astra": "gpt-6-astra_scaffolding_rigor_tutormoments-preview_20260929",
+      "gpt-6-luna-none": "gpt-6-luna-none_scaffolding_rigor_tutormoments-preview_20260929",
+      "gpt-6-sol-none": "gpt-6-sol-none_scaffolding_rigor_tutormoments-preview_20261001"
     }
   },
   "models": [
@@ -22,6 +34,8 @@
       "score": 0.8445,
       "ttft_s": 9.04,
       "ttlt_s": 10.52,
+      "ttft_p95_s": 27.9,
+      "ttlt_p95_s": 29.83,
       "ttft_first_s": 13.22,
       "ttft_later_s": 7.99
     },
@@ -33,8 +47,49 @@
       "score": 0.8115,
       "ttft_s": 8.47,
       "ttlt_s": 8.73,
+      "ttft_p95_s": 21.09,
+      "ttlt_p95_s": 21.09,
       "ttft_first_s": 9.62,
       "ttft_later_s": 7.63
+    },
+    {
+      "id": "claude-opus-5-5",
+      "name": "Claude Opus 5.5",
+      "latency_s": 7.19,
+      "latency_estimated": false,
+      "score": 0.883,
+      "ttft_s": 5.03,
+      "ttft_source": "run",
+      "ttlt_s": 6.86,
+      "ttft_p95_s": 8.71,
+      "ttlt_p95_s": 10.91,
+      "ttft_concurrency": 4
+    },
+    {
+      "id": "claude-fable-5-1",
+      "name": "Claude Fable 5.1",
+      "latency_s": 9.46,
+      "latency_estimated": false,
+      "score": 0.871,
+      "ttft_s": 6.36,
+      "ttft_source": "run",
+      "ttlt_s": 9.01,
+      "ttft_p95_s": 11.66,
+      "ttlt_p95_s": 14.84,
+      "ttft_concurrency": 4
+    },
+    {
+      "id": "claude-sonnet-5-5",
+      "name": "Claude Sonnet 5.5",
+      "latency_s": 2.45,
+      "latency_estimated": false,
+      "score": 0.902,
+      "ttft_s": 0.8,
+      "ttft_source": "run",
+      "ttlt_s": 2.25,
+      "ttft_p95_s": 1.48,
+      "ttlt_p95_s": 3.33,
+      "ttft_concurrency": 4
     },
     {
       "id": "deepseek-ai_DeepSeek-V4-Pro",
@@ -44,8 +99,23 @@
       "score": 0.602,
       "ttft_s": 11.09,
       "ttlt_s": 11.86,
+      "ttft_p95_s": 36.43,
+      "ttlt_p95_s": 40.36,
       "ttft_first_s": 12.91,
       "ttft_later_s": 9.97
+    },
+    {
+      "id": "deepseek-v4-pro-0813",
+      "name": "DeepSeek V4 Pro 0813",
+      "latency_s": 7.63,
+      "latency_estimated": false,
+      "score": 0.65,
+      "ttft_s": 5.05,
+      "ttft_source": "run",
+      "ttlt_s": 5.18,
+      "ttft_p95_s": 16.48,
+      "ttlt_p95_s": 16.59,
+      "ttft_concurrency": 4
     },
     {
       "id": "gemini-2.5-pro",
@@ -55,6 +125,8 @@
       "score": 0.804,
       "ttft_s": 14.08,
       "ttlt_s": 14.15,
+      "ttft_p95_s": 24.34,
+      "ttlt_p95_s": 24.37,
       "ttft_first_s": 14.74,
       "ttft_later_s": 13.68
     },
@@ -66,8 +138,36 @@
       "score": 0.7655,
       "ttft_s": 5.51,
       "ttlt_s": 5.72,
+      "ttft_p95_s": 10.5,
+      "ttlt_p95_s": 10.96,
       "ttft_first_s": 6.11,
       "ttft_later_s": 5.21
+    },
+    {
+      "id": "gemini-3.8-flash",
+      "name": "Gemini 3.8 Flash",
+      "latency_s": 6.77,
+      "latency_estimated": false,
+      "score": 0.779,
+      "ttft_s": 5.17,
+      "ttft_source": "run",
+      "ttlt_s": 5.24,
+      "ttft_p95_s": 14.71,
+      "ttlt_p95_s": 14.71,
+      "ttft_concurrency": 4
+    },
+    {
+      "id": "gemini-3.6-flash",
+      "name": "Gemini 3.6 Flash",
+      "latency_s": 1.3,
+      "latency_estimated": false,
+      "score": 0.692,
+      "ttft_s": 0.98,
+      "ttft_source": "run",
+      "ttlt_s": 1.21,
+      "ttft_p95_s": 1.78,
+      "ttlt_p95_s": 1.92,
+      "ttft_concurrency": 4
     },
     {
       "id": "gpt-5.5-2026-04-23",
@@ -77,8 +177,23 @@
       "score": 0.652,
       "ttft_s": 6.38,
       "ttlt_s": 7.28,
+      "ttft_p95_s": 9.65,
+      "ttlt_p95_s": 11.01,
       "ttft_first_s": 7.53,
       "ttft_later_s": 5.89
+    },
+    {
+      "id": "gpt-5.5-2026-04-23-none",
+      "name": "GPT 5.5 (no reasoning)",
+      "latency_s": 1.64,
+      "latency_estimated": false,
+      "score": 0.5445,
+      "ttft_s": 0.69,
+      "ttft_source": "run",
+      "ttlt_s": 1.52,
+      "ttft_p95_s": 1.25,
+      "ttlt_p95_s": 2.53,
+      "ttft_concurrency": 4
     },
     {
       "id": "gpt-5.4-mini-2026-03-17",
@@ -88,8 +203,49 @@
       "score": 0.571,
       "ttft_s": 3.16,
       "ttlt_s": 3.47,
+      "ttft_p95_s": 7.16,
+      "ttlt_p95_s": 7.44,
       "ttft_first_s": 3.76,
       "ttft_later_s": 2.71
+    },
+    {
+      "id": "gpt-6-astra",
+      "name": "GPT-6 Astra",
+      "latency_s": 11.39,
+      "latency_estimated": false,
+      "score": 0.9265,
+      "ttft_s": 10.2,
+      "ttft_source": "run",
+      "ttlt_s": 10.78,
+      "ttft_p95_s": 17.18,
+      "ttlt_p95_s": 17.82,
+      "ttft_concurrency": 4
+    },
+    {
+      "id": "gpt-6-sol-none",
+      "name": "GPT-6 Sol",
+      "latency_s": 1.47,
+      "latency_estimated": false,
+      "score": 0.875,
+      "ttft_s": 0.82,
+      "ttft_source": "run",
+      "ttlt_s": 1.35,
+      "ttft_p95_s": 1.53,
+      "ttlt_p95_s": 2.24,
+      "ttft_concurrency": 4
+    },
+    {
+      "id": "gpt-6-luna-none",
+      "name": "GPT-6 Luna",
+      "latency_s": 1.15,
+      "latency_estimated": false,
+      "score": 0.752,
+      "ttft_s": 0.69,
+      "ttft_source": "run",
+      "ttlt_s": 1.02,
+      "ttft_p95_s": 1.53,
+      "ttlt_p95_s": 1.88,
+      "ttft_concurrency": 4
     }
   ]
 }
