@@ -33,6 +33,7 @@ ROSTER = [
     "claude-opus-5-5",
     "claude-fable-5-1",
     "claude-sonnet-5-5",
+    "claude-haiku-5-5",
     "gemini-2.5-pro",
     "gemini-3.5-flash",
     "gemini-3.6-flash",

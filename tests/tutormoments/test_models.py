@@ -172,10 +172,20 @@ def test_rejects_bad_anthropic_shapes():
         )
     with pytest.raises(ThinkingConfigError, match="effort requires"):
         resolve_thinking(
-            "claude-opus-4-8", {"thinking": {"type": "disabled"}, "effort": "high"}
+            "claude-opus-4-8",
+            {"thinking": {"type": "enabled", "budget_tokens": 4096}, "effort": "high"},
         )
     with pytest.raises(ThinkingConfigError, match="effort requires"):
         resolve_thinking("claude-opus-4-8", {"thinking": None, "effort": "high"})
+
+
+def test_anthropic_effort_allowed_with_thinking_disabled():
+    # Effort also sets answer length, so a thinking-off arm can still state it.
+    wire = resolve_thinking(
+        "claude-haiku-5-5", {"thinking": {"type": "disabled"}, "effort": "low"}
+    )
+    assert wire.anthropic_thinking == {"type": "disabled"}
+    assert wire.anthropic_effort == "low"
 
 
 def test_rejects_retired_ladder_levels():

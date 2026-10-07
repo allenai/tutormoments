@@ -420,7 +420,7 @@ def _resolve_anthropic(params: dict) -> WireThinking:
     if thinking_config is None:
         if effort is not None:
             raise ThinkingConfigError(
-                "anthropic effort requires thinking.type adaptive."
+                "anthropic effort requires thinking.type adaptive or disabled."
             )
     else:
         kind = thinking_config.get("type")
@@ -439,9 +439,11 @@ def _resolve_anthropic(params: dict) -> WireThinking:
             raise ThinkingConfigError(
                 "anthropic budget_tokens is only valid with thinking.type enabled."
             )
-        if effort is not None and kind != "adaptive":
+        # Effort also governs answer length, so it stays meaningful with
+        # thinking off (Haiku 5.5 accepts disabled + effort).
+        if effort is not None and kind == "enabled":
             raise ThinkingConfigError(
-                "anthropic effort requires thinking.type adaptive."
+                "anthropic effort requires thinking.type adaptive or disabled."
             )
     return WireThinking(
         provider="anthropic",

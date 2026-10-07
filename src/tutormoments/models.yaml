@@ -42,7 +42,7 @@
 
 # Bumped whenever any pricing entry changes; run summaries record it so a
 # published cost stays interpretable after later rate updates.
-pricing_version: "2026-10-01"
+pricing_version: "2026-10-07"
 
 models:
   # --- Anthropic ---
@@ -113,6 +113,20 @@ models:
       cache_write: 2.50
       batch_multiplier: 0.5
       as_of: "2026-10-01"
+      source: https://platform.claude.com/docs/en/about-claude/pricing
+  claude-haiku-5-5:
+    provider: anthropic
+    # <=100k-token-prompt tier; prompts >100k bill 5x across every bucket.
+    # The threshold is per request, and the benchmark's largest request is
+    # roughly 20k tokens (see the gemini-2.5-pro note and docs/cost.md; ~30%
+    # more on this model's newer tokenizer), far below it.
+    pricing:
+      input: 0.10
+      output: 0.50
+      cache_read: 0.01
+      cache_write: 0.125
+      batch_multiplier: 0.5
+      as_of: "2026-10-07"
       source: https://platform.claude.com/docs/en/about-claude/pricing
   claude-3-7-sonnet:
     provider: anthropic

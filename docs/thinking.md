@@ -45,7 +45,7 @@ tokens are spent. The authoritative validation is
 
 | provider | keys | wire form |
 |---|---|---|
-| anthropic | `thinking` (required; a thinking block or `null` = send no thinking param), `effort` (adaptive only) | `thinking={...}` plus `output_config.effort` (extra_body on sync, params on batch) |
+| anthropic | `thinking` (required; a thinking block or `null` = send no thinking param), `effort` (adaptive or disabled) | `thinking={...}` plus `output_config.effort` (extra_body on sync, params on batch) |
 | gemini | exactly one of `thinking_budget` / `thinking_level`, optional `include_thoughts` | `generation_config.thinking_config` |
 | openai | `reasoning` (required) | `reasoning_effort` |
 | together | `reasoning_effort` for hybrid reasoners; none for open-weight internal reasoners | `reasoning_effort`; nothing sent when none |
@@ -53,7 +53,7 @@ tokens are spent. The authoritative validation is
 Validation is shape-level: key ownership, mutual exclusion (Gemini's budget
 vs. level; the API 400s if both are sent), and structural rules (Anthropic
 `budget_tokens` only with `type: enabled` and positive; `effort` only with
-`type: adaptive`). Value vocabularies (which effort tiers or reasoning levels
+`type: adaptive` or `disabled`, since effort also sets answer length). Value vocabularies (which effort tiers or reasoning levels
 a given model accepts) are the provider's to extend, so they are proven live
 with `tutormoments smoke`, not enumerated offline.
 
@@ -69,6 +69,10 @@ Provider notes:
   `medium`, not `high`, so its effort must be stated. Sonnet 5.5 also
   accepts `{type: between_tools}` (thinking only between tool calls); the
   benchmark makes no tool calls, and the config does not accept that type.
+- Anthropic Haiku 5.5 is adaptive by default (default effort `medium`), but
+  unlike the three above it does accept `{type: disabled}` (checked live
+  2026-10-07). Its arm (`claude-haiku-5-5-none`) states `disabled` with
+  effort `low`.
 - Together hybrid reasoners (DeepSeek-V4-Pro-0813) think by default and
   return reasoning in a separate field, reported as `reasoning_tokens`, so
   smoke asserts a stated `reasoning_effort` against it. Together documents
