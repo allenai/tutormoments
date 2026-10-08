@@ -50,6 +50,7 @@ def test_packaged_default_config_parses_and_has_expected_roster():
         "claude-opus-5-5",
         "claude-fable-5-1",
         "claude-sonnet-5-5",
+        "claude-haiku-5-5-none",
         "gemini-2.5-pro",
         "gemini-3.5-flash",
         "gemini-3.8-flash",

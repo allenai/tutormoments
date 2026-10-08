@@ -38,6 +38,7 @@ EXPECTED_ARM_WIRE = {
     "claude-opus-5-5": ("claude-opus-5-5", ADAPTIVE, "high", None, None),
     "claude-fable-5-1": ("claude-fable-5-1", ADAPTIVE, "high", None, None),
     "claude-sonnet-5-5": ("claude-sonnet-5-5", ADAPTIVE, "low", None, None),
+    "claude-haiku-5-5-none": ("claude-haiku-5-5", DISABLED, "low", None, None),
     "gemini-2.5-pro": (
         "gemini-2.5-pro",
         None,
