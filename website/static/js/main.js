@@ -21,6 +21,7 @@
     "claude-opus-5-5":             { provider: "anthropic", color: "#D55E00", marker: "circle" },
     "claude-fable-5-1":            { provider: "anthropic", color: "#D55E00", marker: "diamond" },
     "claude-sonnet-5-5":           { provider: "anthropic", color: "#E69F00", marker: "hexagon" },
+    "claude-haiku-5-5-none":       { provider: "anthropic", color: "#E69F00", marker: "cross" },
     "deepseek-v4-pro-0813":        { provider: "open_weight", color: "#CC79A7", marker: "square" },
     "gemini-3.8-flash":            { provider: "google", color: "#56B4E9", marker: "triangle-up" },
     "gemini-3.6-flash":            { provider: "google", color: "#0072B2", marker: "triangle-down" },

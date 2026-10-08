@@ -120,6 +120,28 @@
       }
     },
     {
+      "id": "claude-haiku-5-5-none",
+      "name": "Claude Haiku 5.5",
+      "source": {
+        "plain": "claude-haiku-5-5-none_plain_tutormoments-preview_20261007",
+        "eval_aware": "claude-haiku-5-5-none_scaffolding_rigor_tutormoments-preview_20261007"
+      },
+      "plain": {
+        "mean": 0.1489,
+        "s_r": 0.1489,
+        "r_s": 0.1489,
+        "n_scaffolding": 260,
+        "n_rigor": 260
+      },
+      "eval_aware": {
+        "mean": 0.1785,
+        "s_r": 0.1671,
+        "r_s": 0.1899,
+        "n_scaffolding": 260,
+        "n_rigor": 260
+      }
+    },
+    {
       "id": "deepseek-ai_DeepSeek-V4-Pro",
       "name": "DeepSeek V4 Pro",
       "source": {

@@ -67,6 +67,7 @@ MODELS = [
     ("claude-opus-5-5", "Claude Opus 5.5"),
     ("claude-fable-5-1", "Claude Fable 5.1"),
     ("claude-sonnet-5-5", "Claude Sonnet 5.5"),
+    ("claude-haiku-5-5-none", "Claude Haiku 5.5"),
     ("deepseek-ai_DeepSeek-V4-Pro", "DeepSeek V4 Pro"),
     ("deepseek-v4-pro-0813", "DeepSeek V4 Pro 0813"),
     ("gemini-2.5-pro", "Gemini 2.5 Pro"),

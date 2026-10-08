@@ -2,7 +2,7 @@
   "source": "score as in latency.json. Cost is the uncached list cost per tutor response: every prompt token at the model's input rate, output and reasoning tokens at its output rate, divided by the number of tutor calls. Measured from the model's full benchmark run, or from the `tutormoments latency` probe where that run predates usage capture (see each row's source). A ceiling -- provider prompt caching can cut the input share substantially. See docs/cost.md.",
   "cost": {
     "mode": "scaffolding_rigor",
-    "pricing_version": "2026-10-01"
+    "pricing_version": "2026-10-07"
   },
   "omitted": [
     "Claude Opus 4.8",
@@ -68,6 +68,25 @@
       "source": {
         "kind": "run",
         "run_id": "claude-sonnet-5-5_scaffolding_rigor_tutormoments-preview_20261001",
+        "n_conversations": 520
+      }
+    },
+    {
+      "id": "claude-haiku-5-5-none",
+      "name": "Claude Haiku 5.5",
+      "score": 0.673,
+      "uncached_cost_per_response_usd": 0.00110017,
+      "prompt_tokens_per_response": 10377,
+      "output_tokens_per_response": 125,
+      "n_calls": 1560,
+      "rates": {
+        "input_per_mtok": 0.1,
+        "output_per_mtok": 0.5,
+        "as_of": "2026-10-07"
+      },
+      "source": {
+        "kind": "run",
+        "run_id": "claude-haiku-5-5-none_scaffolding_rigor_tutormoments-preview_20261007",
         "n_conversations": 520
       }
     },
