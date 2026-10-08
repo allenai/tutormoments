@@ -22,7 +22,8 @@
       "gpt-5.5-2026-04-23-none": "gpt-5.5-2026-04-23-none_scaffolding_rigor_tutormoments-preview_20260929",
       "gpt-6-astra": "gpt-6-astra_scaffolding_rigor_tutormoments-preview_20260929",
       "gpt-6-luna-none": "gpt-6-luna-none_scaffolding_rigor_tutormoments-preview_20260929",
-      "gpt-6-sol-none": "gpt-6-sol-none_scaffolding_rigor_tutormoments-preview_20261001"
+      "gpt-6-sol-none": "gpt-6-sol-none_scaffolding_rigor_tutormoments-preview_20261001",
+      "claude-haiku-5-5-none": "claude-haiku-5-5-none_scaffolding_rigor_tutormoments-preview_20261007"
     }
   },
   "models": [
@@ -89,6 +90,19 @@
       "ttlt_s": 2.25,
       "ttft_p95_s": 1.48,
       "ttlt_p95_s": 3.33,
+      "ttft_concurrency": 4
+    },
+    {
+      "id": "claude-haiku-5-5-none",
+      "name": "Claude Haiku 5.5",
+      "latency_s": 1.21,
+      "latency_estimated": false,
+      "score": 0.673,
+      "ttft_s": 0.45,
+      "ttft_source": "run",
+      "ttlt_s": 1.16,
+      "ttft_p95_s": 0.74,
+      "ttlt_p95_s": 1.7,
       "ttft_concurrency": 4
     },
     {
