@@ -649,7 +649,8 @@ function renderTranscript(turns, bounds, prev, windowed) {
     const inMoment = placed && i >= bounds.start_row && i <= bounds.end_row;
     const row = el("div", [
       "turn",
-      t.role === "STUDENT" ? "student" : "tutor",
+      // Some providers leave a turn's speaker unattributed; it takes neither colour.
+      t.role === "STUDENT" ? "student" : t.role === "TUTOR" ? "tutor" : "",
       t.type.startsWith("[") ? "screen-event" : "",
       inMoment ? "in-moment" : "",
     ].filter(Boolean).join(" "));

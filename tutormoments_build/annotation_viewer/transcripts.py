@@ -74,6 +74,8 @@ class TranscriptIndex:
 
 def _rows(record, path):
     rows = record.get("turns") or []
+    if rows and _plain_dialogue(rows):
+        rows = [_from_plain_dialogue(position, row) for position, row in enumerate(rows)]
     if rows and "index" not in rows[0]:
         raise ValueError(
             f"{path}: transcript rows carry no 'index'. The pane draws the rendered row "
@@ -82,6 +84,36 @@ def _rows(record, path):
             "export provides."
         )
     return [_normalise(row) for row in rows]
+
+
+def _plain_dialogue(rows):
+    """Whether these are a dialogue-only provider's rows, such as tutoring_provider_c's.
+
+    Those transcripts carry no enrichments, so the tool rendered exactly these rows
+    and a row's position in the list is its position in the pane. They are told apart
+    by shape -- a `start_seconds` and no `type` or `index` -- rather than accepted for
+    merely lacking an `index`: the older provider A export lacks one too, and it is
+    missing the enrichment rows its annotators saw.
+    """
+    return all(
+        "start_seconds" in row and "type" not in row and "index" not in row
+        for row in rows
+    )
+
+
+def _from_plain_dialogue(position, row):
+    """A dialogue-only row in the v2 export's shape: one dialogue row per turn."""
+    seconds = row.get("start_seconds")
+    return row | {
+        "index": position,
+        "role": str(row.get("role") or "").upper(),
+        "type": "dialogue",
+        "timestamp": (
+            f"{int(seconds) // 60:02d}:{int(seconds) % 60:02d}"
+            if seconds is not None
+            else ""
+        ),
+    }
 
 
 def _turn_rows(rows):

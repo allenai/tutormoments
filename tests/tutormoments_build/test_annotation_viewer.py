@@ -1008,6 +1008,38 @@ class TestTranscriptIndex:
         with pytest.raises(ValueError, match="carry no 'index'"):
             index.rows("t1")
 
+    @staticmethod
+    def plain_dialogue(path, roles):
+        """A dialogue-only provider's transcript, shaped like tutoring_provider_c's."""
+        turns = [
+            {"turn_number": n, "start_seconds": 61.5 * n, "role": role, "text": "hi"}
+            for n, role in enumerate(roles, start=1)
+        ]
+        path.write_text(json.dumps({"transcript_id": "t1", "turns": turns}) + "\n")
+        return TranscriptIndex(path, {"t1"})
+
+    def test_a_dialogue_only_transcript_is_drawn_row_for_turn(self, tmp_path):
+        index = self.plain_dialogue(tmp_path / "c.jsonl", ["Tutor", "Student"])
+        rows = index.rows("t1")
+        assert [r["turn_index"] for r in rows] == [0, 1]
+        assert [r["turn_number"] for r in rows] == [1, 2]
+        assert {r["type"] for r in rows} == {"dialogue"}
+        assert index.turn_rows("t1") == {1: (0, 0), 2: (1, 1)}
+
+    def test_a_dialogue_only_transcript_uses_the_pane_role_names(self, tmp_path):
+        index = self.plain_dialogue(
+            tmp_path / "c.jsonl", ["Tutor", "Student", "Unattributed"]
+        )
+        assert [r["role"] for r in index.rows("t1")] == [
+            "TUTOR",
+            "STUDENT",
+            "UNATTRIBUTED",
+        ]
+
+    def test_a_dialogue_only_transcript_times_turns_from_their_start(self, tmp_path):
+        index = self.plain_dialogue(tmp_path / "c.jsonl", ["Tutor", "Student"])
+        assert [r["timestamp"] for r in index.rows("t1")] == ["01:01", "02:03"]
+
 
 class TestLocateSpan:
     """Turn numbers, which is all the export records, onto the rows the pane draws."""
