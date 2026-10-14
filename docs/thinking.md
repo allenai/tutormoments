@@ -49,6 +49,7 @@ tokens are spent. The authoritative validation is
 | gemini | exactly one of `thinking_budget` / `thinking_level`, optional `include_thoughts` | `generation_config.thinking_config` |
 | openai | `reasoning` (required) | `reasoning_effort` |
 | together | `reasoning_effort` for hybrid reasoners; none for open-weight internal reasoners | `reasoning_effort`; nothing sent when none |
+| meta | `reasoning_effort` (required) | `reasoning_effort` |
 
 Validation is shape-level: key ownership, mutual exclusion (Gemini's budget
 vs. level; the API 400s if both are sent), and structural rules (Anthropic
@@ -89,6 +90,14 @@ Provider notes:
   to sending no effort (430-2014), so the `max` label is Together's tier
   name, not a measured "most thinking". Recheck before comparing effort
   tiers across runs.
+- Meta (Muse Wonder, `muse-wonder-1.0`) always reasons: `reasoning_effort:
+  none` is a 400, and an omitted effort still reasons at a model-chosen
+  level, so config requires the key rather than letting omission stand for a
+  condition. Meta documents `minimal`/`low`/`medium`/`high`/`xhigh`/`max`
+  for Muse Wonder; the arm uses `high`. Reasoning is private (never streamed
+  or returned as text) and reported as `reasoning_tokens`, so smoke asserts
+  a stated effort against it; `minimal` is treated like Gemini's (zero
+  thinking is a WARN). See https://dev.meta.ai/docs/reasoning.
 - Anthropic `enabled` mode keeps the `max_tokens >= budget + 64` headroom
   rule; the client enforces it.
 - Gemini `thinking_budget: -1` is model-paced; `0` is off (rejected by

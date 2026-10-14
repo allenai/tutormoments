@@ -43,9 +43,10 @@ _PROVIDER_PREFIXES = [
     ("google/gemma", "together"),
     ("meta-llama/", "together"),
     ("qwen/", "together"),
+    ("muse-", "meta"),
 ]
 
-_KNOWN_PROVIDERS = {"anthropic", "gemini", "openai", "together"}
+_KNOWN_PROVIDERS = {"anthropic", "gemini", "meta", "openai", "together"}
 
 # The provider-native thinking keys config may state, per provider. These
 # mirror exactly the knobs the client knows how to send; an unknown key is a
@@ -55,6 +56,7 @@ NATIVE_THINKING_KEYS = {
     "gemini": {"thinking_budget", "thinking_level", "include_thoughts"},
     "openai": {"reasoning"},
     "together": {"reasoning_effort"},
+    "meta": {"reasoning_effort"},
 }
 
 
@@ -83,6 +85,8 @@ class WireThinking:
     openai_reasoning_effort: str | None = None
     # Together hybrid reasoners: reasoning_effort value | None (omit).
     together_reasoning_effort: str | None = None
+    # Meta Model API: reasoning_effort value (always stated; see _resolve_meta).
+    meta_reasoning_effort: str | None = None
 
     def describe(self) -> str:
         """Human-readable wire form, for logs and the smoke report."""
@@ -97,6 +101,8 @@ class WireThinking:
             return f"reasoning_effort={self.openai_reasoning_effort}"
         if self.together_reasoning_effort is not None:
             return f"reasoning_effort={self.together_reasoning_effort}"
+        if self.meta_reasoning_effort is not None:
+            return f"reasoning_effort={self.meta_reasoning_effort}"
         return "(none sent)"
 
 
@@ -307,6 +313,7 @@ def resolve_thinking(model: str, thinking: dict | None) -> WireThinking:
       param) plus optional ``effort``.
     - Together: ``reasoning_effort`` for hybrid reasoners (e.g.
       DeepSeek-V4-Pro-0813); ``{}`` for open-weight reasoners with no knob.
+    - Meta: ``reasoning_effort`` (required).
 
     thinking=None means "no stated condition": nothing is sent and nothing is
     checked. That path exists for non-benchmark direct calls only; every
@@ -331,6 +338,8 @@ def resolve_thinking(model: str, thinking: dict | None) -> WireThinking:
         return _resolve_anthropic(params)
     if provider == "together":
         return _resolve_together(params)
+    if provider == "meta":
+        return _resolve_meta(params)
     raise ValueError(f"Unsupported provider: {provider}")
 
 
@@ -398,6 +407,18 @@ def _resolve_together(params: dict) -> WireThinking:
             "together reasoning_effort must be a non-empty string."
         )
     return WireThinking(provider="together", together_reasoning_effort=effort)
+
+
+def _resolve_meta(params: dict) -> WireThinking:
+    _check_native_keys("meta", params, NATIVE_THINKING_KEYS["meta"])
+    # Required: an omitted reasoning_effort still reasons, at a level the
+    # model picks, so the condition would not be stated in the config.
+    if "reasoning_effort" not in params:
+        raise ThinkingConfigError("meta thinking config must set reasoning_effort.")
+    effort = params["reasoning_effort"]
+    if not isinstance(effort, str) or not effort:
+        raise ThinkingConfigError("meta reasoning_effort must be a non-empty string.")
+    return WireThinking(provider="meta", meta_reasoning_effort=effort)
 
 
 def _resolve_anthropic(params: dict) -> WireThinking:

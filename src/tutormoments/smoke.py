@@ -271,6 +271,12 @@ def _thinking_expectation(wire) -> str:
         return "off" if wire.openai_reasoning_effort == "none" else "required"
     if wire.together_reasoning_effort is not None:
         return "required"  # Together offers no working off switch (thinking.md)
+    if wire.meta_reasoning_effort is not None:
+        # Meta has no off switch (none is a 400); minimal asks for the
+        # shortest reasoning pass, which may use none, like Gemini's minimal.
+        if wire.meta_reasoning_effort == "minimal":
+            return "optional"
+        return "required"
     return "na"  # nothing sent: provider default / internal reasoners
 
 

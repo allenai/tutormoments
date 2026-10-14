@@ -105,6 +105,26 @@ def test_together_wire(thinking, effort):
     assert wire.openai_reasoning_effort is None
 
 
+def test_meta_wire():
+    wire = resolve_thinking("muse-wonder-1.0", {"reasoning_effort": "high"})
+    assert wire.provider == "meta"
+    assert wire.meta_reasoning_effort == "high"
+    assert wire.openai_reasoning_effort is None
+    assert wire.together_reasoning_effort is None
+    assert wire.describe() == "reasoning_effort=high"
+
+
+def test_meta_requires_a_stated_effort():
+    # Omitting reasoning_effort still reasons, at a model-chosen level, so an
+    # empty mapping would leave the condition unstated.
+    with pytest.raises(ThinkingConfigError, match="must set reasoning_effort"):
+        resolve_thinking("muse-wonder-1.0", {})
+    with pytest.raises(ThinkingConfigError, match="non-empty"):
+        resolve_thinking("muse-wonder-1.0", {"reasoning_effort": ""})
+    with pytest.raises(ThinkingConfigError, match="unknown key"):
+        resolve_thinking("muse-wonder-1.0", {"reasoning": "high"})
+
+
 def test_together_rejects_malformed_effort_and_ignored_switch():
     with pytest.raises(ThinkingConfigError, match="non-empty"):
         resolve_thinking("deepseek-ai/DeepSeek-V4-Pro-0813", {"reasoning_effort": ""})
@@ -218,6 +238,7 @@ def test_infer_provider_registered_models():
     assert infer_provider("gemini-3.5-flash") == "gemini"
     assert infer_provider("gpt-5.5-2026-04-23") == "openai"
     assert infer_provider("deepseek-ai/DeepSeek-V4-Pro") == "together"
+    assert infer_provider("muse-wonder-1.0") == "meta"
 
 
 def test_infer_provider_unregistered_falls_back_to_prefixes():
@@ -225,6 +246,7 @@ def test_infer_provider_unregistered_falls_back_to_prefixes():
     assert infer_provider("gpt-4o") == "openai"
     assert infer_provider("o3-mini") == "openai"
     assert infer_provider("qwen/Qwen3-235B") == "together"
+    assert infer_provider("muse-spark-1.3") == "meta"
 
 
 def test_infer_provider_is_case_insensitive():

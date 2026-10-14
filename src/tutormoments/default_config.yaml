@@ -12,6 +12,7 @@ providers:
   openai:    { env: OPENAI_API_KEY }
   gemini:    { env: GEMINI_API_KEY }
   together:  { env: TOGETHER_API_KEY }
+  meta:      { env: META_API_KEY }
 
 # Tutor roster: each key is an ARM -- a benchmark condition. `model` names the
 # provider model id, provider-native keys state the exact request parameters,
@@ -57,6 +58,10 @@ benchmark_models:
   # top effort tier. Replaces the DeepSeek-V4-Pro arm, which Together no
   # longer serves serverless. See docs/thinking.md for observed behaviour.
   deepseek-v4-pro-0813:    { model: deepseek-ai/DeepSeek-V4-Pro-0813, reasoning_effort: max, condition: max }
+  # Muse Wonder (Meta Model API). It always reasons: reasoning_effort none is
+  # a 400, and an omitted effort runs at a model-chosen level, so it is
+  # always stated. Levels run minimal..max.
+  muse-wonder-1.0:         { model: muse-wonder-1.0, reasoning_effort: high, condition: high }
 
 # Role blocks state provider-native thinking parameters the same way arms do.
 # "Off" is stated explicitly ({type: disabled}) rather than by omitting the

@@ -45,6 +45,7 @@ ROSTER = [
     "gpt-6-luna",
     "deepseek-ai/DeepSeek-V4-Pro",
     "deepseek-ai/DeepSeek-V4-Pro-0813",
+    "muse-wonder-1.0",
 ]
 
 

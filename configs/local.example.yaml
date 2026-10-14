@@ -14,6 +14,7 @@ providers:
   openai:    { env: OPENAI_API_KEY }
   gemini:    { env: GEMINI_API_KEY }
   together:  { env: TOGETHER_API_KEY }
+  meta:      { env: META_API_KEY }
 
 # Each key is an ARM (a benchmark condition). `model` names the provider model
 # id, provider-native keys state the exact request parameters, and `condition`
