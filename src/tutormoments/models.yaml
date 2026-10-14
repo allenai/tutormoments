@@ -42,7 +42,7 @@
 
 # Bumped whenever any pricing entry changes; run summaries record it so a
 # published cost stays interpretable after later rate updates.
-pricing_version: "2026-10-07"
+pricing_version: "2026-10-14"
 
 models:
   # --- Anthropic ---
@@ -218,6 +218,24 @@ models:
       cache_write: 0
       batch_multiplier: 0.5
       as_of: "2026-09-30"
+      source: https://ai.google.dev/gemini-api/docs/pricing
+  # Introductory rates, billed through 2026-11-30; Google doubles every rate
+  # (input 4.00, output 20.00, cache_read 0.20) from 2026-12-01. Re-price
+  # then, with a pricing_version bump. Implicit caching only (prompts of
+  # 4,096+ tokens); no storage charge applies to implicit hits. No >200k
+  # tier is listed. Batch requests reject max_output_tokens above 32,768
+  # ("decoding continuation is not supported for batch"), so this model
+  # cannot serve a batch role (scorer/groundtruth) without a batch-only cap;
+  # sync calls are unaffected (smoke, 2026-10-14).
+  gemini-4-argon:
+    provider: gemini
+    pricing:
+      input: 2.00
+      output: 10.00
+      cache_read: 0.10
+      cache_write: 0
+      batch_multiplier: 0.5
+      as_of: "2026-10-14"
       source: https://ai.google.dev/gemini-api/docs/pricing
 
   # --- OpenAI ---

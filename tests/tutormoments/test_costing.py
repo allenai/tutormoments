@@ -38,6 +38,7 @@ ROSTER = [
     "gemini-3.5-flash",
     "gemini-3.6-flash",
     "gemini-3.8-flash",
+    "gemini-4-argon",
     "gpt-5.4-mini-2026-03-17",
     "gpt-5.5-2026-04-23",
     "gpt-6-astra",
