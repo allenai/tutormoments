@@ -81,13 +81,15 @@ EXPECTED_ARM_WIRE = {
         None,
         "max",
     ),
+    "muse-wonder-1.0": ("muse-wonder-1.0", None, None, None, None, None, "high"),
 }
 
 
 def _assert_wire(model, level, expected):
-    # The Together effort is an optional trailing entry (None when omitted).
-    exp_model, anth, effort, gem, oai, *together = expected
-    tog_effort = together[0] if together else None
+    # The Together and Meta efforts are optional trailing entries (None when
+    # omitted).
+    exp_model, anth, effort, gem, oai, *rest = expected
+    tog_effort, meta_effort = (rest + [None, None])[:2]
     assert model == exp_model
     wire = resolve_thinking(model, level)
     assert wire.anthropic_thinking == anth
@@ -95,6 +97,7 @@ def _assert_wire(model, level, expected):
     assert wire.gemini_thinking_config == gem
     assert wire.openai_reasoning_effort == oai
     assert wire.together_reasoning_effort == tog_effort
+    assert wire.meta_reasoning_effort == meta_effort
 
 
 def test_default_roster_covers_expected_arms():

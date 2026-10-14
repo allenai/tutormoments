@@ -241,6 +241,8 @@ Concretely, per provider:
   *inline in the content stream*, so TTFT is held until after the closing tag. Without this
   they would look dramatically faster to first token than any student would experience.
 - **OpenAI** — reasoning is never streamed, so first content delta is both `ttfc` and `ttft`.
+- **Meta** — the same: reasoning stays private, so the first content delta is the first visible
+  token.
 
 **We report warm and cold separately rather than a single number.** See below.
 
@@ -278,7 +280,9 @@ Two corollaries for reading `output_tps`. On models that stream reasoning, most
 tokens/sec largely describes reasoning speed rather than how fast text reaches the student.
 On the OpenAI path it is not even that: reasoning is finished before `ttfc`, so the window
 `ttlt − ttfc` covers only the visible text while `output_tokens` still counts the reasoning,
-which is how `gpt-5.4-mini` posts a nominal 1,518 tokens/sec. Diagnostic only, as labelled.
+which is how `gpt-5.4-mini` posts a nominal 1,518 tokens/sec. Meta behaves the same way (no
+chunk arrives until reasoning is done; a probe of `muse-wonder-1.0` at `high` posted up to
+~25,000 tokens/sec). Diagnostic only, as labelled.
 
 ### Caching does not systematically improve latency
 
@@ -346,8 +350,14 @@ faster first token has to spend elsewhere.
 ### Caching fidelity — the biggest caveat
 
 **Only the Anthropic path and OpenAI's explicit-cache models send a real cache breakpoint.**
-Gemini ([client.py](../src/tutormoments/client.py)) and Together concatenate the cacheable
-prefix into the prompt instead, so neither caches *this conversation's* transcript.
+Gemini ([client.py](../src/tutormoments/client.py)), Together and Meta concatenate the
+cacheable prefix into the prompt instead, so none of them caches *this conversation's*
+transcript by design. Meta caches automatically and reports `cached_tokens`. On the
+2026-10-13 `muse-wonder-1.0` full run, 90–97% of tutor calls report a hit, above the 0.667
+ceiling for a real session cache, while the median read on a hit is only 102–230 tokens. As
+with Together, that is an incidental shared prefix, not this conversation's transcript, so the
+warm-figure gate below dashes its warm column. (A short pre-run probe with identical prompts
+seconds apart saw no hits at all.)
 
 The OpenAI models flagged `explicit_prompt_cache` in
 [`models.yaml`](../src/tutormoments/models.yaml) (GPT-6) have sent one since the fix in

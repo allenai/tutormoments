@@ -42,7 +42,13 @@ def _with_roster(tmp_path, roster_yaml: str):
 def test_packaged_default_config_parses_and_has_expected_roster():
     cfgmod._reset_config_cache()
     cfg = cfgmod.load_config()
-    assert set(cfg["providers"]) == {"anthropic", "openai", "gemini", "together"}
+    assert set(cfg["providers"]) == {
+        "anthropic",
+        "openai",
+        "gemini",
+        "together",
+        "meta",
+    }
     assert set(cfg["benchmark_models"]) == {
         "claude-opus-4-8",
         "claude-sonnet-4-6",
@@ -62,6 +68,7 @@ def test_packaged_default_config_parses_and_has_expected_roster():
         "gpt-6-sol-none",
         "gpt-6-luna-none",
         "deepseek-v4-pro-0813",
+        "muse-wonder-1.0",
     }
     assert cfg["benchmark_models"]["claude-opus-4-8"] == {
         "model": "claude-opus-4-8",
@@ -150,6 +157,14 @@ def test_resolve_arm_together():
     assert arm.model == "deepseek-ai/DeepSeek-V4-Pro-0813"
     assert arm.thinking == {"reasoning_effort": "max"}
     assert arm.condition == "max"
+
+
+def test_resolve_arm_meta():
+    arm = cfgmod.resolve_arm("muse-wonder-1.0")
+    assert arm.provider == "meta"
+    assert arm.model == "muse-wonder-1.0"
+    assert arm.thinking == {"reasoning_effort": "high"}
+    assert arm.condition == "high"
 
 
 def test_resolve_arm_gemini():

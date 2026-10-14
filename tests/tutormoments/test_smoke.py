@@ -470,6 +470,58 @@ def test_report_renders_ascii_and_json():
 # ---------------------------------------------------------------------------
 
 
+@pytest.mark.parametrize(
+    "effort,reasoning_tokens,status",
+    [
+        ("high", 412, PASS),
+        ("high", 0, FAIL),
+        # minimal is the shortest reasoning pass, not a guarantee of one.
+        ("minimal", 0, WARN),
+    ],
+)
+def test_meta_reasoning_effort_is_asserted(effort, reasoning_tokens, status):
+    model = "muse-wonder-1.0"
+    check = _sync_check(model, {"reasoning_effort": effort})
+    client = _FakeClient(
+        model,
+        response=SimpleNamespace(
+            text="answer",
+            usage=_usage(
+                provider="meta", reasoning=0, reasoning_tokens=reasoning_tokens
+            ),
+        ),
+    )
+    report = run_smoke(_plan(sync=[check]), client_factory=_factory({model: client}))
+    assert report.results[0].status == status
+    assert report.results[0].thinking_evidence == str(reasoning_tokens)
+
+
+def test_build_plan_skips_batch_for_meta(tmp_path):
+    from tutormoments.config import _reset_config_cache
+
+    cfg = tmp_path / "config.yaml"
+    cfg.write_text(
+        """
+providers:
+  meta: { env: META_API_KEY }
+benchmark_models:
+  wonder: { model: muse-wonder-1.0, reasoning_effort: high, condition: high }
+defaults: { trials: 1, max_turns: 5 }
+retry:    { max_retries: 5, base_delay: 5 }
+batch:    { timeout: 86400 }
+""",
+        encoding="utf-8",
+    )
+    _reset_config_cache()
+    try:
+        plan = build_smoke_plan(config_path=str(cfg), roles=["tutor"])
+        assert [c.provider for c in plan.sync_checks] == ["meta"]
+        assert plan.batch_checks == []
+        assert ("batch:meta", "provider has no batch API") in plan.skipped
+    finally:
+        _reset_config_cache()
+
+
 def test_build_plan_adds_cache_check_for_explicit_cache_arms(tmp_path):
     from tutormoments.config import _reset_config_cache
 
