@@ -102,7 +102,8 @@ Provider notes:
   describes `minimal` as using as few thinking tokens as possible, not as
   off: on 3.6 Flash (2026-09-30) a smoke ping produced zero thinking tokens,
   so smoke treats `minimal` like budget `-1` (zero thinking is a WARN, not a
-  FAIL). Any other level is expected to produce thinking.
+  FAIL). Any other level is expected to produce thinking. Gemini 4 Argon
+  accepts `low`/`medium`/`high` (default `medium`); its arm uses `high`.
 - The OpenAI o-series exposes only a depth knob (`reasoning`), never an off
   switch.
 

@@ -42,6 +42,8 @@ benchmark_models:
   # Flash is the newest Flash that still accepts minimal. See docs/thinking.md.
   gemini-3.8-flash:        { model: gemini-3.8-flash, include_thoughts: true, thinking_level: high, condition: high }
   gemini-3.6-flash:        { model: gemini-3.6-flash, include_thoughts: true, thinking_level: minimal, condition: minimal }
+  # Gemini 4 Argon accepts low/medium/high (default medium); no off level.
+  gemini-4-argon:          { model: gemini-4-argon, include_thoughts: true, thinking_level: high, condition: high }
   gpt-5.4-mini-2026-03-17: { model: gpt-5.4-mini-2026-03-17, reasoning: high, condition: high }
   gpt-5.5-2026-04-23:      { model: gpt-5.5-2026-04-23, reasoning: high, condition: high }
   # Same model with reasoning off (reasoning_effort=none); smoke asserts zero
