@@ -352,10 +352,12 @@ faster first token has to spend elsewhere.
 **Only the Anthropic path and OpenAI's explicit-cache models send a real cache breakpoint.**
 Gemini ([client.py](../src/tutormoments/client.py)), Together and Meta concatenate the
 cacheable prefix into the prompt instead, so none of them caches *this conversation's*
-transcript by design. Meta documents automatic caching reported as `cached_tokens`, but a
-2026-10-13 probe of `muse-wonder-1.0` on Chat Completions read back nothing: identical
-13.5k-token prompts seconds apart all reported `cached_tokens: 0`. If that holds, every Meta
-input token bills at the uncached rate and the warm-figure gate below dashes its warm column.
+transcript by design. Meta caches automatically and reports `cached_tokens`. On the
+2026-10-13 `muse-wonder-1.0` full run, 90–97% of tutor calls report a hit, above the 0.667
+ceiling for a real session cache, while the median read on a hit is only 102–230 tokens. As
+with Together, that is an incidental shared prefix, not this conversation's transcript, so the
+warm-figure gate below dashes its warm column. (A short pre-run probe with identical prompts
+seconds apart saw no hits at all.)
 
 The OpenAI models flagged `explicit_prompt_cache` in
 [`models.yaml`](../src/tutormoments/models.yaml) (GPT-6) have sent one since the fix in
