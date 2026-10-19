@@ -28,7 +28,9 @@
     "gpt-5.5-2026-04-23-none":     { provider: "openai", color: "#009E73", marker: "circle" },
     "gpt-6-astra":                 { provider: "openai", color: "#F0529C", marker: "star" },
     "gpt-6-sol-none":              { provider: "openai", color: "#F0529C", marker: "pentagon" },
-    "gpt-6-luna-none":             { provider: "openai", color: "#F0529C", marker: "square" }
+    "gpt-6-luna-none":             { provider: "openai", color: "#F0529C", marker: "square" },
+    // Meta: Okabe-Ito black, the palette's one unused hue.
+    "muse-wonder-1.0":             { provider: "meta", color: "#000000", marker: "hexagon" }
   };
 
   // Shared y-axis for the two score scatters, so a model sits at the same

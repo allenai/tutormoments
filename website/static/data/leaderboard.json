@@ -327,6 +327,25 @@
         "rigor": 0.585,
         "avoids_over": 0.777
       }
+    },
+    {
+      "id": "muse-wonder-1.0",
+      "name": "Muse Wonder",
+      "reasoning": "reasoning_effort: high",
+      "source": {
+        "plain": "muse-wonder-1.0_plain_tutormoments-preview_20261013",
+        "eval_aware": "muse-wonder-1.0_scaffolding_rigor_tutormoments-preview_20261013"
+      },
+      "plain": {
+        "scaffolding": 0.738,
+        "rigor": 0.1,
+        "avoids_over": 0.458
+      },
+      "eval_aware": {
+        "scaffolding": 0.954,
+        "rigor": 0.762,
+        "avoids_over": 0.875
+      }
     }
   ]
 }

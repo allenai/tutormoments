@@ -80,6 +80,7 @@ MODELS = [
     ("gpt-6-astra", "GPT-6 Astra"),
     ("gpt-6-sol-none", "GPT-6 Sol"),
     ("gpt-6-luna-none", "GPT-6 Luna"),
+    ("muse-wonder-1.0", "Muse Wonder"),
 ]
 
 # The working paper's models and the provider-native reasoning parameters
