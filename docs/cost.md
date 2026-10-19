@@ -129,7 +129,8 @@ The per-provider normalization, briefly: OpenAI's `cached_tokens` (and, on GPT-5
 models, `cache_write_tokens`) are subtracted out of `prompt_tokens`; Gemini's
 `cached_content_token_count` and `thoughts_token_count` are captured directly; Anthropic's
 `input_tokens` already *excludes* its cache buckets, so they add on top of it; Together
-reports `cached_tokens` in the OpenAI style. One special case: OpenAI's Batch API does not
+and Meta report `cached_tokens` in the OpenAI style (Meta's cache meters no write charge,
+so its `cache_write` rate is 0). One special case: OpenAI's Batch API does not
 apply caching, so batch usage on that path records `cache_read = 0`.
 
 ## The pricing table
@@ -283,8 +284,8 @@ so the chart follows price changes without re-running anything (`cost.json` reco
    per-call capture (every probe up to 2026-09) has no usage in its samples.
 
 A model with neither source is left off the chart and named in the footnote, never
-plotted at 0. `output_tokens_per_call` includes reasoning on every provider. OpenAI and
-Together already count reasoning inside `output`, and their `reasoning` bucket stays 0, so
+plotted at 0. `output_tokens_per_call` includes reasoning on every provider. OpenAI,
+Together and Meta already count reasoning inside `output`, and their `reasoning` bucket stays 0, so
 no separate reasoning figure is reported: it would not be comparable across providers.
 
 The two sources agree. On the 2026-09-29 full runs of four arms (GPT-6 Astra, GPT-6 Luna,

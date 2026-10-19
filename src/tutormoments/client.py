@@ -67,6 +67,7 @@ class ModelResponse:
 
 
 TOGETHER_BASE_URL = "https://api.together.xyz/v1"
+META_BASE_URL = "https://api.meta.ai/v1"
 
 
 # ===================================================================
@@ -255,6 +256,15 @@ class ModelClient:
                 raise RuntimeError("TOGETHER_API_KEY not found in environment")
             return OpenAI(api_key=api_key, base_url=TOGETHER_BASE_URL)
 
+        elif self.provider == "meta":
+            # Meta Model API Chat Completions is OpenAI-compatible too.
+            from openai import OpenAI
+
+            api_key = os.getenv("META_API_KEY")
+            if not api_key:
+                raise RuntimeError("META_API_KEY not found in environment")
+            return OpenAI(api_key=api_key, base_url=META_BASE_URL)
+
         else:
             raise ValueError(f"Unsupported provider: {self.provider}")
 
@@ -351,6 +361,16 @@ class ModelClient:
                     )
                 elif self.provider == "together":
                     resp = self._generate_together(
+                        prompt,
+                        json_mode,
+                        max_tokens,
+                        timeout,
+                        wire,
+                        cacheable_prefix=cacheable_prefix,
+                        stream=stream,
+                    )
+                elif self.provider == "meta":
+                    resp = self._generate_meta(
                         prompt,
                         json_mode,
                         max_tokens,
@@ -599,14 +619,66 @@ class ModelClient:
         )
         return ModelResponse(text=text, usage=usage)
 
+    def _generate_meta(
+        self,
+        prompt,
+        json_mode,
+        max_tokens,
+        timeout,
+        wire: WireThinking,
+        cacheable_prefix: str | None = None,
+        stream: bool = False,
+    ):
+        """Meta Model API call via OpenAI-compatible chat completions.
+
+        Meta takes `max_completion_tokens` as an optional hard cap and
+        otherwise bounds only input + output by the context window, so
+        max_tokens=None (the benchmark's "no cap") omits the param unless the
+        registry states a per-model max_output_cap. Reasoning stays private:
+        it is billed and reported under
+        completion_tokens_details.reasoning_tokens but never streamed, so the
+        first content delta is the first visible token. Prompt caching is
+        automatic (no breakpoints to place), so the cacheable head is just
+        concatenated into the prompt; hits come back as
+        prompt_tokens_details.cached_tokens.
+        """
+        content = (cacheable_prefix or "") + prompt
+        kwargs = {
+            "model": self.model,
+            "messages": [{"role": "user", "content": content}],
+            "timeout": timeout,
+        }
+        cap = max_output_cap(self.model)
+        if max_tokens and cap is not None:
+            max_tokens = min(max_tokens, cap)
+        elif not max_tokens:
+            max_tokens = cap
+        if max_tokens:
+            kwargs["max_completion_tokens"] = max_tokens
+        if wire.meta_reasoning_effort:
+            kwargs["reasoning_effort"] = wire.meta_reasoning_effort
+        if json_mode:
+            kwargs["response_format"] = {"type": "json_object"}
+
+        if stream:
+            return self._stream_openai_compatible(kwargs, inline_think=False)
+
+        response = self._client.chat.completions.create(**kwargs)
+
+        text = response.choices[0].message.content or ""
+        usage = _openai_style_usage(
+            response.usage, provider=self.provider, model=self.model, endpoint="sync"
+        )
+        return ModelResponse(text=text, usage=usage)
+
     def _stream_openai_compatible(self, kwargs: dict, *, inline_think: bool):
         """Stream an OpenAI-compatible chat completion, timing the deltas.
 
-        Shared by the OpenAI and Together paths -- same wire protocol, one
-        difference that matters for TTFT:
+        Shared by the OpenAI, Together and Meta paths -- same wire protocol,
+        one difference that matters for TTFT:
 
-        - OpenAI (chat.completions) never streams reasoning tokens, so the
-          first content delta is both ttfc and ttft.
+        - OpenAI (chat.completions) and Meta never stream reasoning tokens, so
+          the first content delta is both ttfc and ttft.
         - Together's open-weight reasoners emit ``<think>...</think>`` inline
           in the content stream, so `inline_think=True` gates ttft past the
           closing tag (see _InlineThinkGate).
@@ -850,7 +922,7 @@ def resolve_max_tokens(client: "ModelClient", max_tokens: int) -> int | None:
     Takes the client rather than a model string so it reuses the provider the
     client already resolved at construction, instead of re-parsing the name.
 
-    Returns None for a provider with no output cap of its own (Together):
+    Returns None for a provider with no output cap of its own (Together, Meta):
     the caller then omits the param rather than inventing a limit.
     """
     if max_tokens <= 0:
@@ -870,6 +942,9 @@ MAX_OUTPUT_TOKENS = {
     # None = no provider output cap: Together bounds only input + output by
     # the context window, so the param is omitted (see _generate_together).
     "together": None,
+    # Meta likewise: max_completion_tokens is an optional cap, input + output
+    # share the context window, so the param is omitted (see _generate_meta).
+    "meta": None,
 }
 
 
@@ -1003,7 +1078,7 @@ def _gemini_batch_usage(usage_meta: dict, *, model: str) -> dict:
 
 
 def _openai_style_usage(usage_obj, *, provider: str, model: str, endpoint: str) -> dict:
-    """Normalize an OpenAI-shaped usage object (OpenAI + Together, sync/stream).
+    """Normalize an OpenAI-shaped usage object (OpenAI, Together, Meta; sync/stream).
 
     prompt_tokens includes the cached share, reported under
     prompt_tokens_details.cached_tokens. Together populates it too (observed

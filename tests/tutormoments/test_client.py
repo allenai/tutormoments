@@ -41,6 +41,7 @@ from tutormoments.models import ThinkingConfigError
         ("gemini-3.1-pro-preview", "gemini"),
         ("deepseek-ai/DeepSeek-V3", "together"),
         ("meta-llama/Llama-3.3-70B", "together"),
+        ("muse-wonder-1.0", "meta"),
     ],
 )
 def test_infer_provider_routes_by_prefix(model, expected):
@@ -1351,6 +1352,105 @@ def test_resolve_max_tokens_together_is_uncapped(monkeypatch):
         c = ModelClient("deepseek-ai/DeepSeek-V4-Pro-0813")
     assert resolve_max_tokens(c, 0) is None
     assert resolve_max_tokens(c, 50000) == 50000
+
+
+def _meta_create(monkeypatch, *, stream=False, max_tokens=0, usage_obj=None):
+    """Run one Meta generate(); return (kwargs sent to the SDK, OpenAI() kwargs, response)."""
+    monkeypatch.setenv("META_API_KEY", "meta-test")
+    usage_obj = usage_obj or SimpleNamespace(
+        prompt_tokens=5, completion_tokens=3, total_tokens=8
+    )
+    with patch("openai.OpenAI") as MockOpenAI:
+        client_obj = MagicMock()
+        if stream:
+            delta = SimpleNamespace(content="hi")
+            client_obj.chat.completions.create.return_value = iter(
+                [
+                    SimpleNamespace(choices=[SimpleNamespace(delta=delta)], usage=None),
+                    SimpleNamespace(choices=[], usage=usage_obj),
+                ]
+            )
+        else:
+            client_obj.chat.completions.create.return_value = SimpleNamespace(
+                choices=[SimpleNamespace(message=SimpleNamespace(content="hi"))],
+                usage=usage_obj,
+            )
+        MockOpenAI.return_value = client_obj
+        resp = ModelClient("muse-wonder-1.0").generate(
+            "Q",
+            json_mode=False,
+            thinking={"reasoning_effort": "high"},
+            cacheable_prefix="HEAD ",
+            stream=stream,
+            max_tokens=max_tokens,
+        )
+    return (
+        client_obj.chat.completions.create.call_args.kwargs,
+        MockOpenAI.call_args.kwargs,
+        resp,
+    )
+
+
+@pytest.mark.parametrize("stream", [False, True])
+def test_meta_request_shape(monkeypatch, stream):
+    kwargs, init_kwargs, _ = _meta_create(monkeypatch, stream=stream)
+    assert init_kwargs == {"api_key": "meta-test", "base_url": "https://api.meta.ai/v1"}
+    assert kwargs["model"] == "muse-wonder-1.0"
+    assert kwargs["reasoning_effort"] == "high"
+    # Caching is automatic: the head is concatenated, no breakpoint params.
+    assert kwargs["messages"] == [{"role": "user", "content": "HEAD Q"}]
+    assert "prompt_cache_options" not in kwargs
+    # max_tokens=0 (the benchmark's "no cap") omits both cap params.
+    assert "max_completion_tokens" not in kwargs
+    assert "max_tokens" not in kwargs
+    if stream:
+        assert kwargs["stream_options"] == {"include_usage": True}
+
+
+def test_meta_explicit_max_tokens_is_sent_as_max_completion_tokens(monkeypatch):
+    kwargs, _, _ = _meta_create(monkeypatch, max_tokens=50000)
+    assert kwargs["max_completion_tokens"] == 50000
+    assert "max_tokens" not in kwargs
+
+
+def test_resolve_max_tokens_meta_is_uncapped(monkeypatch):
+    from tutormoments.client import resolve_max_tokens
+
+    monkeypatch.setenv("META_API_KEY", "meta-test")
+    with patch("openai.OpenAI"):
+        c = ModelClient("muse-wonder-1.0")
+    assert resolve_max_tokens(c, 0) is None
+
+
+def test_meta_sync_and_stream_report_identical_vectors(monkeypatch):
+    usage_obj = SimpleNamespace(
+        prompt_tokens=50,
+        completion_tokens=10,
+        total_tokens=60,
+        prompt_tokens_details=SimpleNamespace(cached_tokens=7),
+        completion_tokens_details=SimpleNamespace(reasoning_tokens=4),
+    )
+    _, _, sync = _meta_create(monkeypatch, usage_obj=usage_obj)
+    _, _, streamed = _meta_create(monkeypatch, stream=True, usage_obj=usage_obj)
+
+    assert sync.usage["provider"] == "meta"
+    assert sync.usage["cache_read"] == 7
+    assert sync.usage["input_uncached"] == 43
+    # reasoning_tokens is the informational subset of output, not a bucket.
+    assert sync.usage["reasoning_tokens"] == 4
+    assert sync.usage["output"] == 10
+    assert streamed.text == "hi"
+    assert streamed.timing is not None
+    for key, value in sync.usage.items():
+        if key != "endpoint":
+            assert streamed.usage[key] == value, key
+
+
+def test_meta_requires_api_key(monkeypatch):
+    monkeypatch.delenv("META_API_KEY", raising=False)
+    with patch("openai.OpenAI"):
+        with pytest.raises(RuntimeError, match="META_API_KEY"):
+            ModelClient("muse-wonder-1.0")
 
 
 def test_anthropic_sync_cache_buckets_stay_disjoint_from_input(monkeypatch):

@@ -42,7 +42,7 @@
 
 # Bumped whenever any pricing entry changes; run summaries record it so a
 # published cost stays interpretable after later rate updates.
-pricing_version: "2026-10-07"
+pricing_version: "2026-10-13"
 
 models:
   # --- Anthropic ---
@@ -330,3 +330,20 @@ models:
       batch_multiplier: 1.0
       as_of: "2026-09-28"
       source: https://www.together.ai/pricing
+
+  # --- Meta ---
+  # Meta Model API (Standard mode -- Muse Wonder has no Contributor-mode
+  # variant). Caching is automatic and meters no write premium: cached_tokens
+  # are a discounted subset of input. No batch API, so batch_multiplier is 1.0.
+  # No max_output_cap: max_completion_tokens is optional and input + output
+  # share the 1,048,576-token context window.
+  muse-wonder-1.0:
+    provider: meta
+    pricing:
+      input: 4.00
+      output: 20.00
+      cache_read: 0.20
+      cache_write: 0
+      batch_multiplier: 1.0
+      as_of: "2026-10-13"
+      source: https://dev.meta.ai/docs/pricing-rate-limits
