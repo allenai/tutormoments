@@ -23,7 +23,8 @@
       "gpt-6-astra": "gpt-6-astra_scaffolding_rigor_tutormoments-preview_20260929",
       "gpt-6-luna-none": "gpt-6-luna-none_scaffolding_rigor_tutormoments-preview_20260929",
       "gpt-6-sol-none": "gpt-6-sol-none_scaffolding_rigor_tutormoments-preview_20261001",
-      "claude-haiku-5-5-none": "claude-haiku-5-5-none_scaffolding_rigor_tutormoments-preview_20261007"
+      "claude-haiku-5-5-none": "claude-haiku-5-5-none_scaffolding_rigor_tutormoments-preview_20261007",
+      "muse-wonder-1.0": "muse-wonder-1.0_scaffolding_rigor_tutormoments-preview_20261013"
     }
   },
   "models": [
@@ -259,6 +260,19 @@
       "ttlt_s": 1.02,
       "ttft_p95_s": 1.53,
       "ttlt_p95_s": 1.88,
+      "ttft_concurrency": 4
+    },
+    {
+      "id": "muse-wonder-1.0",
+      "name": "Muse Wonder",
+      "latency_s": 12.94,
+      "latency_estimated": false,
+      "score": 0.858,
+      "ttft_s": 11.14,
+      "ttft_source": "run",
+      "ttlt_s": 11.53,
+      "ttft_p95_s": 18.52,
+      "ttlt_p95_s": 18.98,
       "ttft_concurrency": 4
     }
   ]

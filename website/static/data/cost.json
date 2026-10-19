@@ -2,7 +2,7 @@
   "source": "score as in latency.json. Cost is the uncached list cost per tutor response: every prompt token at the model's input rate, output and reasoning tokens at its output rate, divided by the number of tutor calls. Measured from the model's full benchmark run, or from the `tutormoments latency` probe where that run predates usage capture (see each row's source). A ceiling -- provider prompt caching can cut the input share substantially. See docs/cost.md.",
   "cost": {
     "mode": "scaffolding_rigor",
-    "pricing_version": "2026-10-07"
+    "pricing_version": "2026-10-13"
   },
   "omitted": [
     "Claude Opus 4.8",
@@ -220,6 +220,25 @@
       "source": {
         "kind": "run",
         "run_id": "gpt-6-luna-none_scaffolding_rigor_tutormoments-preview_20260929",
+        "n_conversations": 520
+      }
+    },
+    {
+      "id": "muse-wonder-1.0",
+      "name": "Muse Wonder",
+      "score": 0.858,
+      "uncached_cost_per_response_usd": 0.0433717,
+      "prompt_tokens_per_response": 6419,
+      "output_tokens_per_response": 885,
+      "n_calls": 1560,
+      "rates": {
+        "input_per_mtok": 4.0,
+        "output_per_mtok": 20.0,
+        "as_of": "2026-10-13"
+      },
+      "source": {
+        "kind": "run",
+        "run_id": "muse-wonder-1.0_scaffolding_rigor_tutormoments-preview_20261013",
         "n_conversations": 520
       }
     }

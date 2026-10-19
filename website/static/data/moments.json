@@ -96,8 +96,8 @@
         "eval_aware": 1
       },
       "n_models": {
-        "plain": 18,
-        "eval_aware": 18
+        "plain": 19,
+        "eval_aware": 19
       },
       "models": {
         "claude-opus-4-8": {
@@ -1479,6 +1479,88 @@
             "right": false,
             "action": "The tutor is scaffolding. They break the problem into a series of micro-steps and ask funneling questions \u2014 first about which operation undoes addition, then what specific value to subtract, and finally what the resulting equation and solution are. Each sub-step is confirmed before moving to the next."
           }
+        },
+        "muse-wonder-1.0": {
+          "plain": {
+            "turns": [
+              {
+                "role": "tutor",
+                "text": "That's totally okay, Kayla \u2014 let's break it into tiny little steps together."
+              },
+              {
+                "role": "tutor",
+                "text": "You actually just did one like this on number 14, remember? We talked about doing the opposite operation."
+              },
+              {
+                "role": "tutor",
+                "text": "So first, just look at what's happening here: x + 5 = 15"
+              },
+              {
+                "role": "tutor",
+                "text": "What operation is that + sign showing \u2014 are we adding, subtracting, multiplying, or dividing?"
+              },
+              {
+                "role": "student",
+                "text": "Adding."
+              },
+              {
+                "role": "tutor",
+                "text": "Exactly \u2014 good eye, Kayla!"
+              },
+              {
+                "role": "tutor",
+                "text": "So if x is *adding* 5, what opposite operation would undo that +5 and get x all by itself?"
+              },
+              {
+                "role": "student",
+                "text": "Subtracting."
+              },
+              {
+                "role": "tutor",
+                "text": "Perfect \u2014 that's exactly it, Kayla!"
+              }
+            ],
+            "label": "scaffolding",
+            "overscaffold": true,
+            "right": false,
+            "action": "The tutor is scaffolding. They remind the student of a similar prior problem, present the equation, and then ask narrow guiding questions \u2014 first to identify the operation, then to identify the inverse operation. The tutor does most of the cognitive setup, leaving the student only to label the operation and its opposite."
+          },
+          "eval_aware": {
+            "turns": [
+              {
+                "role": "tutor",
+                "text": "That's okay, we can figure it out together. Look at the x here \u2014 what operation is happening to it? What's the sign right next to it in x + 5 = 15?"
+              },
+              {
+                "role": "student",
+                "text": "Plus."
+              },
+              {
+                "role": "tutor",
+                "text": "Exactly \u2014 it's plus, x is having 5 added to it."
+              },
+              {
+                "role": "tutor",
+                "text": "Remember we solve by doing the *opposite* operation to get the variable by itself. So what's the opposite of adding 5?"
+              },
+              {
+                "role": "student",
+                "text": "Um, subtracting five."
+              },
+              {
+                "role": "tutor",
+                "text": "Yes, exactly \u2014 subtracting five."
+              },
+              {
+                "role": "tutor",
+                "text": "So let's try that here. If we subtract 5 from both sides of x + 5 = 15 to keep it balanced, what would be left on the left side, and what would you get on the right side?"
+              }
+            ],
+            "label": "scaffolding",
+            "overscaffold": true,
+            "right": false,
+            "action": "The tutor scaffolds throughout the moment. They break the equation-solving process into very small sub-steps, asking the student to identify the operation, then prompting them for the inverse operation, then setting up the arithmetic for them. The tutor also explicitly reminds the student of the inverse-operations strategy rather than prompting the student to recall it independently."
+          }
         }
       }
     },
@@ -1578,8 +1660,8 @@
         "eval_aware": 2
       },
       "n_models": {
-        "plain": 18,
-        "eval_aware": 18
+        "plain": 19,
+        "eval_aware": 19
       },
       "models": {
         "claude-opus-4-8": {
@@ -2893,6 +2975,96 @@
             "right": false,
             "action": "The tutor is scaffolding. The tutor selects a number, breaks the place value task into sub-steps, and asks guided questions about each digit individually. After the student correctly identifies all three place names, the tutor restates the student's correct answer and then asks a follow-up about the value of each digit. When the student correctly gives the value of one digit, the tutor confirms and asks about the remaining digits one at a time."
           }
+        },
+        "muse-wonder-1.0": {
+          "plain": {
+            "turns": [
+              {
+                "role": "tutor",
+                "text": "Yay, thank you! I love hearing you say it out loud."
+              },
+              {
+                "role": "student",
+                "text": "The eight is the hundreds and the zero is the tens and the one is the ones."
+              },
+              {
+                "role": "tutor",
+                "text": "Yes! That's perfect, Mila! You got all three places right."
+              },
+              {
+                "role": "student",
+                "text": "Hehe."
+              },
+              {
+                "role": "tutor",
+                "text": "Hehe, I love that happy laugh \u2014 you should be proud, you did that all by yourself!"
+              },
+              {
+                "role": "tutor",
+                "text": "Now let's put all three together for this number, 801."
+              },
+              {
+                "role": "tutor",
+                "text": "The 8 is in the hundreds place, so that part is eight *hundred*."
+              },
+              {
+                "role": "tutor",
+                "text": "The 0 is in the tens place, so we don't really say anything for the tens \u2014 there are no tens."
+              },
+              {
+                "role": "tutor",
+                "text": "And the 1 is in the ones place, so that part is just one."
+              },
+              {
+                "role": "tutor",
+                "text": "So eight hundred... and one. Can you try saying the whole number out loud for me?"
+              }
+            ],
+            "label": "scaffolding",
+            "overscaffold": true,
+            "right": false,
+            "action": "The tutor scaffolds heavily. After affirming the student's correct identification of place values, the tutor walks through each digit's contribution to the number name step by step, essentially explaining the entire process. The tutor only asks the student to repeat the fully assembled number at the end."
+          },
+          "eval_aware": {
+            "turns": [
+              {
+                "role": "tutor",
+                "text": "Great, let's try it that way."
+              },
+              {
+                "role": "tutor",
+                "text": "Look at the 8 in 801 first \u2014 what place is that 8 in?"
+              },
+              {
+                "role": "student",
+                "text": "Um, the hundreds."
+              },
+              {
+                "role": "tutor",
+                "text": "Yes, that's right \u2014 hundreds place!"
+              },
+              {
+                "role": "tutor",
+                "text": "So if the 8 is sitting in the hundreds place, how much is that 8 worth on its own?"
+              },
+              {
+                "role": "student",
+                "text": "Um, eight hundred."
+              },
+              {
+                "role": "tutor",
+                "text": "Yes! Eight hundred \u2014 exactly right."
+              },
+              {
+                "role": "tutor",
+                "text": "Now let's look at the middle one \u2014 the 0. What place is that 0 sitting in?"
+              }
+            ],
+            "label": "scaffolding",
+            "overscaffold": true,
+            "right": false,
+            "action": "The tutor is scaffolding. They break down the problem digit by digit, asking guided questions about each digit's place and value individually. The tutor confirms each correct response and immediately moves on to the next sub-step, continuing the same level of support throughout."
+          }
         }
       }
     },
@@ -2991,8 +3163,8 @@
         "eval_aware": 6
       },
       "n_models": {
-        "plain": 18,
-        "eval_aware": 18
+        "plain": 19,
+        "eval_aware": 19
       },
       "models": {
         "claude-opus-4-8": {
@@ -4554,6 +4726,88 @@
             "right": true,
             "action": "The tutor scaffolds by breaking the problem into guided sub-questions, asking the student to identify what a key quantity represents and to build the expression step by step. Once the student successfully constructs the equation and selects the correct answer, the tutor pushes for rigor by asking the student to explain in their own words why the multiplication yields the total."
           }
+        },
+        "muse-wonder-1.0": {
+          "plain": {
+            "turns": [
+              {
+                "role": "tutor",
+                "text": "Ha, I appreciate you being honest about that \u2014 that's actually helpful."
+              },
+              {
+                "role": "student",
+                "text": "Yeah."
+              },
+              {
+                "role": "tutor",
+                "text": "Thank you for actually saying that \u2014 that's really helpful."
+              },
+              {
+                "role": "student",
+                "text": "So what's the next one?"
+              },
+              {
+                "role": "tutor",
+                "text": "Deal \u2014 we'll do the next one, but I don't want you to have to guess on it."
+              },
+              {
+                "role": "tutor",
+                "text": "Look at B again: 40 = c \u00d7 5"
+              },
+              {
+                "role": "tutor",
+                "text": "The 40 is the *total*, the 5 is the bags, and c is how many are in *each* bag. So total = bags \u00d7 in each bag."
+              },
+              {
+                "role": "tutor",
+                "text": "Quick check before we move on: if c was 8, would 5 bags give us 40 total?"
+              }
+            ],
+            "label": "scaffolding",
+            "overscaffold": true,
+            "right": false,
+            "action": "The tutor is scaffolding. After acknowledging the student's honesty, the tutor revisits the problem and explains the meaning of each variable and the relationship between them, effectively doing the conceptual work for the student. The tutor then asks a simple plug-in verification question at the end."
+          },
+          "eval_aware": {
+            "turns": [
+              {
+                "role": "tutor",
+                "text": "I appreciate you being honest about that \u2014 that's actually helpful.\n\nLet's turn that guess into something you *know* instead of just guessing next time. Forget the letter c for a second."
+              },
+              {
+                "role": "tutor",
+                "text": "Pretend we do know how many are in each bag. Say there are 5 bags, and each bag has 4 bars.\n\nHow many bars would there be in total, and what multiplication would you do to figure that out?"
+              },
+              {
+                "role": "student",
+                "text": "5 times 4 equals 20."
+              },
+              {
+                "role": "tutor",
+                "text": "Exactly \u2014 5 \u00d7 4 = 20. That's the pattern we need."
+              },
+              {
+                "role": "tutor",
+                "text": "In that one, the 4 was the bars in *each* bag, and the 20 was the total.\n\nSo if we *don't* know the bars in each bag \u2014 we call that unknown c \u2014 and the total is now 40 instead of 20, can you write that same multiplication, just swapping in c and 40?"
+              },
+              {
+                "role": "student",
+                "text": "Um, so like, 5 times c equals 40."
+              },
+              {
+                "role": "tutor",
+                "text": "Exactly \u2014 that's you building it, not guessing. 5 \u00d7 c = 40."
+              },
+              {
+                "role": "tutor",
+                "text": "Now look back at A, B, C, and D. Which one is saying that *same* thing, even if the order is flipped a little?"
+              }
+            ],
+            "label": "both",
+            "overscaffold": true,
+            "right": false,
+            "action": "The tutor scaffolds heavily. They construct a concrete numerical analogy with simple values, walk the student through the multiplication pattern, and then explicitly prompt the student to substitute the variable and new total into the same structure. The tutor essentially models the reasoning with concrete numbers and asks the student to transfer the pattern to the algebraic version."
+          }
         }
       }
     },
@@ -4650,11 +4904,11 @@
       },
       "n_right": {
         "plain": 4,
-        "eval_aware": 10
+        "eval_aware": 11
       },
       "n_models": {
-        "plain": 18,
-        "eval_aware": 18
+        "plain": 19,
+        "eval_aware": 19
       },
       "models": {
         "claude-opus-4-8": {
@@ -5940,6 +6194,88 @@
             "right": true,
             "action": "The tutor begins with a push for rigor by asking the student to justify their answer choice and think about the positions of the angles. When the student reveals a misconception about the diagram, the tutor scaffolds by directing the student's attention to specific features of the diagram and asking whether the angle opposite the given angle is correctly identified. Once the student correctly identifies the positions of the labeled angles, the tutor asks a guiding question about the relevant angle relationship."
           }
+        },
+        "muse-wonder-1.0": {
+          "plain": {
+            "turns": [
+              {
+                "role": "tutor",
+                "text": "Let's hold off on checking that one for a sec \u2014 can you walk me through why you picked D?"
+              },
+              {
+                "role": "tutor",
+                "text": "Look at where $a$ is compared to the $70^\\circ$ angle. Are they next to each other, or are they across from each other where the two lines cross?"
+              },
+              {
+                "role": "student",
+                "text": "They're across from each other."
+              },
+              {
+                "role": "tutor",
+                "text": "Perfect, yeah \u2014 they're right across from each other where the two lines cross."
+              },
+              {
+                "role": "tutor",
+                "text": "Those are called vertically opposite angles. When angles are opposite like that, what does that tell us about their sizes \u2014 do you think they're the same size, or different sizes?"
+              },
+              {
+                "role": "student",
+                "text": "Um, the same size."
+              },
+              {
+                "role": "tutor",
+                "text": "Exactly \u2014 same size."
+              },
+              {
+                "role": "tutor",
+                "text": "So if $a$ is across from the $70^\\circ$ angle and they're the same size, what number has to $a$ be?"
+              },
+              {
+                "role": "tutor",
+                "text": "Look back at A, B, C, and D \u2014 which choice is saying that?"
+              }
+            ],
+            "label": "both",
+            "overscaffold": true,
+            "right": false,
+            "action": "The tutor initially pushes for rigor by asking the student to justify their answer choice, but immediately pivots to scaffolding before the student responds. The tutor asks a sequence of funneling questions \u2014 about the spatial relationship between angles, whether vertically opposite angles are equal, and which answer choice matches \u2014 effectively guiding the student step-by-step toward the correct answer."
+          },
+          "eval_aware": {
+            "turns": [
+              {
+                "role": "tutor",
+                "text": "Okay, before we check it \u2014 can you walk me through why you picked D?\n\nWhat would the 2a in that equation mean in the diagram?"
+              },
+              {
+                "role": "student",
+                "text": "Um, like, the two a would be like, uh, two times the angle a. Because there's like two angles that are the same, like a and b, so it would be two a plus seventy equals three sixty."
+              },
+              {
+                "role": "tutor",
+                "text": "That's a good thought \u2014 2a *would* mean two angles that are both size a added together.\n\nLet's test that pair you picked. Look closely at a and b in the picture \u2014 can you point to each one for me?"
+              },
+              {
+                "role": "tutor",
+                "text": "Does b look like it opens the same amount as a, or does one of them look wider than the other?"
+              },
+              {
+                "role": "student",
+                "text": "Um, b looks wider than a."
+              },
+              {
+                "role": "tutor",
+                "text": "Exactly \u2014 good catch. So b can't be counted as a second *a*."
+              },
+              {
+                "role": "tutor",
+                "text": "Is there a different angle in the diagram that *does* open the same amount as a? Can you point to it and tell me where it is compared to a?"
+              }
+            ],
+            "label": "both",
+            "overscaffold": false,
+            "right": true,
+            "action": "The tutor pushes for rigor by asking the student to justify their answer choice and explain what a term in the equation means in the context of the diagram. When the student reveals a misconception (assuming two visually different angles are equal), the tutor guides the student to examine the diagram more closely and identify the error themselves, asking whether the two angles appear equal. After the student correctly notices the discrepancy, the tutor prompts them to find which angle actually matches."
+          }
         }
       }
     },
@@ -6035,11 +6371,11 @@
       },
       "n_right": {
         "plain": 3,
-        "eval_aware": 12
+        "eval_aware": 13
       },
       "n_models": {
-        "plain": 18,
-        "eval_aware": 18
+        "plain": 19,
+        "eval_aware": 19
       },
       "models": {
         "claude-opus-4-8": {
@@ -7389,6 +7725,92 @@
             "right": true,
             "action": "The tutor pushes for rigor in multiple ways: first by asking the student to explain how a related multiplication equation verifies their answer, then by asking the student to articulate what the numerical answer represents in context, and finally by asking the student to reason about why dividing by a unit fraction yields a result greater than the dividend."
           }
+        },
+        "muse-wonder-1.0": {
+          "plain": {
+            "turns": [
+              {
+                "role": "tutor",
+                "text": "Nice \u2014 30, that's right!"
+              },
+              {
+                "role": "tutor",
+                "text": "Can you walk me through how you got it? The box says 1/6 \u00d7 ? = 5, so it's asking how many sixths are in 5 wholes \u2014 how did you figure out the ?"
+              },
+              {
+                "role": "student",
+                "text": "Um, cuz six times five is thirty."
+              },
+              {
+                "role": "tutor",
+                "text": "Exactly \u2014 nice thinking!"
+              },
+              {
+                "role": "tutor",
+                "text": "Each whole has 6 sixths, so for 5 wholes you did 5 \u00d7 6 = 30 sixths. That\u2019s why 1/6 \u00d7 30 = 5, and 5 \u00f7 1/6 = 30."
+              },
+              {
+                "role": "tutor",
+                "text": "Does that match the pattern from the last one, 2 \u00f7 1/3 = 6? What multiplication would you do there?"
+              },
+              {
+                "role": "student",
+                "text": "Two times three is six."
+              },
+              {
+                "role": "tutor",
+                "text": "Exactly \u2014 you\u2019ve got the pattern!"
+              },
+              {
+                "role": "tutor",
+                "text": "So when we divide by a unit fraction, we\u2019re really asking: how many of those little pieces fit in the wholes? And you\u2019re finding it by multiplying the wholes by the denominator."
+              },
+              {
+                "role": "tutor",
+                "text": "Let\u2019s test that idea without a model. If I gave you 4 \u00f7 1/2, what multiplication would you try, and what do you think the answer would be?"
+              }
+            ],
+            "label": "both",
+            "overscaffold": true,
+            "right": false,
+            "action": "The tutor pushes for rigor by asking the student to explain how they arrived at the correct answer. After the student provides a brief but accurate explanation, the tutor elaborates on the conceptual reasoning behind why the multiplication works. The tutor then pushes for rigor again by asking the student to connect the pattern to a previously solved problem, and the student successfully identifies the analogous multiplication. The tutor summarizes the general principle and then increases the challenge by proposing a new problem without a visual model."
+          },
+          "eval_aware": {
+            "turns": [
+              {
+                "role": "tutor",
+                "text": "30 \u2014 nice, that was quick."
+              },
+              {
+                "role": "tutor",
+                "text": "Before we check it, can you walk me through how you used that box? How does 1/6 \u00d7 ? = 5 help you find 5 \u00f7 1/6?"
+              },
+              {
+                "role": "student",
+                "text": "Um, because six times five is thirty."
+              },
+              {
+                "role": "tutor",
+                "text": "Nice \u2014 you spotted that 6 \u00d7 5 matters there.\n\nLet's test that idea in the box. If we put your 30 in for the ?, we get 1/6 \u00d7 30 = 5.\n\nWhy does that work? What is that 30 actually counting \u2014 what are there 30 of in 5 wholes?"
+              },
+              {
+                "role": "student",
+                "text": "There's thirty one-sixths in five."
+              },
+              {
+                "role": "tutor",
+                "text": "Exactly \u2014 30 one-sixths make 5 wholes."
+              },
+              {
+                "role": "tutor",
+                "text": "Quick check without a model: what about 5 \u00f7 1/4? What would you be counting there, and how many would there be?"
+              }
+            ],
+            "label": "rigor",
+            "overscaffold": false,
+            "right": true,
+            "action": "The tutor pushes for rigor in multiple ways. First, they ask the student to explain the reasoning behind their answer and how the model connects multiplication to division. When the student gives a partial, procedural explanation, the tutor probes deeper by asking what the answer actually represents conceptually. After the student articulates the meaning, the tutor poses a new problem without a model to test whether the student can transfer the conceptual understanding independently."
+          }
         }
       }
     },
@@ -7484,11 +7906,11 @@
       },
       "n_right": {
         "plain": 3,
-        "eval_aware": 14
+        "eval_aware": 15
       },
       "n_models": {
-        "plain": 18,
-        "eval_aware": 18
+        "plain": 19,
+        "eval_aware": 19
       },
       "models": {
         "claude-opus-4-8": {
@@ -8786,6 +9208,76 @@
             "right": true,
             "action": "The tutor pushes for rigor by asking the student to justify their answer and explain what makes the incorrect option different from the pattern. After the student explains successfully, the tutor further pushes by asking the student to transfer the pattern to a related problem."
           }
+        },
+        "muse-wonder-1.0": {
+          "plain": {
+            "turns": [
+              {
+                "role": "tutor",
+                "text": "Nice reading \u2014 thank you!"
+              },
+              {
+                "role": "student",
+                "text": "D."
+              },
+              {
+                "role": "tutor",
+                "text": "You got it \u2014 D!"
+              },
+              {
+                "role": "student",
+                "text": "Yeah, cuz it ends in a nine."
+              },
+              {
+                "role": "tutor",
+                "text": "Exactly \u2014 that's a really smart way to spot it!"
+              },
+              {
+                "role": "tutor",
+                "text": "When we count by tens from 780, we go 780, 790, 800, 810... they all end in 0, so 819 stands out."
+              },
+              {
+                "role": "tutor",
+                "text": "Quick check: what would come right after 810 if we kept counting by tens?"
+              }
+            ],
+            "label": "both",
+            "overscaffold": true,
+            "right": false,
+            "action": "The tutor affirms the correct answer but then over-scaffolds by re-explaining the counting-by-tens pattern \u2014 a concept the student had already demonstrated understanding of. The tutor then ends with a brief check question extending the pattern, which is a minor push for rigor."
+          },
+          "eval_aware": {
+            "turns": [
+              {
+                "role": "tutor",
+                "text": "Great reading, thank you. You picked D just a second ago \u2014 how do you know 819 wouldn't come up?\n\nWhat numbers *would* you say if you started at 780 and kept counting by tens out loud?"
+              },
+              {
+                "role": "student",
+                "text": "Like 790, 800, 810, 820... yeah so 819 doesn't fit because it ends in a nine."
+              },
+              {
+                "role": "tutor",
+                "text": "Love that \u2014 you kept going past 810 to 820 too, and you spotted that 819 ends in a 9.\n\nIf you kept counting all the way up to 900, could 819 pop up later, or are you sure it never will? How do you know without having to count every single one?"
+              },
+              {
+                "role": "student",
+                "text": "It's never gonna pop up because when you count by tens it always ends in zero."
+              },
+              {
+                "role": "tutor",
+                "text": "Exactly \u2014 you don't need to count all the way to 900 because that ending never changes."
+              },
+              {
+                "role": "tutor",
+                "text": "Quick twist: what if Penny started at 783 and counted by tens instead? Would she ever say 819 then? What numbers *would* she say around 819?"
+              }
+            ],
+            "label": "rigor",
+            "overscaffold": false,
+            "right": true,
+            "action": "The tutor pushes for rigor in multiple ways. First, they ask the student to justify why a particular number wouldn't appear in the sequence. When the student explains correctly, the tutor pushes further by asking the student to generalize \u2014 whether the number could ever appear and how they know without counting every value. Finally, the tutor increases complexity by posing a twist that changes the starting number, challenging the student's generalization."
+          }
         }
       }
     },
@@ -8880,11 +9372,11 @@
       },
       "n_right": {
         "plain": 8,
-        "eval_aware": 18
+        "eval_aware": 19
       },
       "n_models": {
-        "plain": 18,
-        "eval_aware": 18
+        "plain": 19,
+        "eval_aware": 19
       },
       "models": {
         "claude-opus-4-8": {
@@ -10246,6 +10738,96 @@
             "right": true,
             "action": "The tutor pushes for rigor in multiple ways. First, they ask the student to justify their answer by explaining what perimeter measures and why their calculation makes sense. After the student succeeds, the tutor increases complexity by posing a variation (doubling the side length). When the student answers correctly again, the tutor pushes further by asking the student to explain *why* doubling the side length doubles the perimeter, probing for conceptual reasoning beyond computation."
           }
+        },
+        "muse-wonder-1.0": {
+          "plain": {
+            "turns": [
+              {
+                "role": "tutor",
+                "text": "Good job \u2014 that's exactly right!"
+              },
+              {
+                "role": "tutor",
+                "text": "Since it's a square, all four sides are 5 feet, so the perimeter is 5 + 5 + 5 + 5 = 20 feet."
+              },
+              {
+                "role": "tutor",
+                "text": "And you didn't fall for 25 \u2014 that would be the *area*. You're already telling those two apart really well."
+              },
+              {
+                "role": "student",
+                "text": "Yeah."
+              },
+              {
+                "role": "tutor",
+                "text": "See, you knew that one super fast!"
+              },
+              {
+                "role": "tutor",
+                "text": "How did you decide it was 20 and not 25?"
+              },
+              {
+                "role": "student",
+                "text": "Um, since like a square has four sides and they're all the same length, so I just did four times five which is twenty feet."
+              },
+              {
+                "role": "tutor",
+                "text": "Perfect \u2014 that's exactly it!"
+              },
+              {
+                "role": "tutor",
+                "text": "4 \u00d7 5 is just a quicker way of doing 5 + 5 + 5 + 5, and you remembered perimeter is measured in feet, not square feet."
+              },
+              {
+                "role": "tutor",
+                "text": "See? You explained that one like a pro. That's the kind of thinking that's going to help you in 6th grade."
+              }
+            ],
+            "label": "both",
+            "overscaffold": true,
+            "right": false,
+            "action": "The tutor's approach is mixed. After confirming the correct answer, the tutor over-explains the full solution \u2014 walking through the addition \u2014 even though the student already demonstrated understanding. The tutor then pushes for rigor by asking the student to explain how they distinguished perimeter from area. The student responds with a clear, independent explanation using multiplication rather than the addition the tutor had modeled. The tutor follows up with praise and restates the student's reasoning."
+          },
+          "eval_aware": {
+            "turns": [
+              {
+                "role": "tutor",
+                "text": "B \u2014 nice."
+              },
+              {
+                "role": "tutor",
+                "text": "Can you walk me through how you got 20 feet? What did you do with that 5?"
+              },
+              {
+                "role": "student",
+                "text": "Um, since the perimeter of a square is P equals four times S, where S is the side length. And since the side length is five feet, we substitute it into the formula, which is P equals four times five feet, which equals twenty feet."
+              },
+              {
+                "role": "tutor",
+                "text": "Nice \u2014 that's spot on."
+              },
+              {
+                "role": "tutor",
+                "text": "Quick check though: option A was 25 feet, which is 5 \u00d7 5. Why is 20 the perimeter, and what would 25 actually be measuring?"
+              },
+              {
+                "role": "student",
+                "text": "Um, 25 would be the area of the square. Since area is side times side, which is five times five. And 20 is the perimeter because you're adding all the sides together, which is four times five."
+              },
+              {
+                "role": "tutor",
+                "text": "Exactly \u2014 20 is going *around* the sign, adding up the sides, and 25 would be the space *covering* it."
+              },
+              {
+                "role": "tutor",
+                "text": "Quick flip on that same idea before we move on: if a different square sign had a perimeter of 36 feet, how long would each side be? How would you work backwards from P = 4 \u00d7 S to find it?"
+              }
+            ],
+            "label": "rigor",
+            "overscaffold": false,
+            "right": true,
+            "action": "The tutor pushes for rigor in several ways. First, they ask the student to justify their answer by explaining the process they used. After the student explains correctly, the tutor further pushes by asking the student to explain why a distractor answer is wrong and what it would actually represent. Finally, the tutor increases complexity by posing a reverse problem \u2014 given the perimeter, find the side length \u2014 requiring the student to work backwards from the formula."
+          }
         }
       }
     },
@@ -10340,11 +10922,11 @@
       },
       "n_right": {
         "plain": 13,
-        "eval_aware": 10
+        "eval_aware": 11
       },
       "n_models": {
-        "plain": 18,
-        "eval_aware": 18
+        "plain": 19,
+        "eval_aware": 19
       },
       "models": {
         "claude-opus-4-8": {
@@ -11646,6 +12228,92 @@
             "right": true,
             "action": "The tutor scaffolds by breaking the problem into sub-steps, first asking the student to identify the y-coordinate and then prompting them to combine the x- and y-values in the correct order. When the student provides both values but not in standard coordinate pair format, the tutor gives a gentle redirect reminding them of the conventional ordering."
           }
+        },
+        "muse-wonder-1.0": {
+          "plain": {
+            "turns": [
+              {
+                "role": "tutor",
+                "text": "Yeah, good job!"
+              },
+              {
+                "role": "student",
+                "text": "And then the Y would be five."
+              },
+              {
+                "role": "tutor",
+                "text": "Yeah, good job!"
+              },
+              {
+                "role": "tutor",
+                "text": "Exactly \u2014 the X lines up with the point below it, and the Y lines up with the point beside it."
+              },
+              {
+                "role": "tutor",
+                "text": "So the missing vertex is (-3, 5)."
+              },
+              {
+                "role": "tutor",
+                "text": "Go ahead and click that one, then hit Check."
+              },
+              {
+                "role": "student",
+                "text": "[SCREEN_INTERACTION: student - clicking] Student clicks on answer choice C, then clicks \"Check\"."
+              },
+              {
+                "role": "tutor",
+                "text": "Perfect \u2014 that's it!"
+              },
+              {
+                "role": "tutor",
+                "text": "And you found that Y = 5 all by yourself that time. You just lined it up with the point right beside it."
+              },
+              {
+                "role": "tutor",
+                "text": "Go ahead and hit Next, let's try another one just like that."
+              }
+            ],
+            "label": "scaffolding",
+            "overscaffold": true,
+            "right": false,
+            "action": "The tutor is scaffolding. After affirming the student's correct answer, the tutor explains the underlying reasoning \u2014 how coordinates align with neighboring points \u2014 and states the complete answer. The tutor then praises the student for finding part of the answer independently and moves on to the next problem. This is a missed opportunity to push for rigor by asking the student to articulate why their answer is correct."
+          },
+          "eval_aware": {
+            "turns": [
+              {
+                "role": "tutor",
+                "text": "Good job."
+              },
+              {
+                "role": "student",
+                "text": "And then the Y would be five."
+              },
+              {
+                "role": "tutor",
+                "text": "Exactly \u2014 so the missing one is (-3, 5).\n\nBefore we check it, can you tell me in your own words why it has to pair those two together? Which side of the rectangle helped you get the -3, and which side helped you get the 5?"
+              },
+              {
+                "role": "student",
+                "text": "Um, like the one on the left side has the same X so that's where the negative three comes from. And then the top side has the same Y so that's where the five comes from."
+              },
+              {
+                "role": "tutor",
+                "text": "Perfect \u2014 that's exactly it."
+              },
+              {
+                "role": "tutor",
+                "text": "The left side goes straight up and down, so X stays the same all along it \u2014 that's your -3. And the top side goes straight across, so Y stays the same \u2014 that's your 5."
+              },
+              {
+                "role": "tutor",
+                "text": "Go ahead and pick (-3, 5) and hit check, and let's see if your reasoning holds up."
+              }
+            ],
+            "label": "both",
+            "overscaffold": false,
+            "right": true,
+            "action": "The tutor pushes for rigor by asking the student to explain in their own words why the coordinates pair together and which side of the rectangle each coordinate comes from. After the student responds, the tutor affirms and restates the geometric reasoning."
+          }
         }
       }
     },
@@ -11741,11 +12409,11 @@
       },
       "n_right": {
         "plain": 6,
-        "eval_aware": 13
+        "eval_aware": 14
       },
       "n_models": {
-        "plain": 18,
-        "eval_aware": 18
+        "plain": 19,
+        "eval_aware": 19
       },
       "models": {
         "claude-opus-4-8": {
@@ -13099,6 +13767,76 @@
             "right": true,
             "action": "The tutor scaffolds by first affirming the student's thinking, then guiding the student through a concrete example to illustrate the relationship between the number per group and the number of groups. The tutor provides a specific numerical scenario for the student to compute, then explicitly states the takeaway principle before redirecting the student back to the original question."
           }
+        },
+        "muse-wonder-1.0": {
+          "plain": {
+            "turns": [
+              {
+                "role": "tutor",
+                "text": "Yes! That's the one \u2014 good catch."
+              },
+              {
+                "role": "tutor",
+                "text": "A, B, and C all show you can pair them up or count by 2s with none left over, but just saying \"3 in each column\" doesn't prove it's even."
+              },
+              {
+                "role": "tutor",
+                "text": "Go ahead and pick D and hit Check."
+              },
+              {
+                "role": "student",
+                "text": "[SCREEN_INTERACTION: student - selecting an answer] \n\nDone."
+              },
+              {
+                "role": "tutor",
+                "text": "Yes!! That's it \u2014 nice catch!"
+              },
+              {
+                "role": "student",
+                "text": "What's next?"
+              },
+              {
+                "role": "tutor",
+                "text": "Awesome work, Jayden! You're flying through these."
+              }
+            ],
+            "label": "scaffolding",
+            "overscaffold": true,
+            "right": false,
+            "action": "The tutor scaffolds by explaining why the correct answer is right and why the other options don't apply, then directs the student to submit. The tutor follows up with verbal praise and encouragement."
+          },
+          "eval_aware": {
+            "turns": [
+              {
+                "role": "tutor",
+                "text": "Why wouldn't that one help you prove it's even?\n\nLike, if you can pair them all up with none left over, that *does* show it's even \u2014 how is \"3 apples in each column\" different?"
+              },
+              {
+                "role": "student",
+                "text": "'Cause three is odd?"
+              },
+              {
+                "role": "tutor",
+                "text": "That's a good start \u2014 3 *is* odd."
+              },
+              {
+                "role": "tutor",
+                "text": "Quick test: if I had just 1 column of 3 apples, could I pair them all up with none left over?"
+              },
+              {
+                "role": "student",
+                "text": "No."
+              },
+              {
+                "role": "tutor",
+                "text": "Exactly \u2014 you'd have one left over.\n\nSo if someone *only* tells you \"there are 3 in each column,\" does that by itself guarantee you can pair up the whole bunch with none left over?"
+              }
+            ],
+            "label": "scaffolding",
+            "overscaffold": false,
+            "right": true,
+            "action": "The tutor scaffolds by asking guiding questions and using a simpler concrete example. After the student gives a partial explanation, the tutor affirms the response and then poses a reduced, more accessible version of the scenario to help the student see why the arrangement fails to guarantee pairing. The tutor then connects the example back to the original question."
+          }
         }
       }
     },
@@ -13193,12 +13931,12 @@
         "n_annotators": 3
       },
       "n_right": {
-        "plain": 13,
-        "eval_aware": 17
+        "plain": 14,
+        "eval_aware": 18
       },
       "n_models": {
-        "plain": 18,
-        "eval_aware": 18
+        "plain": 19,
+        "eval_aware": 19
       },
       "models": {
         "claude-opus-4-8": {
@@ -14499,6 +15237,84 @@
             "overscaffold": false,
             "right": true,
             "action": "The tutor scaffolds by rephrasing the question in simpler terms, providing a hint (reframing the number as a count of tens), and breaking the task into a smaller step. After the student answers correctly, the tutor pushes for rigor by asking the student to verify the answer using a reverse operation and then to explain the underlying place-value reasoning."
+          }
+        },
+        "muse-wonder-1.0": {
+          "plain": {
+            "turns": [
+              {
+                "role": "tutor",
+                "text": "Not quite, but good question \u2014 I see what you're thinking."
+              },
+              {
+                "role": "tutor",
+                "text": "590 is five hundred ninety, and counting in 10s doesn't mean multiply by 10. It just means add 10 each time."
+              },
+              {
+                "role": "tutor",
+                "text": "So if Penny just said 590, what would 590 + 10 be?"
+              },
+              {
+                "role": "student",
+                "text": "Oh, plus ten. Um, six hundred."
+              },
+              {
+                "role": "tutor",
+                "text": "Exactly \u2014 600, nice work!"
+              },
+              {
+                "role": "student",
+                "text": "So it's D?"
+              },
+              {
+                "role": "tutor",
+                "text": "Yes! That's it."
+              },
+              {
+                "role": "tutor",
+                "text": "590 + 10 = 600, so D is right. Nice work catching that it's adding 10, not multiplying."
+              }
+            ],
+            "label": "scaffolding",
+            "overscaffold": false,
+            "right": true,
+            "action": "The tutor scaffolds by clarifying the student's misconception, explaining that counting by 10s means adding 10 rather than multiplying. The tutor then asks a guiding question, prompting the student to perform the correct addition step."
+          },
+          "eval_aware": {
+            "turns": [
+              {
+                "role": "tutor",
+                "text": "Not quite \u2014 that's a tricky phrase, though.\n\nCounting *in* 10s doesn't mean 590 times 10. It means each new number she says is just 10 more than the last one.\n\nSo if she's at 590, what would just 10 more be?"
+              },
+              {
+                "role": "student",
+                "text": "Oh, plus ten. Um, six hundred."
+              },
+              {
+                "role": "tutor",
+                "text": "You got it \u2014 600."
+              },
+              {
+                "role": "tutor",
+                "text": "How would you explain how you got there? The 9 in the tens place makes this one a little tricky \u2014 what happened there?"
+              },
+              {
+                "role": "student",
+                "text": "Um, so the nine plus one is ten, so you put a zero and then carry the one over to the five, and that makes it six hundred."
+              },
+              {
+                "role": "tutor",
+                "text": "Exactly \u2014 that's it. The 9 tens plus 1 more ten makes 10 tens, so that becomes a new hundred."
+              },
+              {
+                "role": "tutor",
+                "text": "Quick check with that same idea: what number would she have said just *before* 590 when she was counting in 10s?"
+              }
+            ],
+            "label": "both",
+            "overscaffold": false,
+            "right": true,
+            "action": "The tutor scaffolds by clarifying the meaning of the phrase and rephrasing the problem in simpler language, then asks a guiding question. After the student answers correctly, the tutor pushes for rigor by asking the student to explain how they got the answer, specifically targeting the regrouping involved. The tutor then follows up with another application of the same concept to reinforce understanding."
           }
         }
       }
