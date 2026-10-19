@@ -221,6 +221,25 @@
       }
     },
     {
+      "id": "gemini-4-argon",
+      "name": "Gemini 4 Argon",
+      "reasoning": "thinking_level: high",
+      "source": {
+        "plain": "gemini-4-argon_plain_tutormoments-preview_20261014",
+        "eval_aware": "gemini-4-argon_scaffolding_rigor_tutormoments-preview_20261014"
+      },
+      "plain": {
+        "scaffolding": 0.769,
+        "rigor": 0.254,
+        "avoids_over": 0.662
+      },
+      "eval_aware": {
+        "scaffolding": 0.935,
+        "rigor": 0.804,
+        "avoids_over": 0.9
+      }
+    },
+    {
       "id": "gpt-5.5-2026-04-23",
       "name": "GPT 5.5",
       "reasoning": "reasoning: high",

@@ -74,6 +74,7 @@ MODELS = [
     ("gemini-3.5-flash", "Gemini 3.5 Flash"),
     ("gemini-3.8-flash", "Gemini 3.8 Flash"),
     ("gemini-3.6-flash", "Gemini 3.6 Flash"),
+    ("gemini-4-argon", "Gemini 4 Argon"),
     ("gpt-5.5-2026-04-23", "GPT 5.5"),
     ("gpt-5.5-2026-04-23-none", "GPT 5.5 (no reasoning)"),
     ("gpt-5.4-mini-2026-03-17", "GPT 5.4 mini"),

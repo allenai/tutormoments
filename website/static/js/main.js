@@ -25,6 +25,7 @@
     "deepseek-v4-pro-0813":        { provider: "open_weight", color: "#CC79A7", marker: "square" },
     "gemini-3.8-flash":            { provider: "google", color: "#56B4E9", marker: "triangle-up" },
     "gemini-3.6-flash":            { provider: "google", color: "#0072B2", marker: "triangle-down" },
+    "gemini-4-argon":              { provider: "google", color: "#0072B2", marker: "star" },
     "gpt-5.5-2026-04-23-none":     { provider: "openai", color: "#009E73", marker: "circle" },
     "gpt-6-astra":                 { provider: "openai", color: "#F0529C", marker: "star" },
     "gpt-6-sol-none":              { provider: "openai", color: "#F0529C", marker: "pentagon" },
