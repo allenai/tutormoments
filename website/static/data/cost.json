@@ -2,7 +2,7 @@
   "source": "score as in latency.json. Cost is the uncached list cost per tutor response: every prompt token at the model's input rate, output and reasoning tokens at its output rate, divided by the number of tutor calls. Measured from the model's full benchmark run, or from the `tutormoments latency` probe where that run predates usage capture (see each row's source). A ceiling -- provider prompt caching can cut the input share substantially. See docs/cost.md.",
   "cost": {
     "mode": "scaffolding_rigor",
-    "pricing_version": "2026-10-13"
+    "pricing_version": "2026-10-14"
   },
   "omitted": [
     "Claude Opus 4.8",
@@ -144,6 +144,25 @@
       "source": {
         "kind": "run",
         "run_id": "gemini-3.6-flash_scaffolding_rigor_tutormoments-preview_20260930",
+        "n_conversations": 520
+      }
+    },
+    {
+      "id": "gemini-4-argon",
+      "name": "Gemini 4 Argon",
+      "score": 0.8695,
+      "uncached_cost_per_response_usd": 0.02716549,
+      "prompt_tokens_per_response": 7282,
+      "output_tokens_per_response": 1260,
+      "n_calls": 1560,
+      "rates": {
+        "input_per_mtok": 2.0,
+        "output_per_mtok": 10.0,
+        "as_of": "2026-10-14"
+      },
+      "source": {
+        "kind": "run",
+        "run_id": "gemini-4-argon_scaffolding_rigor_tutormoments-preview_20261014",
         "n_conversations": 520
       }
     },

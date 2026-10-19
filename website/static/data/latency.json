@@ -24,7 +24,8 @@
       "gpt-6-luna-none": "gpt-6-luna-none_scaffolding_rigor_tutormoments-preview_20260929",
       "gpt-6-sol-none": "gpt-6-sol-none_scaffolding_rigor_tutormoments-preview_20261001",
       "claude-haiku-5-5-none": "claude-haiku-5-5-none_scaffolding_rigor_tutormoments-preview_20261007",
-      "muse-wonder-1.0": "muse-wonder-1.0_scaffolding_rigor_tutormoments-preview_20261013"
+      "muse-wonder-1.0": "muse-wonder-1.0_scaffolding_rigor_tutormoments-preview_20261013",
+      "gemini-4-argon": "gemini-4-argon_scaffolding_rigor_tutormoments-preview_20261014"
     }
   },
   "models": [
@@ -182,6 +183,19 @@
       "ttlt_s": 1.21,
       "ttft_p95_s": 1.78,
       "ttlt_p95_s": 1.92,
+      "ttft_concurrency": 4
+    },
+    {
+      "id": "gemini-4-argon",
+      "name": "Gemini 4 Argon",
+      "latency_s": 24.88,
+      "latency_estimated": false,
+      "score": 0.8695,
+      "ttft_s": 16.73,
+      "ttft_source": "run",
+      "ttlt_s": 17.01,
+      "ttft_p95_s": 59.52,
+      "ttlt_p95_s": 60.02,
       "ttft_concurrency": 4
     },
     {
