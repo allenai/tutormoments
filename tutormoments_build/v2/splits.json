@@ -48,20 +48,70 @@
    "heldout_fraction": 0.5,
    "balance_by": "transcripts",
    "n_assigned": 5
+  },
+  {
+   "batch": 6,
+   "created_at": "2026-10-22T19:23:25Z",
+   "sources": [
+    "data/v2_annotations/source/tutoring_provider_a_annotations.jsonl",
+    "data/v2_annotations/source/tutoring_provider_c_annotations.jsonl"
+   ],
+   "seed": 20260819,
+   "heldout_fraction": 0.5,
+   "balance_by": "transcripts",
+   "n_assigned": 105,
+   "n_assigned_by_source": {
+    "tutoring_provider_c": 105
+   }
   }
  ],
  "assignments": {
+  "000b91b6-00f2-5c61-beda-b246a4f46149": {
+   "split": "heldout",
+   "batch": 6,
+   "n_moments": 7,
+   "no_key_moments": false,
+   "source": "tutoring_provider_c"
+  },
+  "00124d0d-7d2f-5cdf-8fd7-fc85eaf7832a": {
+   "split": "iterate",
+   "batch": 6,
+   "n_moments": 9,
+   "no_key_moments": false,
+   "source": "tutoring_provider_c"
+  },
   "0014e499-e120-5314-b3d0-962b227fcce0": {
    "split": "heldout",
    "batch": 2,
    "n_moments": 5,
    "no_key_moments": false
   },
+  "0017d6f2-9296-5e29-b244-72a90811820a": {
+   "split": "iterate",
+   "batch": 6,
+   "n_moments": 5,
+   "no_key_moments": false,
+   "source": "tutoring_provider_c"
+  },
+  "00302516-6dca-5c68-b7bb-9accd54f108c": {
+   "split": "heldout",
+   "batch": 6,
+   "n_moments": 7,
+   "no_key_moments": false,
+   "source": "tutoring_provider_c"
+  },
   "00421980-7c0f-5462-9580-e3a68250917e": {
    "split": "heldout",
    "batch": 4,
    "n_moments": 5,
    "no_key_moments": false
+  },
+  "00852610-53d4-51a1-9201-30f0f5431f09": {
+   "split": "iterate",
+   "batch": 6,
+   "n_moments": 11,
+   "no_key_moments": false,
+   "source": "tutoring_provider_c"
   },
   "00e9aed5-bb0c-5f4d-b240-005c86c17192": {
    "split": "heldout",
@@ -81,11 +131,60 @@
    "n_moments": 4,
    "no_key_moments": false
   },
+  "0115dac4-e8a3-5e5b-b884-2383a874d0ea": {
+   "split": "heldout",
+   "batch": 6,
+   "n_moments": 9,
+   "no_key_moments": false,
+   "source": "tutoring_provider_c"
+  },
   "02621552-4286-555d-8112-9628e36453f6": {
    "split": "heldout",
    "batch": 2,
    "n_moments": 7,
    "no_key_moments": false
+  },
+  "027af485-d925-50ec-a87b-91a30f44dd49": {
+   "split": "heldout",
+   "batch": 6,
+   "n_moments": 9,
+   "no_key_moments": false,
+   "source": "tutoring_provider_c"
+  },
+  "02971c56-4560-5556-8f20-0381ec1553d0": {
+   "split": "iterate",
+   "batch": 6,
+   "n_moments": 4,
+   "no_key_moments": false,
+   "source": "tutoring_provider_c"
+  },
+  "02a60250-5d47-566b-b4b4-2cdf2b6348b9": {
+   "split": "iterate",
+   "batch": 6,
+   "n_moments": 5,
+   "no_key_moments": false,
+   "source": "tutoring_provider_c"
+  },
+  "031069ae-767d-5d2a-899a-ec6959ee2d06": {
+   "split": "iterate",
+   "batch": 6,
+   "n_moments": 2,
+   "no_key_moments": false,
+   "source": "tutoring_provider_c"
+  },
+  "03d27c8f-de59-5bde-8a9a-571ea7b6ecd2": {
+   "split": "iterate",
+   "batch": 6,
+   "n_moments": 6,
+   "no_key_moments": false,
+   "source": "tutoring_provider_c"
+  },
+  "04a4664e-6c0d-537e-aca9-4a4d4bc5ab6c": {
+   "split": "iterate",
+   "batch": 6,
+   "n_moments": 7,
+   "no_key_moments": false,
+   "source": "tutoring_provider_c"
   },
   "0519c537-5db0-5f59-ac77-75a1da3a658e": {
    "split": "heldout",
@@ -93,11 +192,53 @@
    "n_moments": 2,
    "no_key_moments": false
   },
+  "054d5955-830d-5e95-8f1d-c6fe1cd016ca": {
+   "split": "iterate",
+   "batch": 6,
+   "n_moments": 8,
+   "no_key_moments": false,
+   "source": "tutoring_provider_c"
+  },
   "055a951b-3048-5b79-92e0-d7b2b8b49919": {
    "split": "iterate",
    "batch": 3,
    "n_moments": 2,
    "no_key_moments": false
+  },
+  "05deac02-d319-53f1-b725-c9abc4d35b15": {
+   "split": "iterate",
+   "batch": 6,
+   "n_moments": 10,
+   "no_key_moments": false,
+   "source": "tutoring_provider_c"
+  },
+  "060d9a85-ff18-5139-9606-c52c9ca87d3f": {
+   "split": "heldout",
+   "batch": 6,
+   "n_moments": 7,
+   "no_key_moments": false,
+   "source": "tutoring_provider_c"
+  },
+  "061dc334-da0b-5af7-985d-68c211860b94": {
+   "split": "heldout",
+   "batch": 6,
+   "n_moments": 9,
+   "no_key_moments": false,
+   "source": "tutoring_provider_c"
+  },
+  "064f6884-3027-5172-ba0d-c4bcb9d96dd7": {
+   "split": "heldout",
+   "batch": 6,
+   "n_moments": 7,
+   "no_key_moments": false,
+   "source": "tutoring_provider_c"
+  },
+  "065cfefb-99fc-50f3-92ea-a55fbe8bbc08": {
+   "split": "heldout",
+   "batch": 6,
+   "n_moments": 8,
+   "no_key_moments": false,
+   "source": "tutoring_provider_c"
   },
   "06a9973c-e311-56d0-baa1-cc017e502eda": {
    "split": "iterate",
@@ -123,11 +264,60 @@
    "n_moments": 7,
    "no_key_moments": false
   },
+  "07b11875-7f9a-5259-a211-0a7a3d82a9a6": {
+   "split": "heldout",
+   "batch": 6,
+   "n_moments": 14,
+   "no_key_moments": false,
+   "source": "tutoring_provider_c"
+  },
+  "082031f4-34a4-52bd-87fe-8ead3a5572ff": {
+   "split": "iterate",
+   "batch": 6,
+   "n_moments": 3,
+   "no_key_moments": false,
+   "source": "tutoring_provider_c"
+  },
   "08898dec-5c57-5bd6-afa0-23a3be67b2b5": {
    "split": "heldout",
    "batch": 2,
    "n_moments": 2,
    "no_key_moments": false
+  },
+  "08bfb808-4258-5a38-a995-abcf3d39f554": {
+   "split": "heldout",
+   "batch": 6,
+   "n_moments": 9,
+   "no_key_moments": false,
+   "source": "tutoring_provider_c"
+  },
+  "093a54e8-90d0-54bf-920b-69ce74eed22c": {
+   "split": "heldout",
+   "batch": 6,
+   "n_moments": 4,
+   "no_key_moments": false,
+   "source": "tutoring_provider_c"
+  },
+  "09d5bcae-efc2-5003-a71a-1432cf6c8a60": {
+   "split": "heldout",
+   "batch": 6,
+   "n_moments": 0,
+   "no_key_moments": true,
+   "source": "tutoring_provider_c"
+  },
+  "09f9c1c5-5776-55e7-bd3d-9f4356da6def": {
+   "split": "iterate",
+   "batch": 6,
+   "n_moments": 5,
+   "no_key_moments": false,
+   "source": "tutoring_provider_c"
+  },
+  "0abe8045-cfc5-543e-b2fb-b33dd761d325": {
+   "split": "iterate",
+   "batch": 6,
+   "n_moments": 7,
+   "no_key_moments": false,
+   "source": "tutoring_provider_c"
   },
   "0b1b17c3-3960-542f-8243-73d1c9e74e16": {
    "split": "iterate",
@@ -141,17 +331,87 @@
    "n_moments": 0,
    "no_key_moments": true
   },
+  "0b8c183e-1cb6-555e-a232-990a971870f8": {
+   "split": "heldout",
+   "batch": 6,
+   "n_moments": 0,
+   "no_key_moments": true,
+   "source": "tutoring_provider_c"
+  },
+  "0b914cee-90be-5a1e-82d6-4cedc1a63241": {
+   "split": "iterate",
+   "batch": 6,
+   "n_moments": 1,
+   "no_key_moments": false,
+   "source": "tutoring_provider_c"
+  },
+  "0bc7a4e7-c8d2-53c0-b8f9-7dc2b3e47593": {
+   "split": "heldout",
+   "batch": 6,
+   "n_moments": 2,
+   "no_key_moments": false,
+   "source": "tutoring_provider_c"
+  },
+  "0beaa76d-3b67-5690-a189-0775e7b206d2": {
+   "split": "iterate",
+   "batch": 6,
+   "n_moments": 2,
+   "no_key_moments": false,
+   "source": "tutoring_provider_c"
+  },
   "0befcc59-18ee-559c-b57b-aa7a09407cf6": {
    "split": "iterate",
    "batch": 1,
    "n_moments": 3,
    "no_key_moments": false
   },
+  "0c5457ac-970f-5e9e-b229-3646cfd2fa82": {
+   "split": "iterate",
+   "batch": 6,
+   "n_moments": 2,
+   "no_key_moments": false,
+   "source": "tutoring_provider_c"
+  },
+  "0cb0eaff-0994-524c-a631-51e948bc5095": {
+   "split": "heldout",
+   "batch": 6,
+   "n_moments": 2,
+   "no_key_moments": false,
+   "source": "tutoring_provider_c"
+  },
+  "0d047265-6f35-5c82-b617-405519678e47": {
+   "split": "heldout",
+   "batch": 6,
+   "n_moments": 9,
+   "no_key_moments": false,
+   "source": "tutoring_provider_c"
+  },
+  "0d4e171d-8183-5d2c-9d87-38b1acc8dcef": {
+   "split": "iterate",
+   "batch": 6,
+   "n_moments": 9,
+   "no_key_moments": false,
+   "source": "tutoring_provider_c"
+  },
+  "0db257c8-081c-5e0f-9b5b-9b6ed9b5754f": {
+   "split": "heldout",
+   "batch": 6,
+   "n_moments": 5,
+   "no_key_moments": false,
+   "source": "tutoring_provider_c"
+  },
   "0dee51bb-f037-5b52-bf42-f49ba669f5de": {
    "split": "iterate",
    "batch": 1,
    "n_moments": 6,
    "no_key_moments": false
+  },
+  "0eee94da-71b2-5774-8971-8511adfdebc0": {
+   "split": "iterate",
+   "batch": 6,
+   "n_moments": 6,
+   "no_key_moments": false,
+   "source": "tutoring_provider_c"
   },
   "0f3895fa-cf4e-5d85-a3f6-8709e3d72e74": {
    "split": "iterate",
@@ -165,11 +425,53 @@
    "n_moments": 0,
    "no_key_moments": true
   },
+  "103d9fda-244f-5ae5-836d-39ae7e8c5875": {
+   "split": "iterate",
+   "batch": 6,
+   "n_moments": 10,
+   "no_key_moments": false,
+   "source": "tutoring_provider_c"
+  },
+  "10545d23-0c5d-56e7-b3c9-cdebb6adb305": {
+   "split": "iterate",
+   "batch": 6,
+   "n_moments": 5,
+   "no_key_moments": false,
+   "source": "tutoring_provider_c"
+  },
   "10663abe-0e15-581d-8794-909979e9a3d2": {
    "split": "iterate",
    "batch": 3,
    "n_moments": 0,
    "no_key_moments": true
+  },
+  "10b4b252-cb93-521c-811b-9c43fe3a90c8": {
+   "split": "heldout",
+   "batch": 6,
+   "n_moments": 6,
+   "no_key_moments": false,
+   "source": "tutoring_provider_c"
+  },
+  "10c1f91b-ba37-53d6-b33b-3e80207ba406": {
+   "split": "iterate",
+   "batch": 6,
+   "n_moments": 9,
+   "no_key_moments": false,
+   "source": "tutoring_provider_c"
+  },
+  "10cd0b67-37b6-5803-856f-89cadcf17aaa": {
+   "split": "iterate",
+   "batch": 6,
+   "n_moments": 6,
+   "no_key_moments": false,
+   "source": "tutoring_provider_c"
+  },
+  "111fc38a-9b19-5adb-b744-b99e61a54503": {
+   "split": "heldout",
+   "batch": 6,
+   "n_moments": 2,
+   "no_key_moments": false,
+   "source": "tutoring_provider_c"
   },
   "1121382f-1e31-54a0-adde-b143f3fcff68": {
    "split": "heldout",
@@ -177,17 +479,38 @@
    "n_moments": 1,
    "no_key_moments": false
   },
+  "112dd658-96c6-52a4-be2d-7fa229b9824a": {
+   "split": "heldout",
+   "batch": 6,
+   "n_moments": 2,
+   "no_key_moments": false,
+   "source": "tutoring_provider_c"
+  },
   "11beedf0-4c2a-556b-b904-c05d7d69f380": {
    "split": "iterate",
    "batch": 1,
    "n_moments": 7,
    "no_key_moments": false
   },
+  "11dc5d25-c123-579f-887d-c9194c7c95d3": {
+   "split": "heldout",
+   "batch": 6,
+   "n_moments": 2,
+   "no_key_moments": false,
+   "source": "tutoring_provider_c"
+  },
   "123037a0-d55d-51a1-b45a-a59406daaa9b": {
    "split": "iterate",
    "batch": 3,
    "n_moments": 2,
    "no_key_moments": false
+  },
+  "145c8d87-8315-5c3e-b543-8f3b8ae1f452": {
+   "split": "iterate",
+   "batch": 6,
+   "n_moments": 5,
+   "no_key_moments": false,
+   "source": "tutoring_provider_c"
   },
   "148eddff-c871-526c-b635-08c8cef06cd6": {
    "split": "heldout",
@@ -200,6 +523,48 @@
    "batch": 1,
    "n_moments": 5,
    "no_key_moments": false
+  },
+  "1502ebab-91cc-5116-bf74-d6548cf6fbea": {
+   "split": "iterate",
+   "batch": 6,
+   "n_moments": 5,
+   "no_key_moments": false,
+   "source": "tutoring_provider_c"
+  },
+  "151cf012-a483-59a2-bb7f-dc80f99cd4e9": {
+   "split": "heldout",
+   "batch": 6,
+   "n_moments": 9,
+   "no_key_moments": false,
+   "source": "tutoring_provider_c"
+  },
+  "15301c0a-6022-5311-950e-cc451494b766": {
+   "split": "iterate",
+   "batch": 6,
+   "n_moments": 0,
+   "no_key_moments": true,
+   "source": "tutoring_provider_c"
+  },
+  "1568f476-3b33-5db6-9ccb-e60927fb07d8": {
+   "split": "heldout",
+   "batch": 6,
+   "n_moments": 2,
+   "no_key_moments": false,
+   "source": "tutoring_provider_c"
+  },
+  "158a5bd8-d779-53b8-8bc4-d2ce9236c945": {
+   "split": "iterate",
+   "batch": 6,
+   "n_moments": 9,
+   "no_key_moments": false,
+   "source": "tutoring_provider_c"
+  },
+  "15a53bda-5748-5a28-86c3-cb5f8f8e8697": {
+   "split": "heldout",
+   "batch": 6,
+   "n_moments": 7,
+   "no_key_moments": false,
+   "source": "tutoring_provider_c"
   },
   "16394466-ee5f-554b-9f60-9c2343d2c276": {
    "split": "iterate",
@@ -219,11 +584,32 @@
    "n_moments": 5,
    "no_key_moments": false
   },
+  "167137cd-56ef-54f9-9914-3a6476bcf841": {
+   "split": "heldout",
+   "batch": 6,
+   "n_moments": 5,
+   "no_key_moments": false,
+   "source": "tutoring_provider_c"
+  },
   "1675a4b8-b81f-5e32-b26e-617bacf1cac8": {
    "split": "iterate",
    "batch": 2,
    "n_moments": 2,
    "no_key_moments": false
+  },
+  "16e551f0-fbda-5dac-a593-8094a1389f28": {
+   "split": "iterate",
+   "batch": 6,
+   "n_moments": 7,
+   "no_key_moments": false,
+   "source": "tutoring_provider_c"
+  },
+  "173fa17b-7f53-53da-8182-e1cb948f7f24": {
+   "split": "iterate",
+   "batch": 6,
+   "n_moments": 5,
+   "no_key_moments": false,
+   "source": "tutoring_provider_c"
   },
   "17ad5553-f84e-55d7-89a3-d754747fdd67": {
    "split": "heldout",
@@ -237,6 +623,13 @@
    "n_moments": 3,
    "no_key_moments": false
   },
+  "18ab39d1-b256-5804-a892-721e8469594a": {
+   "split": "iterate",
+   "batch": 6,
+   "n_moments": 4,
+   "no_key_moments": false,
+   "source": "tutoring_provider_c"
+  },
   "18b7acdf-b9ce-5698-8d2a-b6e5159e8249": {
    "split": "iterate",
    "batch": 2,
@@ -248,6 +641,27 @@
    "batch": 2,
    "n_moments": 3,
    "no_key_moments": false
+  },
+  "19a1bc91-f913-584b-9e46-ecacbdba2a05": {
+   "split": "iterate",
+   "batch": 6,
+   "n_moments": 14,
+   "no_key_moments": false,
+   "source": "tutoring_provider_c"
+  },
+  "19ea10bd-9c2d-55be-a698-3405cedcae83": {
+   "split": "heldout",
+   "batch": 6,
+   "n_moments": 6,
+   "no_key_moments": false,
+   "source": "tutoring_provider_c"
+  },
+  "19f3eb1c-4c40-5555-be54-d60fa72fdfd2": {
+   "split": "heldout",
+   "batch": 6,
+   "n_moments": 9,
+   "no_key_moments": false,
+   "source": "tutoring_provider_c"
   },
   "1a381b51-d190-585e-94c6-971fe490d7c5": {
    "split": "heldout",
@@ -267,11 +681,116 @@
    "n_moments": 0,
    "no_key_moments": true
   },
+  "1ac2b5fb-ec25-5df6-aeda-a4c7b648cd3d": {
+   "split": "iterate",
+   "batch": 6,
+   "n_moments": 7,
+   "no_key_moments": false,
+   "source": "tutoring_provider_c"
+  },
+  "1b2bbf54-08bb-55a4-a23a-e2d697c9b081": {
+   "split": "heldout",
+   "batch": 6,
+   "n_moments": 8,
+   "no_key_moments": false,
+   "source": "tutoring_provider_c"
+  },
+  "1b467228-3ee6-505f-8cc1-216662342d87": {
+   "split": "iterate",
+   "batch": 6,
+   "n_moments": 7,
+   "no_key_moments": false,
+   "source": "tutoring_provider_c"
+  },
   "1b7a38ce-5d03-58ca-beee-b359e23819bd": {
    "split": "iterate",
    "batch": 1,
    "n_moments": 4,
    "no_key_moments": false
+  },
+  "1b98c0e7-802a-55ab-b596-f96c013fb176": {
+   "split": "iterate",
+   "batch": 6,
+   "n_moments": 9,
+   "no_key_moments": false,
+   "source": "tutoring_provider_c"
+  },
+  "1b9c6588-11ce-5f59-bfca-8143fedb3b1b": {
+   "split": "heldout",
+   "batch": 6,
+   "n_moments": 8,
+   "no_key_moments": false,
+   "source": "tutoring_provider_c"
+  },
+  "1bf12dc3-b052-5e05-be17-89deffdd1069": {
+   "split": "iterate",
+   "batch": 6,
+   "n_moments": 9,
+   "no_key_moments": false,
+   "source": "tutoring_provider_c"
+  },
+  "1c4704ec-28fd-578d-aa20-36a2691da2f0": {
+   "split": "heldout",
+   "batch": 6,
+   "n_moments": 7,
+   "no_key_moments": false,
+   "source": "tutoring_provider_c"
+  },
+  "1c9d1962-559f-5fb5-a960-b5cab28271bf": {
+   "split": "heldout",
+   "batch": 6,
+   "n_moments": 8,
+   "no_key_moments": false,
+   "source": "tutoring_provider_c"
+  },
+  "1ce91c3b-61fd-56b7-ab51-ac9ee0cbea8a": {
+   "split": "iterate",
+   "batch": 6,
+   "n_moments": 3,
+   "no_key_moments": false,
+   "source": "tutoring_provider_c"
+  },
+  "1e0f9529-f511-54f5-8b83-df572b190c80": {
+   "split": "iterate",
+   "batch": 6,
+   "n_moments": 3,
+   "no_key_moments": false,
+   "source": "tutoring_provider_c"
+  },
+  "1e50c391-c596-5271-a292-8510ad75d396": {
+   "split": "heldout",
+   "batch": 6,
+   "n_moments": 3,
+   "no_key_moments": false,
+   "source": "tutoring_provider_c"
+  },
+  "1eaa7773-f77b-5a87-ae66-8fbdca77a049": {
+   "split": "heldout",
+   "batch": 6,
+   "n_moments": 2,
+   "no_key_moments": false,
+   "source": "tutoring_provider_c"
+  },
+  "1eea826f-0f28-54b2-bbc2-669c294ba77f": {
+   "split": "heldout",
+   "batch": 6,
+   "n_moments": 1,
+   "no_key_moments": false,
+   "source": "tutoring_provider_c"
+  },
+  "1f05c9bb-d7b0-502b-830b-9d1aa094ad0b": {
+   "split": "heldout",
+   "batch": 6,
+   "n_moments": 0,
+   "no_key_moments": true,
+   "source": "tutoring_provider_c"
+  },
+  "1f0a2229-e82a-5b49-8ea1-318545c067ab": {
+   "split": "heldout",
+   "batch": 6,
+   "n_moments": 3,
+   "no_key_moments": false,
+   "source": "tutoring_provider_c"
   },
   "1f271438-47c6-5116-bad7-b429aa18ae29": {
    "split": "iterate",
@@ -279,11 +798,88 @@
    "n_moments": 4,
    "no_key_moments": false
   },
+  "1f3d26d9-e688-5dd0-b2b2-b84455da88d3": {
+   "split": "heldout",
+   "batch": 6,
+   "n_moments": 2,
+   "no_key_moments": false,
+   "source": "tutoring_provider_c"
+  },
+  "1f7af8e5-0247-5054-a64b-a6bd34f206af": {
+   "split": "iterate",
+   "batch": 6,
+   "n_moments": 5,
+   "no_key_moments": false,
+   "source": "tutoring_provider_c"
+  },
   "1f8f6a50-31ef-578e-9132-fa9e99c33443": {
    "split": "heldout",
    "batch": 5,
    "n_moments": 13,
    "no_key_moments": false
+  },
+  "1fd53dc6-2782-5f1d-bc59-f00ba7bb5a65": {
+   "split": "heldout",
+   "batch": 6,
+   "n_moments": 0,
+   "no_key_moments": true,
+   "source": "tutoring_provider_c"
+  },
+  "20861d7c-e7cf-5ab5-a516-56acf5c96e8a": {
+   "split": "heldout",
+   "batch": 6,
+   "n_moments": 2,
+   "no_key_moments": false,
+   "source": "tutoring_provider_c"
+  },
+  "20a1df65-57bd-59e6-8825-0ee11a1b8232": {
+   "split": "iterate",
+   "batch": 6,
+   "n_moments": 2,
+   "no_key_moments": false,
+   "source": "tutoring_provider_c"
+  },
+  "21cd8b2f-98a4-5e7c-bf5e-df10070d2713": {
+   "split": "heldout",
+   "batch": 6,
+   "n_moments": 19,
+   "no_key_moments": false,
+   "source": "tutoring_provider_c"
+  },
+  "21ff213e-1753-52d7-920b-275ab2957398": {
+   "split": "heldout",
+   "batch": 6,
+   "n_moments": 4,
+   "no_key_moments": false,
+   "source": "tutoring_provider_c"
+  },
+  "223cc156-cca7-548e-87e7-9db0aa8d66e3": {
+   "split": "iterate",
+   "batch": 6,
+   "n_moments": 3,
+   "no_key_moments": false,
+   "source": "tutoring_provider_c"
+  },
+  "228ffefc-0995-5b24-afd2-a659ac43d395": {
+   "split": "iterate",
+   "batch": 6,
+   "n_moments": 4,
+   "no_key_moments": false,
+   "source": "tutoring_provider_c"
+  },
+  "22f9d625-4050-50df-8d98-b6a90d826018": {
+   "split": "iterate",
+   "batch": 6,
+   "n_moments": 8,
+   "no_key_moments": false,
+   "source": "tutoring_provider_c"
+  },
+  "23067628-8a33-50df-9c32-b782c400d54a": {
+   "split": "iterate",
+   "batch": 6,
+   "n_moments": 3,
+   "no_key_moments": false,
+   "source": "tutoring_provider_c"
   },
   "23ce7087-791e-5900-865a-2162cb1a2505": {
    "split": "heldout",
@@ -291,11 +887,60 @@
    "n_moments": 4,
    "no_key_moments": false
   },
+  "24bd51a0-b3e0-52f2-9a69-f2b86c80c253": {
+   "split": "heldout",
+   "batch": 6,
+   "n_moments": 11,
+   "no_key_moments": false,
+   "source": "tutoring_provider_c"
+  },
+  "24f0590b-f00d-5544-b42f-f9d406c9290e": {
+   "split": "heldout",
+   "batch": 6,
+   "n_moments": 7,
+   "no_key_moments": false,
+   "source": "tutoring_provider_c"
+  },
+  "25189c89-0187-5b96-8091-d10b704b43c5": {
+   "split": "iterate",
+   "batch": 6,
+   "n_moments": 7,
+   "no_key_moments": false,
+   "source": "tutoring_provider_c"
+  },
+  "25617512-bbf8-5004-82f3-d23f954f2b2d": {
+   "split": "heldout",
+   "batch": 6,
+   "n_moments": 16,
+   "no_key_moments": false,
+   "source": "tutoring_provider_c"
+  },
   "256dfe20-04ac-5921-a0b1-95130d5b2a67": {
    "split": "iterate",
    "batch": 2,
    "n_moments": 9,
    "no_key_moments": false
+  },
+  "259a1d22-f64a-566f-a14f-5a3ced3fcb52": {
+   "split": "heldout",
+   "batch": 6,
+   "n_moments": 6,
+   "no_key_moments": false,
+   "source": "tutoring_provider_c"
+  },
+  "25b5ee52-0358-525d-9569-ab77546ec578": {
+   "split": "iterate",
+   "batch": 6,
+   "n_moments": 9,
+   "no_key_moments": false,
+   "source": "tutoring_provider_c"
+  },
+  "26104673-48ef-52ea-b7d9-b657e537cee7": {
+   "split": "heldout",
+   "batch": 6,
+   "n_moments": 5,
+   "no_key_moments": false,
+   "source": "tutoring_provider_c"
   },
   "266eabd2-a76b-52d8-8bcb-8f538b0a3a6a": {
    "split": "iterate",
@@ -309,17 +954,45 @@
    "n_moments": 0,
    "no_key_moments": true
   },
+  "26b13d9d-0441-591c-b649-f375348129ab": {
+   "split": "heldout",
+   "batch": 6,
+   "n_moments": 7,
+   "no_key_moments": false,
+   "source": "tutoring_provider_c"
+  },
   "2705591b-4053-5749-9178-af301e7f207d": {
    "split": "iterate",
    "batch": 2,
    "n_moments": 0,
    "no_key_moments": true
   },
+  "270d0663-4df6-5b14-ab14-f1ed31aa4313": {
+   "split": "iterate",
+   "batch": 6,
+   "n_moments": 5,
+   "no_key_moments": false,
+   "source": "tutoring_provider_c"
+  },
   "2753d881-2dc5-5f1e-907a-10a1dae1f5c6": {
    "split": "iterate",
    "batch": 2,
    "n_moments": 4,
    "no_key_moments": false
+  },
+  "2795a63d-0276-59a7-97aa-608a5ed8191f": {
+   "split": "iterate",
+   "batch": 6,
+   "n_moments": 2,
+   "no_key_moments": false,
+   "source": "tutoring_provider_c"
+  },
+  "28263279-6593-574a-a8f9-64f8254331c2": {
+   "split": "iterate",
+   "batch": 6,
+   "n_moments": 12,
+   "no_key_moments": false,
+   "source": "tutoring_provider_c"
   },
   "282dd100-5ecb-5426-bf2c-22eaf2a6402a": {
    "split": "heldout",
@@ -333,6 +1006,13 @@
    "n_moments": 0,
    "no_key_moments": true
   },
+  "28a7cad8-218f-5f3f-8ecc-b78ad291835c": {
+   "split": "iterate",
+   "batch": 6,
+   "n_moments": 2,
+   "no_key_moments": false,
+   "source": "tutoring_provider_c"
+  },
   "28e9354f-8149-5122-b8b8-5d643b29b606": {
    "split": "heldout",
    "batch": 1,
@@ -345,11 +1025,39 @@
    "n_moments": 0,
    "no_key_moments": true
   },
+  "29cfaf7a-a110-502a-8b7d-15986f11bf60": {
+   "split": "heldout",
+   "batch": 6,
+   "n_moments": 9,
+   "no_key_moments": false,
+   "source": "tutoring_provider_c"
+  },
+  "2aa9aadc-7b5c-5006-a8dc-118711a06a48": {
+   "split": "heldout",
+   "batch": 6,
+   "n_moments": 3,
+   "no_key_moments": false,
+   "source": "tutoring_provider_c"
+  },
+  "2b00be74-799b-585e-9d97-1b9a700fddd6": {
+   "split": "iterate",
+   "batch": 6,
+   "n_moments": 12,
+   "no_key_moments": false,
+   "source": "tutoring_provider_c"
+  },
   "2b22bea0-2c34-50e1-af1c-7ff7e0bc9992": {
    "split": "heldout",
    "batch": 1,
    "n_moments": 3,
    "no_key_moments": false
+  },
+  "2b310636-9e5f-5a81-97ad-0e00f01b966c": {
+   "split": "iterate",
+   "batch": 6,
+   "n_moments": 12,
+   "no_key_moments": false,
+   "source": "tutoring_provider_c"
   },
   "2b875f91-2809-547d-806c-dfd81edfb025": {
    "split": "iterate",
@@ -357,11 +1065,39 @@
    "n_moments": 4,
    "no_key_moments": false
   },
+  "2ba37fa8-4a9f-5089-9508-67f19ecdd6e7": {
+   "split": "iterate",
+   "batch": 6,
+   "n_moments": 11,
+   "no_key_moments": false,
+   "source": "tutoring_provider_c"
+  },
+  "2baafae1-9404-54b7-9e7f-5c930f28b178": {
+   "split": "iterate",
+   "batch": 6,
+   "n_moments": 14,
+   "no_key_moments": false,
+   "source": "tutoring_provider_c"
+  },
   "2c7aba68-abac-521c-93d4-e6ff6e9b0b26": {
    "split": "iterate",
    "batch": 1,
    "n_moments": 6,
    "no_key_moments": false
+  },
+  "2ce58c40-1ce7-5c88-8f3f-c19067de9dcb": {
+   "split": "heldout",
+   "batch": 6,
+   "n_moments": 9,
+   "no_key_moments": false,
+   "source": "tutoring_provider_c"
+  },
+  "2d1933c1-7f50-5f58-9595-4da2c909a42b": {
+   "split": "heldout",
+   "batch": 6,
+   "n_moments": 12,
+   "no_key_moments": false,
+   "source": "tutoring_provider_c"
   },
   "2da92a19-1443-57de-92b8-6afaf40dc349": {
    "split": "heldout",
@@ -374,6 +1110,20 @@
    "batch": 3,
    "n_moments": 5,
    "no_key_moments": false
+  },
+  "2e7f3698-f82a-556e-b726-135ca05bb7fa": {
+   "split": "heldout",
+   "batch": 6,
+   "n_moments": 10,
+   "no_key_moments": false,
+   "source": "tutoring_provider_c"
+  },
+  "2e869ec9-70e0-5cfc-b39e-4c2a0331cd2e": {
+   "split": "iterate",
+   "batch": 6,
+   "n_moments": 7,
+   "no_key_moments": false,
+   "source": "tutoring_provider_c"
   },
   "30e294b8-d5ab-5a47-80cb-7a7f3e9618db": {
    "split": "heldout",

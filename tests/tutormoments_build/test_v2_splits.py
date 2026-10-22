@@ -8,8 +8,8 @@ import pytest
 from tutormoments_build.v2 import splits as S
 
 
-def _annotations_file(tmp_path, rows):
-    path = tmp_path / "annotations.jsonl"
+def _annotations_file(tmp_path, rows, name="annotations.jsonl"):
+    path = tmp_path / name
     path.write_text("\n".join(json.dumps(r) for r in rows) + "\n", encoding="utf-8")
     return str(path)
 
@@ -42,6 +42,8 @@ def _empty_manifest():
 
 
 def _assign(corpus, manifest, **kw):
+    # Corpora built in a test without a provider all belong to one.
+    corpus = {tid: {"source": "p", **t} for tid, t in corpus.items()}
     kw.setdefault("seed", 1234)
     kw.setdefault("heldout_fraction", 0.5)
     kw.setdefault("balance_by", "moments")
@@ -66,7 +68,28 @@ def test_summarize_counts_moments_per_transcript(tmp_path):
     got = S.summarize_transcripts(path)
     assert got["a"]["n_moments"] == 2
     assert got["b"]["n_moments"] == 1
-    assert got["c"] == {"n_moments": 0, "no_key_moments": True}
+    assert got["c"] == {"n_moments": 0, "no_key_moments": True, "source": "annotations"}
+
+
+def test_summarize_names_the_provider_by_its_file(tmp_path):
+    path = _annotations_file(
+        tmp_path, [_moment_row("a")], name="tutoring_provider_c_annotations.jsonl"
+    )
+    assert S.summarize_transcripts(path)["a"]["source"] == "tutoring_provider_c"
+
+
+def test_summarize_rejects_row_from_another_provider(tmp_path):
+    row = {**_moment_row("a"), "source": "tutoring_provider_a"}
+    path = _annotations_file(tmp_path, [row], name="tutoring_provider_c_annotations.jsonl")
+    with pytest.raises(ValueError, match="tutoring_provider_a"):
+        S.summarize_transcripts(path)
+
+
+def test_summarize_all_rejects_transcript_in_two_providers(tmp_path):
+    a = _annotations_file(tmp_path, [_moment_row("t")], name="a_annotations.jsonl")
+    c = _annotations_file(tmp_path, [_moment_row("t")], name="c_annotations.jsonl")
+    with pytest.raises(ValueError, match="appears in both"):
+        S.summarize_all([a, c])
 
 
 def test_summarize_rejects_unrecognised_row(tmp_path):
@@ -212,6 +235,61 @@ def test_heldout_fraction_is_respected():
 
 
 # ---------------------------------------------------------------------------
+# providers
+# ---------------------------------------------------------------------------
+
+
+def _provider_corpus(source, n, prefix):
+    return {
+        f"{prefix}{i:04d}": {"n_moments": 1, "no_key_moments": False, "source": source}
+        for i in range(n)
+    }
+
+
+def test_each_provider_is_balanced_on_its_own():
+    # Provider a's existing assignments lean heavily to heldout. Pooled
+    # balancing would send provider c's transcripts to iterate to make up a's
+    # drift; split on its own, c lands on the target ratio by itself.
+    manifest = _empty_manifest()
+    manifest["assignments"] = {
+        f"a{i:04d}": {"split": "heldout", "n_moments": 1, "no_key_moments": False}
+        for i in range(30)
+    }
+    manifest["batches"].append({"batch": 1})
+    corpus = {**_provider_corpus("a", 30, "a"), **_provider_corpus("c", 20, "c")}
+
+    new, new_ids = _assign(corpus, manifest, balance_by="transcripts")
+    assert set(new_ids) == set(_provider_corpus("c", 20, "c"))
+    counts = {s: sum(1 for rec in new.values() if rec["split"] == s) for s in S.SPLITS}
+    assert counts == {"iterate": 10, "heldout": 10}
+    assert {rec["source"] for rec in new.values()} == {"c"}
+
+
+def test_provider_split_ignores_other_providers_new_transcripts():
+    # Adding a second provider to a batch must not change how the first is split.
+    a = _provider_corpus("a", 25, "a")
+    alone, _ = _assign(a, _empty_manifest())
+    together, _ = _assign({**a, **_provider_corpus("c", 17, "c")}, _empty_manifest())
+    assert {tid: together[tid] for tid in alone} == alone
+
+
+def test_assignments_without_a_source_count_toward_their_annotations_provider():
+    # Batches written before providers existed record no source; they must
+    # still count toward their provider's running totals, read off the
+    # annotations, or that provider's next batch would ignore them.
+    manifest = _empty_manifest()
+    manifest["assignments"] = {
+        f"a{i:04d}": {"split": "heldout", "n_moments": 1, "no_key_moments": False}
+        for i in range(10)
+    }
+    manifest["batches"].append({"batch": 1})
+    corpus = _provider_corpus("a", 20, "a")
+
+    new, _ = _assign(corpus, manifest, balance_by="transcripts")
+    assert all(rec["split"] == "iterate" for rec in new.values())
+
+
+# ---------------------------------------------------------------------------
 # manifest I/O and CLI
 # ---------------------------------------------------------------------------
 
@@ -324,3 +402,24 @@ def test_no_key_moment_transcripts_split_alongside_weighted_ones():
     for tid, rec in new.items():
         moments[rec["split"]] += corpus[tid]["n_moments"]
     assert abs(moments["iterate"] - moments["heldout"]) <= 1
+
+
+def test_cli_reads_every_provider_in_one_run(tmp_path):
+    a = _annotations_file(
+        tmp_path, [_moment_row(f"a{i}") for i in range(6)], name="prov_a_annotations.jsonl"
+    )
+    c = _annotations_file(
+        tmp_path, [_moment_row(f"c{i}") for i in range(4)], name="prov_c_annotations.jsonl"
+    )
+    manifest = str(tmp_path / "splits.json")
+    assert S.main(["--annotations", a, c, "--manifest", manifest]) == 0
+
+    written = S.load_manifest(manifest)
+    assert {rec["source"] for rec in written["assignments"].values()} == {"prov_a", "prov_c"}
+    batch = written["batches"][-1]
+    assert batch["sources"] == [a, c]
+    assert batch["n_assigned_by_source"] == {"prov_a": 6, "prov_c": 4}
+
+
+def test_cli_defaults_to_every_provider():
+    assert S.build_parser().parse_args([]).annotations == list(S.DEFAULT_ANNOTATIONS_FILES)

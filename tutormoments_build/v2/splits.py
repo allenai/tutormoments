@@ -1,20 +1,27 @@
 """Assign v2-annotated transcripts to the `iterate` / `heldout` splits.
 
-Splits are **append-only**. Re-running this script only assigns transcript ids it
-has not seen before, and preserves previous assignments.
+Splits are **append-only**: a re-run assigns only transcripts not yet in the
+manifest and never moves an existing one.
 
-Assignment is deterministic given (seed, manifest, new transcript ids):
+One run reads every provider's annotations file (DEFAULT_ANNOTATIONS_FILES).
+Each provider is split on its own, balanced against its own running totals, so
+one provider never makes up for another's drift.
 
-1. Transcript ids present in the annotations file but absent from the manifest
-   are collected and sorted (sorting removes any dependence on file order).
-2. They are shuffled with ``random.Random(f"{seed}:{batch}")``. The batch number
-   is folded in so successive rounds draw different permutations from one seed.
-3. The batch is then ordered heaviest-first (randomised within each weight)
-   and each id handed to whichever split is furthest *below* its target share --
-   counting transcripts already in the manifest. Greedy deficit filling (rather
-   than an independent coin flip per transcript) is what keeps the cumulative
-   ratio on target as rounds accumulate, instead of letting per-round sampling
-   noise pile up.
+Current split (transcripts, as of batch 6):
+
+    provider               iterate   heldout
+    tutoring_provider_a        167       167
+    tutoring_provider_c         53        52
+
+How a batch is assigned, per provider (deterministic given seed + manifest):
+
+1. Collect the provider's transcript ids not yet in the manifest, sorted.
+2. Shuffle with ``random.Random(f"{seed}:{batch}:{provider}")``.
+   (Batches 1-5 predate providers and used ``f"{seed}:{batch}"``; they are
+   frozen, so the change does not affect them.)
+3. Order heaviest-first (the shuffle breaks ties) and give each id to whichever
+   split is furthest below its target share. Filling the gap, rather than
+   flipping a coin per transcript, keeps the ratio on target across batches.
 
 Usage:
     # preview without touching the manifest
@@ -41,6 +48,13 @@ SCHEMA_VERSION = "1.0"
 SPLITS = ("iterate", "heldout")
 
 DEFAULT_ANNOTATIONS = "data/v2_annotations/source/tutoring_provider_a_annotations.jsonl"
+# Read together by this script. DEFAULT_ANNOTATIONS stays provider A only
+# because build_ground_truth imports it.
+DEFAULT_ANNOTATIONS_FILES = (
+    DEFAULT_ANNOTATIONS,
+    "data/v2_annotations/source/tutoring_provider_c_annotations.jsonl",
+)
+ANNOTATIONS_SUFFIX = "_annotations"
 DEFAULT_MANIFEST = os.path.join(os.path.dirname(__file__), "splits.json")
 
 # Frozen so a rebuilt manifest reproduces the committed one. Changing this
@@ -55,14 +69,23 @@ DEFAULT_HELDOUT_FRACTION = 0.5
 # ===========================================================================
 
 
+def source_of_file(annotations_path: str) -> str:
+    """``tutoring_provider_a_annotations.jsonl`` -> ``tutoring_provider_a``."""
+    stem = os.path.splitext(os.path.basename(annotations_path))[0]
+    return stem.removesuffix(ANNOTATIONS_SUFFIX)
+
+
 def summarize_transcripts(annotations_path: str) -> dict[str, dict]:
-    """Return {transcript_id: {"n_moments": int, "no_key_moments": bool}}.
+    """Return {transcript_id: {"n_moments": int, "no_key_moments": bool, "source": str}}.
 
     The annotations JSONL carries one row per moment, plus rows shaped
     ``{"transcript_id", "no_key_moments_record"}`` for transcripts an annotator
     reviewed and found nothing in. Both kinds count as annotated transcripts and
     both are eligible for a split.
+
+    A row's own ``source`` (some providers include one) must match the file's.
     """
+    source = source_of_file(annotations_path)
     moments: Counter[str] = Counter()
     no_key_moments: set[str] = set()
 
@@ -76,6 +99,11 @@ def summarize_transcripts(annotations_path: str) -> dict[str, dict]:
             if not tid:
                 raise ValueError(
                     f"{annotations_path}:{lineno}: row has no transcript_id"
+                )
+            if row.get("source", source) != source:
+                raise ValueError(
+                    f"{annotations_path}:{lineno}: row {tid} has source "
+                    f"{row['source']!r}, but the file is {source!r}'s"
                 )
             if "moment" in row:
                 moments[tid] += 1
@@ -91,9 +119,27 @@ def summarize_transcripts(annotations_path: str) -> dict[str, dict]:
         tid: {
             "n_moments": moments.get(tid, 0),
             "no_key_moments": tid in no_key_moments and moments.get(tid, 0) == 0,
+            "source": source,
         }
         for tid in sorted(set(moments) | no_key_moments)
     }
+
+
+def summarize_all(annotations_paths: list[str]) -> dict[str, dict]:
+    """summarize_transcripts over every provider's file, merged.
+
+    A transcript id in two providers' files is an error.
+    """
+    merged: dict[str, dict] = {}
+    for path in annotations_paths:
+        for tid, summary in summarize_transcripts(path).items():
+            if tid in merged:
+                raise ValueError(
+                    f"transcript {tid} appears in both {merged[tid]['source']!r} "
+                    f"and {summary['source']!r} annotations"
+                )
+            merged[tid] = summary
+    return merged
 
 
 # ===========================================================================
@@ -148,6 +194,14 @@ def _weight(record: dict, balance_by: str) -> float:
     return float(record["n_moments"]) if balance_by == "moments" else 1.0
 
 
+def assigned_source(tid: str, record: dict, transcripts: dict[str, dict]) -> str | None:
+    """The provider of an assigned transcript, or None if unknown.
+
+    Batches 1-5 don't record one, so it falls back to the annotations.
+    """
+    return record.get("source") or transcripts.get(tid, {}).get("source")
+
+
 def assign_new(
     transcripts: dict[str, dict],
     manifest: dict,
@@ -156,7 +210,7 @@ def assign_new(
     heldout_fraction: float,
     balance_by: str,
 ) -> tuple[dict[str, dict], list[str]]:
-    """Assign every transcript not already in the manifest.
+    """Assign every transcript not already in the manifest, provider by provider.
 
     Returns (new_assignments, ordered_new_ids). Existing assignments are read
     for the running totals but never modified.
@@ -164,8 +218,42 @@ def assign_new(
     assignments = manifest["assignments"]
     batch = len(manifest["batches"]) + 1
 
+    new_assignments: dict[str, dict] = {}
+    ordered_new_ids: list[str] = []
+    for source in sorted({t["source"] for t in transcripts.values()}):
+        provider = {tid: t for tid, t in transcripts.items() if t["source"] == source}
+        provider_assignments = {
+            tid: rec
+            for tid, rec in assignments.items()
+            if assigned_source(tid, rec, transcripts) == source
+        }
+        new, new_ids = _assign_provider(
+            source,
+            provider,
+            provider_assignments,
+            batch=batch,
+            seed=seed,
+            heldout_fraction=heldout_fraction,
+            balance_by=balance_by,
+        )
+        new_assignments.update(new)
+        ordered_new_ids.extend(new_ids)
+    return new_assignments, ordered_new_ids
+
+
+def _assign_provider(
+    source: str,
+    transcripts: dict[str, dict],
+    assignments: dict[str, dict],
+    *,
+    batch: int,
+    seed: int,
+    heldout_fraction: float,
+    balance_by: str,
+) -> tuple[dict[str, dict], list[str]]:
+    """Assign one provider's new transcripts against its own running totals."""
     new_ids = sorted(tid for tid in transcripts if tid not in assignments)
-    random.Random(f"{seed}:{batch}").shuffle(new_ids)
+    random.Random(f"{seed}:{batch}:{source}").shuffle(new_ids)
     # Heaviest first, randomised within each weight. Greedy filling cannot undo
     # an earlier choice, so a 15-moment transcript arriving last would strand a
     # gap the remaining transcripts are too small to close; placing the heavy
@@ -214,6 +302,7 @@ def assign_new(
             "batch": batch,
             "n_moments": transcripts[tid]["n_moments"],
             "no_key_moments": transcripts[tid]["no_key_moments"],
+            "source": source,
         }
 
     return new_assignments, new_ids
@@ -234,15 +323,32 @@ def _totals(assignments: dict[str, dict]) -> dict[str, dict]:
     return out
 
 
-def report(manifest: dict, n_new: int, dry_run: bool) -> str:
-    totals = _totals(manifest["assignments"])
-    all_t = sum(v["transcripts"] for v in totals.values())
-    all_m = sum(v["moments"] for v in totals.values())
+def report(manifest: dict, transcripts: dict[str, dict], n_new: int, dry_run: bool) -> str:
+    """Split totals per provider, then over all providers."""
+    assignments = manifest["assignments"]
+    by_source: dict[str, dict[str, dict]] = {}
+    for tid, rec in assignments.items():
+        source = assigned_source(tid, rec, transcripts) or "unknown provider"
+        by_source.setdefault(source, {})[tid] = rec
+
     lines = [
         "",
         f"{'DRY RUN -- nothing written' if dry_run else 'Manifest updated'}"
         f"  ({n_new} newly assigned transcript(s), batch {len(manifest['batches'])})",
+    ]
+    for source in sorted(by_source):
+        lines += _report_table(source, by_source[source])
+    lines += _report_table("all providers", assignments)
+    return "\n".join(lines)
+
+
+def _report_table(title: str, assignments: dict[str, dict]) -> list[str]:
+    totals = _totals(assignments)
+    all_t = sum(v["transcripts"] for v in totals.values())
+    all_m = sum(v["moments"] for v in totals.values())
+    lines = [
         "",
+        f"  {title}",
         f"  {'split':<10}{'transcripts':>13}{'':>8}{'moments':>10}{'':>8}{'no-key-moments':>16}",
         f"  {'-' * 65}",
     ]
@@ -261,8 +367,7 @@ def report(manifest: dict, n_new: int, dry_run: bool) -> str:
         f"  {'total':<10}{all_t:>13}{'':>8}{all_m:>10}{'':>8}"
         f"{sum(v['no_key_moments'] for v in totals.values()):>16}"
     )
-    lines.append("")
-    return "\n".join(lines)
+    return lines
 
 
 # ===========================================================================
@@ -279,9 +384,10 @@ def build_parser() -> argparse.ArgumentParser:
     )
     parser.add_argument(
         "--annotations",
-        default=DEFAULT_ANNOTATIONS,
+        nargs="+",
+        default=list(DEFAULT_ANNOTATIONS_FILES),
         metavar="FILE",
-        help="Raw v2 annotations JSONL",
+        help="Raw v2 annotations JSONL, one per provider (<provider>_annotations.jsonl)",
     )
     parser.add_argument(
         "--manifest",
@@ -330,12 +436,12 @@ def main(argv: list[str] | None = None) -> int:
         logger.error("--heldout-fraction must be strictly between 0 and 1")
         return 2
 
-    transcripts = summarize_transcripts(args.annotations)
+    transcripts = summarize_all(args.annotations)
     manifest = load_manifest(args.manifest)
     logger.info(
         "%d annotated transcript(s) in %s; %d already assigned in %s",
         len(transcripts),
-        args.annotations,
+        ", ".join(args.annotations),
         len(manifest["assignments"]),
         args.manifest,
     )
@@ -368,7 +474,7 @@ def main(argv: list[str] | None = None) -> int:
     stale = sorted(set(manifest["assignments"]) - set(transcripts))
     if stale:
         logger.warning(
-            "%d assigned transcript(s) no longer appear in the annotations file; "
+            "%d assigned transcript(s) no longer appear in any annotations file; "
             "keeping their assignments (append-only): %s",
             len(stale),
             ", ".join(stale[:5]) + (" ..." if len(stale) > 5 else ""),
@@ -384,7 +490,7 @@ def main(argv: list[str] | None = None) -> int:
 
     if not new_ids:
         logger.info("no new transcripts to assign; manifest is up to date")
-        print(report(manifest, 0, dry_run=True))
+        print(report(manifest, transcripts, 0, dry_run=True))
         return 0
 
     manifest["assignments"].update(new_assignments)
@@ -393,21 +499,24 @@ def main(argv: list[str] | None = None) -> int:
         {
             "batch": len(manifest["batches"]) + 1,
             "created_at": datetime.now(timezone.utc).strftime("%Y-%m-%dT%H:%M:%SZ"),
-            "source": args.annotations,
+            "sources": list(args.annotations),
             "seed": args.seed,
             "heldout_fraction": args.heldout_fraction,
             "balance_by": args.balance_by,
             "n_assigned": len(new_ids),
+            "n_assigned_by_source": dict(
+                sorted(Counter(rec["source"] for rec in new_assignments.values()).items())
+            ),
         }
     )
 
     if args.dry_run:
-        print(report(manifest, len(new_ids), dry_run=True))
+        print(report(manifest, transcripts, len(new_ids), dry_run=True))
         return 0
 
     write_manifest(args.manifest, manifest)
     logger.info("wrote %s", args.manifest)
-    print(report(manifest, len(new_ids), dry_run=False))
+    print(report(manifest, transcripts, len(new_ids), dry_run=False))
     return 0
 
 
