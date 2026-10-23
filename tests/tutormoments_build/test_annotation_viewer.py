@@ -1041,6 +1041,102 @@ class TestTranscriptIndex:
         assert [r["timestamp"] for r in index.rows("t1")] == ["01:01", "02:03"]
 
 
+    @staticmethod
+    def with_enrichments(path, enrichments, n_turns=3):
+        """A provider A transcript: dialogue in `turns`, enrichments listed beside it."""
+        turns = [
+            {"turn_number": n, "start_seconds": 10.0 * n, "role": "Tutor", "text": "hi"}
+            for n in range(1, n_turns + 1)
+        ]
+        path.write_text(
+            json.dumps({"transcript_id": "t1", "turns": turns, "enrichments": enrichments})
+            + "\n"
+        )
+        return TranscriptIndex(path, {"t1"})
+
+    @staticmethod
+    def enrichment(number, before_turn, kind="pause", label="", content=""):
+        return {
+            "enrichment_number": number,
+            "type": kind,
+            "start_seconds": 5,
+            "end_seconds": 8,
+            "before_turn": before_turn,
+            "label": label,
+            "content": content,
+        }
+
+    def test_enrichments_are_drawn_before_the_turn_they_precede(self, tmp_path):
+        index = self.with_enrichments(
+            tmp_path / "a.jsonl",
+            [self.enrichment(2, 2), self.enrichment(1, 2), self.enrichment(3, None)],
+        )
+        rows = index.rows("t1")
+        # Before turn 2 in enrichment-number order; the one naming no turn goes last.
+        assert [r["turn_number"] for r in rows] == [1, None, None, 2, 3, None]
+        assert [r["turn_index"] for r in rows] == [0, 1, 2, 3, 4, 5]
+        assert index.turn_rows("t1") == {1: (0, 0), 2: (3, 3), 3: (4, 4)}
+
+    def test_a_moment_lands_past_the_interleaved_enrichments(self, tmp_path):
+        index = self.with_enrichments(
+            tmp_path / "a.jsonl", [self.enrichment(1, 2), self.enrichment(2, 2)]
+        )
+        span = {"start_turn": 2, "cut_turn": 2, "end_turn": 3}
+        assert locate_span(index.turn_rows("t1"), span) == {
+            "start_row": 3,
+            "cut_row": 3,
+            "end_row": 4,
+        }
+
+    def test_an_enrichment_row_reads_as_a_tagged_screen_event(self, tmp_path):
+        index = self.with_enrichments(
+            tmp_path / "a.jsonl",
+            [
+                self.enrichment(
+                    1, 2, "screen_interaction", "tutor - drawing", "Tutor draws a line."
+                )
+            ],
+        )
+        row = index.rows("t1")[1]
+        assert row["type"] == "[SCREEN INTERACTION]"
+        assert row["text"] == "[SCREEN INTERACTION] tutor - drawing — Tutor draws a line."
+        assert row["role"] == ""
+        assert row["timestamp"] == "00:05-00:08"
+
+    def test_an_empty_pause_still_says_how_long_it_was(self, tmp_path):
+        index = self.with_enrichments(
+            tmp_path / "a.jsonl", [self.enrichment(1, 1, label="3 seconds")]
+        )
+        assert index.rows("t1")[0]["text"] == "[PAUSE] 3 seconds"
+
+    def test_problems_come_deck_by_deck_in_slide_order(self, tmp_path):
+        # Positions restart in each learning objective's deck, so sorting on position
+        # alone would put the second deck's first slide among the first deck's.
+        path = tmp_path / "c.jsonl"
+        fractions = {"id": 7, "title": "Fractions as decimals ", "year": 5}
+        rounding = {"id": 3, "title": "Rounding", "year": 5}
+        problems = [
+            {"slide_id": 12, "slide_position": 2, "learning_objective": fractions},
+            {"slide_id": 31, "slide_position": 1, "learning_objective": rounding},
+            {"slide_id": 11, "slide_position": 1, "learning_objective": fractions},
+        ]
+        path.write_text(
+            json.dumps(transcript([row(0, turn_number=1)]) | {"problems": problems})
+            + "\n"
+        )
+        cards = TranscriptIndex(path, {"t1"}).problems("t1")
+        assert [c["slide_id"] for c in cards] == [11, 12, 31]
+        assert cards[0] == {
+            "slide_id": 11,
+            "slide_position": 1,
+            "objective": "Fractions as decimals",
+            "objective_id": 7,
+            "year": 5,
+        }
+
+    def test_a_provider_that_records_no_problems_has_none(self, path):
+        assert TranscriptIndex(path, {"t1"}).problems("t1") == []
+
 class TestLocateSpan:
     """Turn numbers, which is all the export records, onto the rows the pane draws."""
 
@@ -1150,7 +1246,7 @@ class TestBuildPayload:
 
     def test_groups_moments_and_verdicts_under_their_transcripts(self, paths):
         annotations, transcripts, _ = paths
-        payload = build_payload(annotations, transcripts)
+        payload = build_payload([(annotations, transcripts)])
         by_id = {t["transcript_id"]: t for t in payload["transcripts"]}
         assert by_id["t1"]["n_moments"] == 2
         assert by_id["t1"]["found"] is True
@@ -1171,7 +1267,7 @@ class TestBuildPayload:
         transcripts.write_text(
             json.dumps(transcript([], "somewhere-else", "c-else")) + "\n"
         )
-        payload = build_payload(annotations, transcripts)
+        payload = build_payload([(annotations, transcripts)])
         assert {t["found"] for t in payload["transcripts"]} == {False}
         # With no transcript to name it, the transcript id stands in for the one the
         # tool showed, so the picker still has something to sort and label by.
@@ -1179,14 +1275,14 @@ class TestBuildPayload:
 
     def test_lists_everyone_who_annotated(self, paths):
         annotations, transcripts, _ = paths
-        payload = build_payload(annotations, transcripts)
+        payload = build_payload([(annotations, transcripts)])
         assert [a["id"] for a in payload["annotators"]] == ["a", "b", "c"]
 
     def test_places_each_moment_in_the_rows_the_pane_draws(self, paths):
         # The moment is recorded in turn numbers; the pane highlights row positions, and
         # they run ENRICHMENTS apart. Reading one as the other draws the wrong stretch.
         annotations, transcripts, _ = paths
-        payload = build_payload(annotations, transcripts)
+        payload = build_payload([(annotations, transcripts)])
         moment = next(m for m in payload["moments"] if m["id"] == "m1")
         assert moment["boundaries"] == {
             "start_turn": 10,
@@ -1205,11 +1301,100 @@ class TestBuildPayload:
         transcripts.write_text(
             json.dumps(transcript([], "somewhere-else", "c-else")) + "\n"
         )
-        payload = build_payload(annotations, transcripts)
+        payload = build_payload([(annotations, transcripts)])
         moment = next(m for m in payload["moments"] if m["id"] == "m1")
         assert moment["boundaries"]["start_turn"] == 10
         assert moment["boundaries"]["start_row"] is None
 
+
+
+class TestSeveralProviders:
+    """Each provider's export is read against its own transcripts file and kept apart."""
+
+    @staticmethod
+    def provider(tmp_path, name, transcript_id, **extra):
+        annotations = tmp_path / f"{name}_annotations.jsonl"
+        annotations.write_text(
+            json.dumps(
+                record(
+                    [annotation("a", "selector", **judged())],
+                    moment_id=f"m-{name}",
+                    transcript_id=transcript_id,
+                )
+            )
+            + "\n"
+        )
+        transcripts = tmp_path / f"{name}.jsonl"
+        transcripts.write_text(
+            json.dumps(transcript(rendered_rows(23), transcript_id) | extra) + "\n"
+        )
+        return annotations, transcripts
+
+    def test_everything_is_tagged_with_the_provider_its_file_names(self, tmp_path):
+        payload = build_payload(
+            [
+                self.provider(tmp_path, "tutoring_provider_a", "ta"),
+                self.provider(tmp_path, "tutoring_provider_c", "tc"),
+            ]
+        )
+        assert payload["providers"] == ["tutoring_provider_a", "tutoring_provider_c"]
+        assert {m["id"]: m["provider"] for m in payload["moments"]} == {
+            "m-tutoring_provider_a": "tutoring_provider_a",
+            "m-tutoring_provider_c": "tutoring_provider_c",
+        }
+        assert {t["transcript_id"]: t["provider"] for t in payload["transcripts"]} == {
+            "ta": "tutoring_provider_a",
+            "tc": "tutoring_provider_c",
+        }
+        assert payload["transcripts_total"] == 2
+
+    def test_a_moment_is_placed_against_its_own_providers_transcript(self, tmp_path):
+        # The same transcript id is absent from the other provider's file, so reading
+        # the wrong file would leave the moment unplaced.
+        payload = build_payload(
+            [
+                self.provider(tmp_path, "tutoring_provider_a", "ta"),
+                self.provider(tmp_path, "tutoring_provider_c", "tc"),
+            ]
+        )
+        assert {t["found"] for t in payload["transcripts"]} == {True}
+        assert all(m["boundaries"]["start_row"] is not None for m in payload["moments"])
+
+    def test_a_verdict_carries_its_provider_too(self, tmp_path):
+        annotations, transcripts = self.provider(tmp_path, "tutoring_provider_c", "tc")
+        annotations.write_text(
+            json.dumps(no_key_moments("c") | {"transcript_id": "tc"}) + "\n"
+        )
+        payload = build_payload([(annotations, transcripts)])
+        assert payload["no_key_moments"][0]["provider"] == "tutoring_provider_c"
+
+    def test_the_problems_ride_along_with_the_transcript(self, tmp_path):
+        objective = {"id": 7, "title": "Fractions", "year": 5}
+        payload = build_payload(
+            [
+                self.provider(tmp_path, "tutoring_provider_a", "ta"),
+                self.provider(
+                    tmp_path,
+                    "tutoring_provider_c",
+                    "tc",
+                    problems=[
+                        {"slide_id": 3, "slide_position": 1, "learning_objective": objective}
+                    ],
+                ),
+            ]
+        )
+        by_id = {t["transcript_id"]: t for t in payload["transcripts"]}
+        assert by_id["ta"]["problems"] == []
+        assert [p["objective"] for p in by_id["tc"]["problems"]] == ["Fractions"]
+
+    def test_a_transcript_annotated_under_two_providers_is_refused(self, tmp_path):
+        with pytest.raises(ValueError, match="another provider: same"):
+            build_payload(
+                [
+                    self.provider(tmp_path, "tutoring_provider_a", "same"),
+                    self.provider(tmp_path, "tutoring_provider_c", "same"),
+                ]
+            )
 
 class TestBuildSite:
     @pytest.fixture
@@ -1232,7 +1417,7 @@ class TestBuildSite:
 
     def test_writes_a_self_contained_page(self, paths):
         annotations, transcripts, out = paths
-        payload = build_site(annotations, transcripts, out)
+        payload = build_site([(annotations, transcripts)], out)
         html = out.read_text()
         assert "__VIEWER_DATA__" not in html
         assert len(payload["moments"]) == 1
@@ -1245,7 +1430,7 @@ class TestBuildSite:
             json.dumps(transcript([row(12, "</script><b>pwned</b>", turn_number=13)]))
             + "\n"
         )
-        build_site(annotations, transcripts, out)
+        build_site([(annotations, transcripts)], out)
 
         # The browser ends the block at the first "</script>", so parsing the same way it
         # does must still yield the whole payload with the hostile text intact inside it.

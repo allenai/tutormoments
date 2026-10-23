@@ -22,16 +22,64 @@ from tutormoments_build.annotation_viewer.transcripts import (
     TranscriptIndex,
     locate_span,
 )
+from tutormoments_build.v2.splits import source_of_file
 
 TEMPLATE = Path(__file__).with_name("template.html")
 PLACEHOLDER = "__VIEWER_DATA__"
 
 
-def build_payload(annotations_path, transcripts_path, excluded=()):
-    """Moments, transcripts and rosters for one annotations export."""
+def build_payload(sources, excluded=()):
+    """Moments, transcripts and rosters for one or more providers' exports.
+
+    `sources` pairs each provider's annotations export with its transcripts file. The
+    provider is named after the annotations file (`<provider>_annotations.jsonl`), the
+    convention the splits manifest reads providers by, and every moment, verdict and
+    transcript carries it so the page can show one provider at a time. Annotators are
+    pooled: the same raters work every provider.
+    """
+    moments, verdicts, transcripts, provenance = [], [], {}, []
+    total = 0
+    for annotations_path, transcripts_path in sources:
+        provider = source_of_file(str(annotations_path))
+        part = _provider_part(provider, annotations_path, transcripts_path, excluded)
+        clash = transcripts.keys() & part["transcripts"].keys()
+        if clash:
+            raise ValueError(
+                f"{annotations_path}: transcript(s) also annotated under another "
+                f"provider: {', '.join(sorted(clash))}"
+            )
+        moments += part["moments"]
+        verdicts += part["verdicts"]
+        transcripts |= part["transcripts"]
+        total += part["total"]
+        provenance.append(
+            {
+                "provider": provider,
+                "annotations": str(annotations_path),
+                "transcripts": str(transcripts_path),
+            }
+        )
+
+    return {
+        "generated_at": datetime.now(timezone.utc).strftime("%Y-%m-%d %H:%M UTC"),
+        "sources": provenance,
+        "providers": [p["provider"] for p in provenance],
+        "axes": list(axes_mod.AXES),
+        "moments": moments,
+        "no_key_moments": verdicts,
+        "annotators": annotator_roster(moments, verdicts),
+        "transcripts": sorted(transcripts.values(), key=lambda t: t["conversation_id"]),
+        "transcripts_total": total,
+    }
+
+
+def _provider_part(provider, annotations_path, transcripts_path, excluded):
+    """One provider's moments, verdicts and the transcripts they sit in."""
     records = read_records(annotations_path)
     moments = build_moments(records, excluded)
     verdicts = no_key_moment_verdicts(records, excluded)
+    for item in (*moments, *verdicts):
+        item["provider"] = provider
 
     wanted = {m["transcript_id"] for m in moments} | {
         v["transcript_id"] for v in verdicts
@@ -50,27 +98,21 @@ def build_payload(annotations_path, transcripts_path, excluded=()):
                 # the export keys moments and verdicts by transcript alone.
                 entry = transcripts[tid] = {
                     "transcript_id": tid,
+                    "provider": provider,
                     "conversation_id": (index.conversation_id(tid) if found else "")
                     or tid,
                     "found": found,
                     "turns": index.rows(tid) if found else [],
+                    "problems": index.problems(tid) if found else [],
                     "n_moments": 0,
                     "n_no_key_moments": 0,
                 }
             entry["n_moments" if source is moments else "n_no_key_moments"] += 1
-
     return {
-        "generated_at": datetime.now(timezone.utc).strftime("%Y-%m-%d %H:%M UTC"),
-        "source": {
-            "annotations": str(annotations_path),
-            "transcripts": str(transcripts_path),
-        },
-        "axes": list(axes_mod.AXES),
         "moments": moments,
-        "no_key_moments": verdicts,
-        "annotators": annotator_roster(moments, verdicts),
-        "transcripts": sorted(transcripts.values(), key=lambda t: t["conversation_id"]),
-        "transcripts_total": index.total,
+        "verdicts": verdicts,
+        "transcripts": transcripts,
+        "total": index.total,
     }
 
 
@@ -91,9 +133,9 @@ def _locate(moments, index):
                 span.update(locate_span(turn_rows, span))
 
 
-def build_site(annotations_path, transcripts_path, out_path, excluded=()):
+def build_site(sources, out_path, excluded=()):
     """Write the viewer to out_path and return the payload it embeds."""
-    payload = build_payload(annotations_path, transcripts_path, excluded)
+    payload = build_payload(sources, excluded)
     # Embedded in a <script type="application/json"> block: escaping "<" keeps a stray
     # "</script>" inside transcript text from ending the block early.
     data = json.dumps(payload, ensure_ascii=False).replace("<", "\\u003c")

@@ -42,16 +42,25 @@ def _build_parser() -> argparse.ArgumentParser:
     )
     viewer_p.add_argument(
         "--annotations",
-        default="data/v2_annotations/source/tutoring_provider_a_annotations.jsonl",
+        nargs="+",
+        default=[
+            "data/v2_annotations/source/tutoring_provider_a_annotations.jsonl",
+            "data/v2_annotations/source/tutoring_provider_c_annotations.jsonl",
+        ],
         metavar="FILE",
-        help="Raw annotations JSONL (default: %(default)s)",
+        help="Raw annotations JSONL, one per provider (<provider>_annotations.jsonl) "
+        "(default: %(default)s)",
     )
     viewer_p.add_argument(
         "--transcripts",
-        default="data/v2_annotations/source/tutoring_provider_a_v2_transcripts.jsonl",
+        nargs="+",
+        default=[
+            "data/v2_annotations/source/tutoring_provider_a.jsonl",
+            "data/v2_annotations/source/tutoring_provider_c.jsonl",
+        ],
         metavar="FILE",
-        help="v2 transcripts JSONL, whose rows carry the index moments are numbered "
-        "against (default: %(default)s)",
+        help="Transcripts JSONL, one per --annotations file and in the same order "
+        "(default: %(default)s)",
     )
     viewer_p.add_argument(
         "--out",
@@ -300,9 +309,12 @@ def _cmd_viewer(args) -> None:
     """
     from tutormoments_build.annotation_viewer import build_site
 
+    if len(args.annotations) != len(args.transcripts):
+        raise SystemExit(
+            "viewer: give one --transcripts file per --annotations file, in the same order"
+        )
     payload = build_site(
-        args.annotations,
-        args.transcripts,
+        list(zip(args.annotations, args.transcripts)),
         args.out,
         excluded=set(args.exclude),
     )

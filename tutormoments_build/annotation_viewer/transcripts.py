@@ -9,7 +9,7 @@ numberings coincide only until the first enrichment, so a moment is placed in th
 by mapping its turn numbers onto rows (`locate_span`), never by reading them as row
 positions.
 
-The file holds every transcript in the collection and runs to tens of megabytes, but
+The file holds every transcript in the collection and runs to gigabytes, but
 only the annotated ones are ever rendered, so rows are read by byte offset on demand.
 """
 
@@ -62,6 +62,30 @@ class TranscriptIndex:
             self._cache[transcript_id] = _rows(self._record(transcript_id), self.path)
         return self._cache[transcript_id]
 
+    def problems(self, transcript_id):
+        """The session's problems deck by deck, for the cards the page flips through.
+
+        Only some providers record them -- tutoring_provider_c lists each slide the
+        session covered with its learning objective -- and none record the problem text
+        itself or when in the session a slide was up, so a card says what was covered
+        and nothing about which turns it covers.
+
+        A slide's position counts within its learning objective's deck, so the cards
+        keep the decks in the order the provider lists them and sort slides only
+        within one: sorting on position alone would shuffle two decks together.
+        """
+        problems = self._record(transcript_id).get("problems") or []
+        decks = {}
+        for p in problems:
+            decks.setdefault(_objective_id(p), len(decks))
+        return [
+            _problem(p)
+            for p in sorted(
+                problems,
+                key=lambda p: (decks[_objective_id(p)], p.get("slide_position") or 0),
+            )
+        ]
+
     def turn_rows(self, transcript_id):
         """Each dialogue turn number mapped to (first row, last row) carrying it.
 
@@ -75,7 +99,7 @@ class TranscriptIndex:
 def _rows(record, path):
     rows = record.get("turns") or []
     if rows and _plain_dialogue(rows):
-        rows = [_from_plain_dialogue(position, row) for position, row in enumerate(rows)]
+        rows = _interleave(rows, record.get("enrichments") or [])
     if rows and "index" not in rows[0]:
         raise ValueError(
             f"{path}: transcript rows carry no 'index'. The pane draws the rendered row "
@@ -87,12 +111,13 @@ def _rows(record, path):
 
 
 def _plain_dialogue(rows):
-    """Whether these are a dialogue-only provider's rows, such as tutoring_provider_c's.
+    """Whether `turns` holds dialogue alone, as in the per-provider exports.
 
-    Those transcripts carry no enrichments, so the tool rendered exactly these rows
-    and a row's position in the list is its position in the pane. They are told apart
-    by shape -- a `start_seconds` and no `type` or `index` -- rather than accepted for
-    merely lacking an `index`: the older provider A export lacks one too, and it is
+    There enrichments, where a provider has them, sit in a list of their own beside
+    `turns` (tutoring_provider_a's) or are absent altogether (tutoring_provider_c's),
+    and the rendered row list is rebuilt from the two (`_interleave`). They are told
+    apart by shape -- a `start_seconds` and no `type` or `index` -- rather than accepted
+    for merely lacking an `index`: the older provider A export lacks one too, and it is
     missing the enrichment rows its annotators saw.
     """
     return all(
@@ -101,18 +126,79 @@ def _plain_dialogue(rows):
     )
 
 
-def _from_plain_dialogue(position, row):
-    """A dialogue-only row in the v2 export's shape: one dialogue row per turn."""
-    seconds = row.get("start_seconds")
+def _interleave(turns, enrichments):
+    """Dialogue and enrichments as one row list, numbered in the order they are drawn.
+
+    An enrichment is drawn just before the dialogue turn its `before_turn` names, in
+    enrichment-number order, and one naming no turn -- whatever followed the last line
+    of dialogue -- after all of them. The annotation tool folded some screen
+    interactions into the turn before them instead of giving them a row; the export
+    does not say which, so here every enrichment gets its own row. Moments are placed
+    by turn number, so this changes what the pane shows, not where a moment lands.
+    """
+    waiting = {}
+    for enrichment in sorted(enrichments, key=lambda e: e["enrichment_number"]):
+        waiting.setdefault(enrichment.get("before_turn"), []).append(enrichment)
+    ordered = []
+    for turn in turns:
+        ordered += [_enrichment_row(e) for e in waiting.pop(turn["turn_number"], [])]
+        ordered.append(_dialogue_row(turn))
+    # Left over: those after the last turn, and any naming a turn the dialogue lacks.
+    ordered += [
+        _enrichment_row(e)
+        for key in sorted(waiting, key=lambda k: (k is None, k or 0))
+        for e in waiting[key]
+    ]
+    return [row | {"index": position} for position, row in enumerate(ordered)]
+
+
+def _dialogue_row(row):
+    """A dialogue turn in the v2 export's shape."""
     return row | {
-        "index": position,
         "role": str(row.get("role") or "").upper(),
         "type": "dialogue",
-        "timestamp": (
-            f"{int(seconds) // 60:02d}:{int(seconds) % 60:02d}"
-            if seconds is not None
-            else ""
-        ),
+        "timestamp": _clock(row.get("start_seconds")),
+    }
+
+
+def _enrichment_row(enrichment):
+    """An enrichment in the v2 export's shape: a bracketed tag the page draws as a chip.
+
+    The export names no speaker for an enrichment, so the row takes neither speaker's
+    colour; who acted is in the text ("Tutor types ...").
+    """
+    tag = f"[{str(enrichment.get('type') or 'enrichment').replace('_', ' ').upper()}]"
+    label = str(enrichment.get("label") or "").strip()
+    content = str(enrichment.get("content") or "").strip()
+    start, end = enrichment.get("start_seconds"), enrichment.get("end_seconds")
+    return {
+        "turn_number": None,
+        "role": "",
+        "type": tag,
+        "text": " ".join(part for part in (tag, label + (" —" if label and content else ""), content) if part),
+        "timestamp": _clock(start)
+        + (f"-{_clock(end)}" if end is not None and end != start else ""),
+    }
+
+
+def _clock(seconds):
+    return (
+        f"{int(seconds) // 60:02d}:{int(seconds) % 60:02d}" if seconds is not None else ""
+    )
+
+
+def _objective_id(problem):
+    return (problem.get("learning_objective") or {}).get("id")
+
+
+def _problem(problem):
+    objective = problem.get("learning_objective") or {}
+    return {
+        "slide_id": problem.get("slide_id"),
+        "slide_position": problem.get("slide_position"),
+        "objective": str(objective.get("title") or "").strip(),
+        "objective_id": objective.get("id"),
+        "year": objective.get("year"),
     }
 
 

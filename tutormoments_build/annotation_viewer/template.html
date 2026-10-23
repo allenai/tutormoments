@@ -56,6 +56,7 @@
     display: flex; flex-wrap: wrap; align-items: flex-end; gap: 16px; padding: 12px 16px 14px;
   }
   .ctl { display: flex; flex-direction: column; gap: 5px; }
+  .ctl[hidden] { display: none; }
   .ctl label { letter-spacing: .05em; text-transform: uppercase; color: var(--muted); font-size: 10.5px; }
   .ctl select, .ctl input {
     font: inherit; border: 1px solid var(--line); color: var(--ink); background: #fff;
@@ -141,6 +142,22 @@
   }
   .detail-split[hidden] { display: none; }
   .detail-split .transcript-pane, .detail-split .moments-pane { max-height: 76vh; overflow-y: auto; }
+
+  /* ── Problem cards ──────────────────────────────────────────────────────── */
+  .problems {
+    display: flex; align-items: center; gap: 12px; margin-bottom: 14px; max-width: 760px;
+  }
+  .problems[hidden] { display: none; }
+  .problem-card {
+    flex: 1; min-width: 0; background: #fff; border: 1px solid var(--line); border-radius: 8px;
+    padding: 10px 14px; box-shadow: 0 1px 4px rgba(0, 0, 0, .06);
+  }
+  .problem-card .p-count {
+    letter-spacing: .06em; text-transform: uppercase; color: var(--muted); font-size: 10.5px; font-weight: 600;
+  }
+  .problem-card .p-title { color: var(--text); font-size: 14px; font-weight: 600; margin: 2px 0; }
+  .problem-card .p-meta { color: var(--muted); font-size: 12px; }
+  .problems .btn:disabled { opacity: .4; cursor: default; }
 
   /* ── Transcript ─────────────────────────────────────────────────────────── */
   .transcript .turn {
@@ -275,6 +292,10 @@
 
 <div class="toolbar">
   <div class="ctl">
+    <label for="f-provider">Provider</label>
+    <select id="f-provider"></select>
+  </div>
+  <div class="ctl">
     <label for="f-annotator">Annotator</label>
     <select id="f-annotator"></select>
   </div>
@@ -317,6 +338,14 @@
       <select id="transcript-select" class="transcript-select"></select>
     </div>
     <p class="hint" id="transcript-hint"></p>
+  </div>
+  <!-- The session's problems, where the provider records them. One card at a time:
+       a session can run to a dozen slides, and a row of them would push the
+       transcript below the fold. -->
+  <div class="problems" id="transcript-problems" hidden>
+    <button class="btn small" id="problem-prev" aria-label="Previous problem">‹ Prev</button>
+    <div class="problem-card" id="problem-card"></div>
+    <button class="btn small" id="problem-next" aria-label="Next problem">Next ›</button>
   </div>
   <div class="detail-split" id="transcript-detail" hidden>
     <div class="pane transcript-pane" id="transcript-turns"></div>
@@ -395,6 +424,8 @@ for (const list of MOMENTS_BY_TRANSCRIPT.values()) {
 }
 
 const state = {
+  // A provider name from DATA.providers, or "" for all of them.
+  provider: "",
   annotator: "",
   // Which two raters the agreement filter and the agreement table compare:
   // "passes" for the selector against the reannotator, "adjudicators" for the two
@@ -409,6 +440,8 @@ const state = {
   excludeTesters: true,
   transcriptId: "",
   activeMomentId: null,
+  // Which of the open transcript's problem cards is showing.
+  problemIndex: 0,
 };
 
 // ── Filtering ───────────────────────────────────────────────────────────────
@@ -454,6 +487,10 @@ function bothAdjudicators(moment, adjudicators) {
   const live = new Set(adjudicators.map((p) => p.annotator_id));
   const pair = moment.adjudicator_pair || [];
   return pair.length === 2 && pair.every((id) => live.has(id));
+}
+
+function matchesProvider(item) {
+  return !state.provider || item.provider === state.provider;
 }
 
 function matchesAnnotator(v) {
@@ -518,7 +555,7 @@ function selectedViews({ ignoreAdjudication = false } = {}) {
   const out = [];
   for (const moment of DATA.moments) {
     const v = view(moment);
-    if (!v || !matchesAnnotator(v) || !matchesDates(v) || !matchesAxis(v)) continue;
+    if (!v || !matchesProvider(moment) || !matchesAnnotator(v) || !matchesDates(v) || !matchesAxis(v)) continue;
     if (!ignoreAdjudication && !matchesAdjudication(v)) continue;
     out.push(v);
   }
@@ -557,7 +594,7 @@ function agreementViews() {
   const out = [];
   for (const moment of DATA.moments) {
     const v = view(moment);
-    if (!v || !matchesDates(v)) continue;
+    if (!v || !matchesProvider(moment) || !matchesDates(v)) continue;
     if (state.annotator && !judgedAsComparedPass(v, state.annotator)) continue;
     out.push(v);
   }
@@ -567,6 +604,7 @@ function agreementViews() {
 function selectedVerdicts() {
   return DATA.no_key_moments.filter((r) =>
     (!state.excludeTesters || !r.is_test)
+    && matchesProvider(r)
     && (!state.annotator || r.annotator_id === state.annotator)
     && (!state.from || r.date >= state.from)
     && (!state.to || r.date <= state.to));
@@ -1271,7 +1309,9 @@ function renderTranscriptMode(views, verdicts) {
   for (const o of options) {
     const moments = `${o.moments} moment${o.moments === 1 ? "" : "s"}`;
     const note = o.verdicts ? " · no key moments" : "";
-    select.append(new Option(`${o.cid} — ${moments}${note}`, o.tid));
+    const provider = !state.provider && DATA.providers.length > 1
+      ? ` · ${humanize((TRANSCRIPTS.get(o.tid) || {}).provider || "")}` : "";
+    select.append(new Option(`${o.cid} — ${moments}${note}${provider}`, o.tid));
   }
   if (!options.some((o) => o.tid === state.transcriptId)) state.transcriptId = "";
   select.value = state.transcriptId;
@@ -1279,6 +1319,7 @@ function renderTranscriptMode(views, verdicts) {
     ? (state.transcriptId ? "" : "Select a transcript to read its moments.")
     : "No transcripts match these filters.";
   $("transcript-detail").hidden = !state.transcriptId;
+  renderProblems((TRANSCRIPTS.get(state.transcriptId) || {}).problems || []);
   if (!state.transcriptId) return;
 
   const shown = views
@@ -1324,6 +1365,28 @@ function renderTranscriptMode(views, verdicts) {
   if (active) scrollToSpan(pane, active.moment.boundaries.start_row);
 }
 
+/** The open transcript's problems as cards to flip through, one at a time.
+ *
+ *  What a provider records is the slides the session covered and each one's learning
+ *  objective -- no problem text, and nothing tying a slide to the turns it was up for --
+ *  so the card says what was covered and the transcript pane is left alone. */
+function renderProblems(problems) {
+  $("transcript-problems").hidden = !problems.length;
+  if (!problems.length) return;
+  const i = state.problemIndex = Math.min(Math.max(state.problemIndex, 0), problems.length - 1);
+  const p = problems[i];
+  const card = clear($("problem-card"));
+  card.append(el("div", "p-count", `Problem ${i + 1} of ${problems.length}`));
+  card.append(el("div", "p-title", p.objective || "No learning objective recorded"));
+  card.append(el("div", "p-meta", [
+    p.year != null ? `Year ${p.year}` : "",
+    p.slide_position != null ? `slide position ${p.slide_position}` : "",
+    p.slide_id != null ? `slide id ${p.slide_id}` : "",
+  ].filter(Boolean).join(" · ")));
+  $("problem-prev").disabled = i === 0;
+  $("problem-next").disabled = i === problems.length - 1;
+}
+
 /** Bring a moment's first turn into view inside the transcript pane only -- scrolling
  *  the pane directly rather than scrollIntoView, which would drag the page with it. */
 function scrollToSpan(pane, turnIndex) {
@@ -1341,6 +1404,15 @@ function render() {
   $("clear-dates").hidden = !state.from && !state.to;
   renderTranscriptMode(views, selectedVerdicts());
 }
+
+const providerSelect = $("f-provider");
+providerSelect.append(new Option("All providers", ""));
+for (const provider of DATA.providers) {
+  const n = DATA.moments.filter((m) => m.provider === provider).length;
+  providerSelect.append(new Option(`${humanize(provider)} (${n})`, provider));
+}
+// One provider has nothing to choose between.
+providerSelect.closest(".ctl").hidden = DATA.providers.length < 2;
 
 const annotatorSelect = $("f-annotator");
 annotatorSelect.append(new Option("All annotators", ""));
@@ -1362,6 +1434,7 @@ function labelPairOptions() {
   Object.keys(PAIR_SOURCES).forEach((value, i) => {
     state.pairSource = value;
     const n = DATA.moments
+      .filter((m) => matchesProvider(m))
       .map((m) => view(m))
       .filter((v) => v && Object.keys(pairsOf(v)).length).length;
     pairSelect.options[i].text = `${PAIR_SOURCES[value].label} (${n})`;
@@ -1411,6 +1484,7 @@ function labelAdjudicationOptions() {
 }
 
 const BINDINGS = [
+  ["f-provider", "provider"],
   ["f-annotator", "annotator"],
   ["f-pairs", "pairSource"],
   ["f-axis", "axis"],
@@ -1436,12 +1510,22 @@ $("clear-dates").addEventListener("click", () => {
 $("transcript-select").addEventListener("change", () => {
   state.transcriptId = $("transcript-select").value;
   state.activeMomentId = null;
+  state.problemIndex = 0;
   render();
 });
+// Flipping cards redraws only the card: a full render would rebuild the moment list
+// and close any <details> the reader has open.
+for (const [id, step] of [["problem-prev", -1], ["problem-next", 1]]) {
+  $(id).addEventListener("click", () => {
+    state.problemIndex += step;
+    renderProblems((TRANSCRIPTS.get(state.transcriptId) || {}).problems || []);
+  });
+}
 $("header-sub").textContent =
   `${DATA.moments.length} moments · ${DATA.transcripts.length} annotated transcripts of `
   + `${DATA.transcripts_total} · ${DATA.annotators.length} annotators`;
-$("header-source").textContent = `${DATA.source.annotations} · built ${DATA.generated_at}`;
+$("header-source").textContent =
+  `${DATA.sources.map((s) => s.annotations).join(", ")} · built ${DATA.generated_at}`;
 render();
 </script>
 </body>
