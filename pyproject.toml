@@ -63,10 +63,12 @@ tutormoments = [
 tutormoments_build = [
     "moments.schema.json",
     "action_taxonomy.schema.json",
+    "annotation_viewer/template.html",
     "prompts/classify/labeller/*.txt",
     "prompts/classify/situation_labeller/*.md",
     "prompts/trait_generator/*.txt",
     "prompts/trait_generator/dimensions/*.txt",
+    "prompts/v2/*.md",
 ]
 
 [tool.pytest.ini_options]

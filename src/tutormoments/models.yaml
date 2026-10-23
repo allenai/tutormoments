@@ -128,6 +128,9 @@ models:
       batch_multiplier: 0.5
       as_of: "2026-10-07"
       source: https://platform.claude.com/docs/en/about-claude/pricing
+  claude-opus-5:
+    provider: anthropic
+    pricing: {}
   claude-3-7-sonnet:
     provider: anthropic
     pricing: {}
@@ -307,6 +310,9 @@ models:
       batch_multiplier: 0.5
       as_of: "2026-10-01"
       source: https://developers.openai.com/api/docs/pricing
+  gpt-5.6-sol:
+    provider: openai
+    pricing: {}
   o1:
     provider: openai
     pricing: {}
