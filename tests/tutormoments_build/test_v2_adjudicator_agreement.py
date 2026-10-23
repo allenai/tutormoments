@@ -500,6 +500,27 @@ def test_latest_revision_of_a_role_wins(tmp_path):
     assert A.latest_by_role(record["annotations"], "reannotator") is None
 
 
+def test_retracted_moments_are_skipped(tmp_path):
+    kept = _row("m1", [_annotation("Erin")])
+    retracted = _row("m2", [_annotation("Erin")])
+    retracted["moment"]["status"] = "retracted"
+    path = _write(tmp_path, [kept, retracted])
+    assert [r["moment"]["moment_id"] for r in A.moment_records(path)] == ["m1"]
+
+
+def test_moments_with_a_moved_cut_point_are_skipped(tmp_path):
+    moved = _annotation("Anita", "reannotator")
+    moved["payload"]["meta"] = {"redrew_cut_point": True}
+    path = _write(
+        tmp_path,
+        [
+            _row("m1", [_annotation("Erin"), _annotation("Anita", "reannotator")]),
+            _row("m2", [_annotation("Erin"), moved]),
+        ],
+    )
+    assert [r["moment"]["moment_id"] for r in A.moment_records(path)] == ["m1"]
+
+
 def test_two_people_in_one_role_are_logged_rather_than_silently_reduced(caplog):
     # Keyed on (annotator, role), a re-save collapses but two different people
     # in one role do not -- that is a second annotator, not a second save, and

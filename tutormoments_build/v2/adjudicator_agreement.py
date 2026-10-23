@@ -1,77 +1,17 @@
-"""Cohen's kappa between adjudicators on the moments two of them adjudicated.
+"""How well adjudicators agree with each other and with the annotators.
 
-Most moments are seen by a selector and a reannotator. A small number go to
-adjudication, and a smaller number still are adjudicated *twice* -- two
-adjudicators independently issuing a final call on the same moment. Those doubly
-adjudicated moments are the only place in the export where two annotators
-answered the same questions in the same role, so they are what agreement is
-measured on here.
+Reports four things:
 
-The five labels are the ones ``build_ground_truth`` resolves, read from the
-adjudicator's ``payload["final"]``:
-
-    situation.scaffolding_appropriate    scaffolding was called for here
-    situation.rigor_appropriate          a push for rigor was called for here
-    action.scaffolding_present           the tutor scaffolded
-    action.rigor_present                 the tutor pushed for rigor
-    action.scaffolding_amount == over_scaffolding
-                                         the tutor scaffolded too much
-
-The last one is the adjudicator's literal amount choice. The *inferred*
-over-scaffolding case is derived from resolved labels rather than answered by
-anyone, so there is nothing per-annotator to compare and it is not scored.
-
-A sixth row, ``throw_out``, is the adjudicator's call that the moment does not
-belong in the benchmark at all. It is scored separately because it is the
-decision that gates the rest: an adjudicator who throws a moment out leaves
-``final: null`` and answers no label questions, so that moment drops out of the
-other five rows rather than being read as five negatives. ``n`` is therefore per
-row -- every moment reaches ``throw_out``, fewer reach the labels.
-
-Cohen's kappa is a two-rater statistic, but the pairs vary across moments (six
-distinct adjudicators appear, and they did not adjudicate in fixed pairs). The
-headline number pools every doubly adjudicated moment and treats "the two
-adjudicators on this moment" as the two raters, which is the usual pooled
-reading. Below it, one table per adjudicator runs the same calculation over the
-moments that adjudicator was on, with them as rater 1 and whoever else was on the
-moment as rater 2 -- how far each of them sits from the rest of the group.
-
-Read those with two things in view. Rater 2 is a composite, so the chance
-agreement being corrected for is the pooled marginal of everyone that adjudicator
-was paired with, not one colleague's habits; where most of somebody's moments
-came from a single partner the number is close to a pairwise one regardless. And
-every moment appears in two of the tables, once from each side, so the tables
-overlap rather than partitioning the moments and their kappas cannot be averaged.
-The partner counts printed under each title are there to make both readable.
-
-Three further sections look at the adjudicator against the pair they were called
-in to settle, and so are scored on *every* adjudication, not just the doubly
-adjudicated ones:
-
-**How often the adjudicator backs the pair below them.** For each label: where
-the first and second pass agreed, how often the adjudicator let that stand --
-split by whether they agreed the label was there or agreed it was not, since a
-pooled rate on a lopsided label mostly reports how often everyone said no. And
-where the two passes split, how often the adjudicator picked the label rather
-than leaving it off. One side of a split said True by definition, so that
-"picked" rate is also the rate at which the adjudicator lands where the union
-rule ``build_ground_truth`` resolves the shipped labels does.
-
-**Whether the adjudicator backs a throw-out.** The second pass can throw a
-moment out too, and an adjudicator either agrees or reinstates it. This is kept
-apart from the section above because it has a different shape: only the
-reannotator answers the throw question -- the selector has no ``meta`` block and
-is never asked -- so it is a one-sided uphold rate, not an agreed/split split.
-It is also why a reannotator throw drops that adjudication from the label
-section: throwing out nulls their payload, so they answered no label questions
-and there is no second read to back or overturn.
-
-**How much the free-text boxes are edited.** The adjudicator's final call carries
-the same prose boxes the annotators filled in, and adjudicating one is a matter
-of keeping a text, editing it, or writing a new one. Each box is compared against
-whichever of the two source texts it is closest to -- the export does not record
-which one the interface put in front of them -- and reported as verbatim, edited,
-rewritten or added, with the character distance behind that call.
+- Cohen's kappa between adjudicators, on the moments two adjudicators each
+  reviewed. Scored on the five ground-truth labels plus ``throw_out``. A moment
+  someone threw out has no labels, so the count differs per label. One table
+  pools everyone; then one table per adjudicator compares them against whoever
+  they were paired with. Each moment shows up in two of those per-person tables,
+  so don't average them.
+- How often the adjudicator keeps a label both annotators agreed on, and, when
+  the annotators disagreed, how often the adjudicator says yes.
+- How often the adjudicator agrees with the reannotator's throw-out decision.
+- How much the adjudicator changes the annotators' written explanations.
 
 Usage:
     python -m tutormoments_build.v2.adjudicator_agreement
@@ -89,37 +29,35 @@ from collections import Counter, defaultdict
 from tutormoments.logging_setup import logging_args_parent, setup_logging
 from tutormoments_build.v2.build_ground_truth import (
     DEFAULT_ANNOTATOR_LABELS,
+    RETRACTED,
     annotator_label,
     latest_annotations,
     load_annotator_labels,
+    redrew_cut_point,
 )
 
 logger = logging.getLogger("tutormoments_build.v2.adjudicator_agreement")
 
 DEFAULT_ANNOTATIONS = "data/v2_annotations/source/tutoring_provider_a_annotations.jsonl"
 
-# (label, payload section, payload key) -- the four booleans adjudicators answer.
+# (label, section, key) for the four yes/no questions.
 BOOLEAN_FIELDS = (
     ("scaffolding_appropriate", "situation", "scaffolding_appropriate"),
     ("rigor_appropriate", "situation", "rigor_appropriate"),
     ("scaffolding_present", "action", "scaffolding_present"),
     ("rigor_present", "action", "rigor_present"),
 )
-# The five labels that only exist inside a final call.
+# The five labels an adjudicator gives when they keep the moment.
 FINAL_FIELDS = tuple(name for name, _, _ in BOOLEAN_FIELDS) + (
     "over_scaffolding_declared",
 )
-# throw_out comes first: it is the decision that determines whether the rest of
-# the labels exist at all.
+# throw_out first: if a moment is thrown out, the other labels are blank.
 LABEL_FIELDS = ("throw_out",) + FINAL_FIELDS
 
 OVER_SCAFFOLDING = "over_scaffolding"
 
-# The free-text boxes an adjudicator inherits, as (payload section, key). These
-# are the annotators' own prose: the adjudicator's final call carries the same
-# four, filled with whatever they decided to keep, edit or replace. The
-# adjudicator-only ``rationale`` note is not here -- nobody wrote a first draft
-# of it, so there is nothing to measure it against; it is summarised separately.
+# Written-explanation boxes both annotators and adjudicators fill in, as
+# (section, key). The adjudicator-only ``rationale`` box is reported separately.
 TEXT_BOXES = (
     ("situation", "why"),
     ("action", "explanation"),
@@ -127,22 +65,15 @@ TEXT_BOXES = (
     (None, "other_observations"),
 )
 
-# Similarity below which a text is called rewritten rather than edited. A
-# threshold is a reading of a continuum, not a fact about the data, so the raw
-# character distances are reported alongside the buckets: half the characters
-# surviving is a generous floor for "this is still the same paragraph".
+# Texts less similar than this count as rewritten rather than edited. The cutoff
+# is a judgement call, so character counts are reported too.
 REWRITE_SIMILARITY = 0.5
 
 EDIT_KINDS = ("verbatim", "edited", "rewritten", "added", "cleared", "blank")
 
 
 def payload_labels(payload: dict) -> dict[str, bool]:
-    """The five labels as answered inside one ``situation``/``action`` payload.
-
-    Selectors and reannotators answer these at the top level of their payload;
-    an adjudicator answers the identical questions inside ``payload["final"]``,
-    so both sides read with this one function and are directly comparable.
-    """
+    """The five labels from one set of answers (annotator or adjudicator)."""
     labels = {
         name: bool((payload.get(section) or {}).get(key))
         for name, section, key in BOOLEAN_FIELDS
@@ -154,28 +85,15 @@ def payload_labels(payload: dict) -> dict[str, bool]:
 
 
 def threw_out(payload: dict) -> bool:
-    """Whether this payload's author threw the moment out.
-
-    Reannotators and adjudicators both answer this in ``meta.throw_out``;
-    selectors have no ``meta`` block and never answer it, so a selector payload
-    is always False here.
-    """
+    """Whether this person threw the moment out. Selectors are never asked."""
     return bool((payload.get("meta") or {}).get("throw_out"))
 
 
 def adjudicator_labels(annotation: dict) -> dict[str, bool | None]:
-    """Pull one adjudicator's decisions out of their adjudication.
+    """One adjudicator's ``throw_out`` answer plus the five labels.
 
-    ``throw_out`` -- the adjudicator's call that the moment does not belong in
-    the benchmark at all -- is always present. The other five are None when they
-    threw the moment out, because an adjudication with ``final: null`` answered
-    no label questions.
-
-    **The None matters.** Reading a null final as all-False would score "this
-    moment should not be in the benchmark" as "the tutor did not scaffold, and
-    no scaffolding was called for", turning a colleague who declined to label
-    into one who labelled everything negative -- and manufacturing disagreement
-    with whoever did label the moment.
+    If they threw the moment out, the labels are None rather than False, so a
+    throw-out isn't counted as "no" to every label.
     """
     payload = annotation["payload"]
     labels = {"throw_out": threw_out(payload)}
@@ -188,34 +106,28 @@ def adjudicator_labels(annotation: dict) -> dict[str, bool | None]:
 
 
 def moment_records(path: str):
-    """Yield the export's moment records, skipping "no key moments" transcripts.
+    """Yield moment records, skipping the same moments the ground-truth build does.
 
-    Annotations are read through the ground-truth build's ``latest_annotations``,
-    which drops project staff and collapses re-saves -- the same person's
-    annotation saved twice in one role, seconds apart under successive
-    ``revision`` numbers -- to the revision they meant. Keying that collapse on
-    (annotator, role), exactly as the build does, is what keeps every reader here
-    on the annotator set the ground truth was resolved from; keying it on the
-    role alone would hide a second person in a role behind the first, and
-    keying it on neither would let a re-saved adjudication stand as a second
-    adjudicator disagreeing with themselves.
+    Skips "no key moments" transcripts, retracted moments, and moments where
+    someone moved the cut point (the annotators then judged different excerpts).
+    Staff are dropped, and if someone saved twice only their latest save is kept.
     """
     with open(path, encoding="utf-8") as fh:
         for line in fh:
             record = json.loads(line)
             if "moment" not in record:  # a "no key moments" transcript record
                 continue
-            yield record | {"annotations": latest_annotations(record["annotations"])}
+            if record["moment"].get("status") == RETRACTED:
+                continue
+            annotations = latest_annotations(record["annotations"])
+            if any(redrew_cut_point(a) for a in annotations):
+                continue
+            yield record | {"annotations": annotations}
 
 
 def latest_by_role(annotations: list[dict], role: str) -> dict | None:
-    """The one annotation for ``role``, or None.
-
-    ``moment_records`` has already collapsed re-saves per (annotator, role), so
-    anything left over here is two *different* people holding the same role on
-    one moment. No moment in the export has that; one appearing is logged and
-    the first taken, rather than silently settled by whoever saved last.
-    """
+    """The annotation for ``role``, or None. If two people have the same role,
+    warns and uses the first."""
     candidates = [a for a in annotations if a.get("role") == role]
     if not candidates:
         return None
@@ -229,15 +141,11 @@ def latest_by_role(annotations: list[dict], role: str) -> dict | None:
 
 
 def doubly_adjudicated(path: str, labels: dict[str, str]) -> list[dict]:
-    """Return one row per moment that exactly two adjudicators finalised.
+    """One row per moment with exactly two adjudicators.
 
-    Each row is {"moment_id", "raters": (label, label), "labels": [dict, dict]},
-    with the two adjudicators sorted by label so that "rater 1" and "rater 2" mean
-    the same person on every moment a given pair shares -- otherwise the marginals
-    kappa expects chance agreement from would mix the two raters together.
-
-    Moments with one adjudicator have nothing to compare; the export contains no
-    moment with three, and any that appeared would be skipped and logged.
+    Each row is {"moment_id", "raters": (label, label), "labels": [dict, dict]}.
+    The two adjudicators are sorted by name so the same person is always
+    rater 1 for a given pair, which kappa needs.
     """
     rows = []
     for record in moment_records(path):
@@ -266,31 +174,11 @@ def doubly_adjudicated(path: str, labels: dict[str, str]) -> list[dict]:
 
 
 def by_adjudicator(rows: list[dict]) -> dict[str, list[dict]]:
-    """One entry per adjudicator: their doubly adjudicated moments, them first.
+    """For each adjudicator, their shared moments with them as rater 1.
 
-    ``doubly_adjudicated`` sorts each moment's two adjudicators by label, which
-    is what the pooled table wants but not what a per-person view does: an
-    adjudicator would land in column 1 on some of their moments and column 2 on
-    the rest, and the marginals kappa corrects for would be split across both.
-    Here each row is reoriented so the adjudicator whose table it is always sits
-    in column 1 and whoever else was on that moment in column 2.
-
-    **Every moment appears in two of these tables**, once from each adjudicator's
-    side. They are views of the same doubly adjudicated moments, not a partition
-    of them, so their ``n`` sums to twice the pooled total and a kappa cannot be
-    averaged across them. Note that the pooled total is the moment count in the
-    table title, not the per-label ``n`` in the rows: every moment reaches
-    ``throw_out``, and only the ones neither adjudicator threw out reach the
-    other five.
-
-    **Column 2 is not one person.** It is whoever else adjudicated each moment,
-    so the chance agreement kappa corrects for comes from the pooled marginal of
-    everyone this adjudicator was paired with. That is the intended reading of a
-    one-against-the-rest table -- how far this adjudicator sits from the group --
-    but it is not Cohen's kappa between two fixed raters, and where one
-    adjudicator supplies most of somebody's partners it is close to a pairwise
-    number wearing a pooled label. The partner counts are printed with each table
-    for that reason.
+    Rater 2 is whoever else reviewed each moment, so it can be different people.
+    Every moment appears under both of its adjudicators, so don't average the
+    results.
     """
     oriented = defaultdict(list)
     for row in rows:
@@ -307,12 +195,8 @@ def by_adjudicator(rows: list[dict]) -> dict[str, list[dict]]:
 
 
 def cohens_kappa(pairs: list[tuple[bool, bool]]) -> float | None:
-    """Cohen's kappa for a list of (rater A value, rater B value).
-
-    Returns None where kappa is undefined: no pairs, or chance agreement of 1
-    because every rating on both sides fell in a single category (with nothing
-    to disagree about, the statistic has no denominator).
-    """
+    """Cohen's kappa over (rater A, rater B) pairs. None if there are no pairs
+    or everyone gave the same answer every time."""
     n = len(pairs)
     if n == 0:
         return None
@@ -327,12 +211,8 @@ def cohens_kappa(pairs: list[tuple[bool, bool]]) -> float | None:
 
 
 def score(rows: list[dict]) -> dict[str, dict]:
-    """Kappa, raw agreement and positive counts for each label over ``rows``.
-
-    A moment counts towards a label only where *both* adjudicators answered it,
-    so ``n`` is per label: every moment reaches ``throw_out``, while the other
-    five are scored on the moments neither adjudicator threw out.
-    """
+    """Per label: kappa, percent agreement and yes counts, using only moments
+    where both adjudicators answered."""
     results = {}
     for field in LABEL_FIELDS:
         pairs = [
@@ -353,12 +233,7 @@ def score(rows: list[dict]) -> dict[str, dict]:
 
 
 def report(title: str, results: dict[str, dict]) -> str:
-    """One table: a row per label, kappa alongside the raw numbers behind it.
-
-    ``pos 1``/``pos 2`` are how many moments each rater called True -- the
-    marginals kappa corrects for, and the reason a label both raters almost never
-    call True can hold high agreement and a low kappa.
-    """
+    """A row per label. ``pos 1``/``pos 2`` count each rater's yes answers."""
     lines = [
         title,
         f"{'label':<28}{'n':>4}{'kappa':>9}{'agree':>8}{'pos 1':>7}{'pos 2':>7}",
@@ -378,21 +253,15 @@ def report(title: str, results: dict[str, dict]) -> str:
 
 
 # ===========================================================================
-# How the adjudicator resolved the pair below them
+# How the adjudicator settled the two annotators
 # ===========================================================================
 
 
 def adjudications(path: str, labels: dict[str, str]) -> list[dict]:
-    """One row per adjudication, alongside the two annotations it was settling.
+    """One row per adjudication, with both annotators' answers.
 
-    Each row is {"moment_id", "adjudicator", "selector", "reannotator", "final",
-    "rationale"} -- the last four raw payloads (``final`` is None where the
-    adjudicator threw the moment out). Every adjudication counts, including both
-    halves of a doubly adjudicated moment: each is one person's independent
-    resolution of the same split, which is exactly the unit being counted.
-
-    A moment missing a selector or a reannotator has no pair to resolve and is
-    skipped with a warning.
+    ``final`` is None if the adjudicator threw the moment out. Moments missing
+    an annotator are skipped with a warning.
     """
     rows = []
     for record in moment_records(path):
@@ -427,34 +296,12 @@ def adjudications(path: str, labels: dict[str, str]) -> list[dict]:
 
 
 def resolution_counts(rows: list[dict]) -> dict[str, dict]:
-    """Per label: how often the adjudicator backed the two annotators below them.
+    """Per label: how often the adjudicator went along with the annotators.
 
-    Two questions, one for each thing the pair below can do:
-
-    **They agreed.** ``agreed`` counts those adjudications and ``upheld`` how
-    many the adjudicator left standing. Split by what was agreed, because a
-    pooled uphold rate on a lopsided label is mostly a report of how often
-    everyone said no: ``agreed_yes``/``upheld_yes`` are the adjudications where
-    both annotators marked the label, ``agreed_no``/``upheld_no`` where neither
-    did. An overturn -- the difference between ``agreed`` and ``upheld`` -- is a
-    call no rule over the two annotators could have produced, since both of them
-    said the same thing.
-
-    **They split.** ``disagreed`` counts those, and ``picked`` how often the
-    adjudicator marked the label rather than leaving it off. One side of a split
-    said True by definition, so ``picked`` is also the rate at which the
-    adjudicator lands where the union rule ``build_ground_truth`` resolves the
-    shipped labels does.
-
-    ``with_selector``/``with_reannotator`` record which pass the adjudicator's
-    call matched on a split. They are carried in the JSON rather than the printed
-    tables: on a two-value label they say the same thing as ``picked`` about
-    whose read prevailed, only keyed by role instead of by answer.
-
-    Thrown-out adjudications answer no label questions and are not counted, and
-    neither are adjudications whose reannotator threw the moment out -- there is
-    no second read on the labels to back or overturn. ``throw_out_resolution``
-    covers those.
+    When both annotators gave the same answer, ``upheld`` counts the adjudicator
+    giving it too, broken out by yes and no. When they disagreed, ``picked``
+    counts the adjudicator saying yes. Skips moments the adjudicator or the
+    reannotator threw out.
     """
     results = {
         field: dict.fromkeys(
@@ -479,12 +326,7 @@ def resolution_counts(rows: list[dict]) -> dict[str, dict]:
     for row in rows:
         if not row["final"]:
             continue
-        # A reannotator who threw the moment out answered no label questions --
-        # the export nulls their situation/action/result outright. Reading those
-        # nulls would score them as a second pass who said no to everything,
-        # manufacturing agreement in the lopsided cells and inventing splits
-        # against a selector who answered yes. There is no second read here to
-        # back or overturn, so the adjudication is not counted.
+        # The reannotator threw it out, so they gave no labels to compare.
         if threw_out(row["reannotator"]):
             continue
         selector = payload_labels(row["selector"])
@@ -514,18 +356,12 @@ def _count_pct(count: int, total: int) -> str:
 
 
 def _share(count: int, total: int) -> str:
-    """``count/total (pct)`` -- the rate with the numbers it rests on in view."""
+    """``count/total (pct)``."""
     return "-" if not total else f"{count}/{total} ({count / total:.0%})"
 
 
 def report_resolution(title: str, results: dict[str, dict]) -> str:
-    """One row per label: how often the adjudicator backed the pair below them.
-
-    Every percentage is of the group in its own half of the table, never of
-    ``n``: the uphold rates are of the adjudications where the two annotators
-    agreed (and of the yes/no halves of that), ``picked`` is of the ones where
-    they split.
-    """
+    """A row per label. Percentages are out of the agreed or disagreed count, not ``n``."""
     lines = [
         title,
         f"{'':<28}{'':>4}{'---- the two annotators agreed ----':^42}"
@@ -546,23 +382,9 @@ def report_resolution(title: str, results: dict[str, dict]) -> str:
 
 
 def throw_out_resolution(rows: list[dict]) -> dict:
-    """How the adjudicator answered the second pass's throw-out call.
+    """How the adjudicator's throw-out decision compares to the reannotator's.
 
-    The throw question does not fit the shape ``resolution_counts`` uses, so it
-    is counted here instead. That table asks how an adjudicator settled two
-    annotators who both answered; only the reannotator ever answers this one --
-    the selector has no ``meta`` block and is never asked, and a moment reaching
-    a second pass at all is the selector's implicit vote to keep it. So this is
-    a one-sided uphold rate against the second pass, not an agreed/split split.
-
-    ``upheld`` is the adjudicator throwing a moment the reannotator threw;
-    ``reinstated`` is the adjudicator keeping one. The mirror half -- moments the
-    reannotator kept -- is counted too, since an adjudicator throwing out a
-    moment nobody below them wanted gone is the same decision in the other
-    direction, and kappa needs both rows.
-
-    Every adjudication counts, both halves of a doubly adjudicated moment
-    included: each is one person's independent call on the same moment.
+    Only the reannotator is compared, since selectors are never asked.
     """
     pairs = [(threw_out(row["reannotator"]), row["final"] is None) for row in rows]
     thrown = [adjudicator for reannotator, adjudicator in pairs if reannotator]
@@ -584,7 +406,7 @@ def throw_out_resolution(rows: list[dict]) -> dict:
 
 
 def report_throw_out(title: str, results: dict) -> str:
-    """The throw-out row, as counts with the rate each rests on."""
+    """The throw-out summary as text."""
     kappa = "n/a" if results["kappa"] is None else f"{results['kappa']:.3f}"
     agreement = (
         "n/a"
@@ -608,28 +430,19 @@ def report_throw_out(title: str, results: dict) -> str:
 
 
 # ===========================================================================
-# How much the free-text boxes were edited
+# How much the written explanations were edited
 # ===========================================================================
 
 
 def box_text(payload: dict, section: str | None, key: str) -> str:
-    """One free-text box out of a payload."""
+    """The text in one box."""
     source = (payload.get(section) or {}) if section else payload
     return source.get(key) or ""
 
 
 def diff_stats(base: str, final: str) -> dict:
-    """How far ``final`` sits from ``base``, in characters.
-
-    ``net`` is the change in length -- positive where the adjudicator added more
-    than they cut -- and ``changed`` is the characters actually touched (deleted
-    plus inserted), which distinguishes a rewrite of the same length from a text
-    left alone. ``similarity`` is difflib's ratio over characters.
-
-    ``autojunk`` is off: it treats characters appearing in more than 1% of a
-    sequence over 200 elements as junk, which for prose is most of the alphabet,
-    and would collapse the similarity of texts that are nearly identical.
-    """
+    """Similarity, change in length, and number of characters changed."""
+    # autojunk=False: otherwise difflib ignores common letters in long text.
     matcher = difflib.SequenceMatcher(None, base, final, autojunk=False)
     changed = sum(
         (i2 - i1) + (j2 - j1)
@@ -644,26 +457,12 @@ def diff_stats(base: str, final: str) -> dict:
 
 
 def classify_edit(final: str, sources: dict[str, str]) -> dict:
-    """What the adjudicator did to one box, against the nearest source text.
+    """Label what the adjudicator did to one box (one of ``EDIT_KINDS``).
 
-    The export does not record which annotator's text the interface put in the
-    box, so the base is inferred: whichever source the final text is closest to.
-    Where the two annotators wrote the same thing the attribution is arbitrary
-    and the first source wins -- read ``base`` as "whose text this most resembles",
-    not as a record of what was on screen.
-
-    The kinds:
-
-        verbatim   kept one annotator's text character for character
-        edited     started from one and changed part of it
-        rewritten  shares less than REWRITE_SIMILARITY with either -- a new text
-        added      wrote something where neither annotator wrote anything
-        cleared    left the box empty though an annotator had filled it
-        blank      nobody filled it, adjudicator included
+    We don't know which annotator's text the adjudicator started from, so we
+    compare against whichever is closest.
     """
-    # Stripped: surrounding whitespace is what a text box collects on its own,
-    # not something an adjudicator decided, and comparing it would report edits
-    # nobody made.
+    # Ignore leading/trailing whitespace.
     final = final.strip()
     written = {name: text.strip() for name, text in sources.items() if text.strip()}
     if not final:
@@ -694,17 +493,8 @@ def _median(values) -> float | None:
 
 
 def text_edits(rows: list[dict]) -> dict[str, dict]:
-    """Per free-text box: what the adjudicator did to it, and by how many characters.
-
-    Counted over the adjudications that reached a final call -- a thrown-out
-    moment has no boxes to compare.
-
-    The character medians cover only the boxes that started from a source text
-    (verbatim, edited, rewritten), so they answer "how far did the adjudicator
-    move the text they were given". A box written from nothing has no distance
-    to report and would otherwise enter the median as a whole text's worth of
-    change.
-    """
+    """Per box: how often each kind of edit happened, and median size of the
+    change where the adjudicator started from an annotator's text."""
     results = {}
     for section, key in TEXT_BOXES:
         name = f"{section}.{key}" if section else key
@@ -746,12 +536,7 @@ def _number(value: float | None, spec: str) -> str:
 
 
 def report_text_edits(title: str, results: dict[str, dict]) -> tuple[str, str]:
-    """Two tables: what happened to each box, then how far the kept texts moved.
-
-    They are split because the second only describes the boxes with a source
-    text behind them, and putting both in one row would invite reading the
-    character medians as covering every adjudication of that box.
-    """
+    """Two tables: kinds of edit per box, then how much the text changed."""
     kinds = [
         title,
         f"{'text box':<24}{'n':>4}" + "".join(f"{kind:>12}" for kind in EDIT_KINDS),
@@ -850,8 +635,7 @@ def main(argv: list[str] | None = None) -> int:
         )
 
     finalised = [row for row in all_adjudications if row["final"]]
-    # The label table needs two reads to settle, so it drops the final calls
-    # whose reannotator threw the moment out and left no labels behind.
+    # Skip ones the reannotator threw out, since they gave no labels.
     comparable = [row for row in finalised if not threw_out(row["reannotator"])]
     resolution = resolution_counts(all_adjudications)
     throw_out_rates = throw_out_resolution(all_adjudications)
