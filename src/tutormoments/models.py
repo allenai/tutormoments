@@ -1,7 +1,8 @@
 """Provider routing, per-model facts, and thinking-parameter translation.
 
 The packaged ``models.yaml`` stores stable per-model facts: provider, pricing,
-and output caps. It says nothing about reasoning conditions -- those are
+output caps, and whether OpenAI prompt caching needs explicit breakpoints.
+It says nothing about reasoning conditions -- those are
 stated explicitly, in provider parlance, wherever a model is configured
 (``benchmark_models:`` arms and the role blocks), so the run config is
 auditable without consulting a mapping.
@@ -15,6 +16,7 @@ shape-checked here and proven live with `tutormoments smoke`.
 Deliberately SDK-free: config loading must not drag provider SDKs in.
 """
 
+import re
 import threading
 from copy import deepcopy
 from dataclasses import dataclass
@@ -41,9 +43,10 @@ _PROVIDER_PREFIXES = [
     ("google/gemma", "together"),
     ("meta-llama/", "together"),
     ("qwen/", "together"),
+    ("muse-", "meta"),
 ]
 
-_KNOWN_PROVIDERS = {"anthropic", "gemini", "openai", "together"}
+_KNOWN_PROVIDERS = {"anthropic", "gemini", "meta", "openai", "together"}
 
 # The provider-native thinking keys config may state, per provider. These
 # mirror exactly the knobs the client knows how to send; an unknown key is a
@@ -52,7 +55,8 @@ NATIVE_THINKING_KEYS = {
     "anthropic": {"thinking", "effort"},
     "gemini": {"thinking_budget", "thinking_level", "include_thoughts"},
     "openai": {"reasoning"},
-    "together": set(),
+    "together": {"reasoning_effort"},
+    "meta": {"reasoning_effort"},
 }
 
 
@@ -79,6 +83,10 @@ class WireThinking:
     gemini_thinking_config: dict | None = None
     # reasoning_effort value | None (omit).
     openai_reasoning_effort: str | None = None
+    # Together hybrid reasoners: reasoning_effort value | None (omit).
+    together_reasoning_effort: str | None = None
+    # Meta Model API: reasoning_effort value (always stated; see _resolve_meta).
+    meta_reasoning_effort: str | None = None
 
     def describe(self) -> str:
         """Human-readable wire form, for logs and the smoke report."""
@@ -91,6 +99,10 @@ class WireThinking:
             return f"thinking_config={self.gemini_thinking_config}"
         if self.openai_reasoning_effort is not None:
             return f"reasoning_effort={self.openai_reasoning_effort}"
+        if self.together_reasoning_effort is not None:
+            return f"reasoning_effort={self.together_reasoning_effort}"
+        if self.meta_reasoning_effort is not None:
+            return f"reasoning_effort={self.meta_reasoning_effort}"
         return "(none sent)"
 
 
@@ -135,14 +147,75 @@ def _validate_registry(raw: dict) -> dict:
                 f"models.yaml model '{model_key}': max_output_cap must be a "
                 f"positive integer, got {cap!r}"
             )
+        explicit_cache = entry.get("explicit_prompt_cache")
+        if explicit_cache is not None and (
+            not isinstance(explicit_cache, bool) or provider != "openai"
+        ):
+            raise ValueError(
+                f"models.yaml model '{model_key}': explicit_prompt_cache must "
+                f"be a boolean on an openai model, got {explicit_cache!r} on "
+                f"provider {provider!r}"
+            )
         pricing = entry.get("pricing")
         if pricing is not None and not isinstance(pricing, dict):
             raise ValueError(
                 f"models.yaml model '{model_key}': pricing must be a mapping, "
                 f"got {pricing!r}"
             )
+        if pricing:
+            _validate_pricing(model_key, pricing)
 
     return raw
+
+
+# A populated pricing entry states exactly these keys: $/MTok list rates for
+# the four canonical usage buckets, the batch discount multiplier, and the
+# lookup provenance (rates change over time -- a rate without its as_of date
+# and source is not auditable). Empty pricing ({}) means "not priced yet".
+_PRICING_RATE_KEYS = ("input", "output", "cache_read", "cache_write")
+_PRICING_KEYS = frozenset((*_PRICING_RATE_KEYS, "batch_multiplier", "as_of", "source"))
+_AS_OF_RE = re.compile(r"\d{4}-\d{2}-\d{2}")
+
+
+def _validate_pricing(model_key: str, pricing: dict) -> None:
+    """Validate one populated pricing entry; raise ValueError naming the defect."""
+    missing = _PRICING_KEYS - set(pricing)
+    unknown = set(pricing) - _PRICING_KEYS
+    if missing or unknown:
+        raise ValueError(
+            f"models.yaml model '{model_key}': pricing must state exactly "
+            f"{sorted(_PRICING_KEYS)}; missing {sorted(missing)}, "
+            f"unknown {sorted(unknown)}"
+        )
+    for key in _PRICING_RATE_KEYS:
+        value = pricing[key]
+        if isinstance(value, bool) or not isinstance(value, (int, float)) or value < 0:
+            raise ValueError(
+                f"models.yaml model '{model_key}': pricing.{key} must be a "
+                f"non-negative $/MTok number, got {value!r}"
+            )
+    multiplier = pricing["batch_multiplier"]
+    if (
+        isinstance(multiplier, bool)
+        or not isinstance(multiplier, (int, float))
+        or not 0 < multiplier <= 1
+    ):
+        raise ValueError(
+            f"models.yaml model '{model_key}': pricing.batch_multiplier must "
+            f"be a number in (0, 1], got {multiplier!r}"
+        )
+    as_of = pricing["as_of"]
+    if not isinstance(as_of, str) or not _AS_OF_RE.fullmatch(as_of):
+        raise ValueError(
+            f"models.yaml model '{model_key}': pricing.as_of must be a "
+            f"YYYY-MM-DD string, got {as_of!r}"
+        )
+    source = pricing["source"]
+    if not isinstance(source, str) or not source:
+        raise ValueError(
+            f"models.yaml model '{model_key}': pricing.source must be a "
+            f"non-empty documentation URL, got {source!r}"
+        )
 
 
 def _find_model_entry(model: str) -> tuple[str, dict] | None:
@@ -195,12 +268,31 @@ def max_output_cap(model: str) -> int | None:
     return found[1].get("max_output_cap")
 
 
+def explicit_prompt_cache(model: str) -> bool:
+    """True when OpenAI caching must be steered with explicit breakpoints.
+
+    GPT-5.6-and-later models put their implicit breakpoint at the end of the
+    latest message, so a prompt whose single message grows every turn is
+    written to cache on every call and never read back (see models.yaml).
+    """
+    found = _find_model_entry(model)
+    if found is None:
+        return False
+    return bool(found[1].get("explicit_prompt_cache", False))
+
+
 def get_pricing(model: str) -> dict:
     """Per-model pricing grid (per-MTok rates). Empty = not priced yet."""
     found = _find_model_entry(model)
     if found is None:
         return {}
     return dict(found[1].get("pricing") or {})
+
+
+def pricing_version() -> str | None:
+    """The registry's pricing-table version, recorded into run summaries."""
+    version = _load_registry().get("pricing_version")
+    return version if isinstance(version, str) and version else None
 
 
 def resolve_thinking(model: str, thinking: dict | None) -> WireThinking:
@@ -219,7 +311,9 @@ def resolve_thinking(model: str, thinking: dict | None) -> WireThinking:
       ``reasoning_effort``).
     - Anthropic: ``thinking`` (a provider thinking block, or null to omit the
       param) plus optional ``effort``.
-    - Together/open-weight reasoners: no exposed knobs.
+    - Together: ``reasoning_effort`` for hybrid reasoners (e.g.
+      DeepSeek-V4-Pro-0813); ``{}`` for open-weight reasoners with no knob.
+    - Meta: ``reasoning_effort`` (required).
 
     thinking=None means "no stated condition": nothing is sent and nothing is
     checked. That path exists for non-benchmark direct calls only; every
@@ -243,8 +337,9 @@ def resolve_thinking(model: str, thinking: dict | None) -> WireThinking:
     if provider == "anthropic":
         return _resolve_anthropic(params)
     if provider == "together":
-        _check_native_keys(provider, params, NATIVE_THINKING_KEYS["together"])
-        return WireThinking(provider=provider)
+        return _resolve_together(params)
+    if provider == "meta":
+        return _resolve_meta(params)
     raise ValueError(f"Unsupported provider: {provider}")
 
 
@@ -301,6 +396,31 @@ def _resolve_openai(params: dict) -> WireThinking:
     return WireThinking(provider="openai", openai_reasoning_effort=reasoning)
 
 
+def _resolve_together(params: dict) -> WireThinking:
+    _check_native_keys("together", params, NATIVE_THINKING_KEYS["together"])
+    effort = params.get("reasoning_effort")
+    if effort is None:
+        # Open-weight reasoners with no exposed knob (e.g. DeepSeek-V4-Pro).
+        return WireThinking(provider="together")
+    if not isinstance(effort, str) or not effort:
+        raise ThinkingConfigError(
+            "together reasoning_effort must be a non-empty string."
+        )
+    return WireThinking(provider="together", together_reasoning_effort=effort)
+
+
+def _resolve_meta(params: dict) -> WireThinking:
+    _check_native_keys("meta", params, NATIVE_THINKING_KEYS["meta"])
+    # Required: an omitted reasoning_effort still reasons, at a level the
+    # model picks, so the condition would not be stated in the config.
+    if "reasoning_effort" not in params:
+        raise ThinkingConfigError("meta thinking config must set reasoning_effort.")
+    effort = params["reasoning_effort"]
+    if not isinstance(effort, str) or not effort:
+        raise ThinkingConfigError("meta reasoning_effort must be a non-empty string.")
+    return WireThinking(provider="meta", meta_reasoning_effort=effort)
+
+
 def _resolve_anthropic(params: dict) -> WireThinking:
     _check_native_keys("anthropic", params, NATIVE_THINKING_KEYS["anthropic"])
     if "thinking" not in params:
@@ -321,7 +441,7 @@ def _resolve_anthropic(params: dict) -> WireThinking:
     if thinking_config is None:
         if effort is not None:
             raise ThinkingConfigError(
-                "anthropic effort requires thinking.type adaptive."
+                "anthropic effort requires thinking.type adaptive or disabled."
             )
     else:
         kind = thinking_config.get("type")
@@ -340,9 +460,11 @@ def _resolve_anthropic(params: dict) -> WireThinking:
             raise ThinkingConfigError(
                 "anthropic budget_tokens is only valid with thinking.type enabled."
             )
-        if effort is not None and kind != "adaptive":
+        # Effort also governs answer length, so it stays meaningful with
+        # thinking off (Haiku 5.5 accepts disabled + effort).
+        if effort is not None and kind == "enabled":
             raise ThinkingConfigError(
-                "anthropic effort requires thinking.type adaptive."
+                "anthropic effort requires thinking.type adaptive or disabled."
             )
     return WireThinking(
         provider="anthropic",

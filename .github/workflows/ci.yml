@@ -70,7 +70,7 @@ jobs:
       - if: steps.core.outputs.touched == 'true' && github.event.pull_request.head.repo.full_name == github.repository
         name: Upsert sticky PR comment (same-repo PRs only)
         continue-on-error: true
-        uses: actions/github-script@v8
+        uses: actions/github-script@v9
         with:
           script: |
             const marker = '<!-- smoke-reminder -->';

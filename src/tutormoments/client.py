@@ -18,6 +18,7 @@ from google.genai import types
 # import it from here.
 from tutormoments.models import (
     WireThinking,
+    explicit_prompt_cache,
     infer_provider,
     max_output_cap,
     resolve_thinking,
@@ -66,6 +67,7 @@ class ModelResponse:
 
 
 TOGETHER_BASE_URL = "https://api.together.xyz/v1"
+META_BASE_URL = "https://api.meta.ai/v1"
 
 
 # ===================================================================
@@ -254,6 +256,15 @@ class ModelClient:
                 raise RuntimeError("TOGETHER_API_KEY not found in environment")
             return OpenAI(api_key=api_key, base_url=TOGETHER_BASE_URL)
 
+        elif self.provider == "meta":
+            # Meta Model API Chat Completions is OpenAI-compatible too.
+            from openai import OpenAI
+
+            api_key = os.getenv("META_API_KEY")
+            if not api_key:
+                raise RuntimeError("META_API_KEY not found in environment")
+            return OpenAI(api_key=api_key, base_url=META_BASE_URL)
+
         else:
             raise ValueError(f"Unsupported provider: {self.provider}")
 
@@ -354,6 +365,17 @@ class ModelClient:
                         json_mode,
                         max_tokens,
                         timeout,
+                        wire,
+                        cacheable_prefix=cacheable_prefix,
+                        stream=stream,
+                    )
+                elif self.provider == "meta":
+                    resp = self._generate_meta(
+                        prompt,
+                        json_mode,
+                        max_tokens,
+                        timeout,
+                        wire,
                         cacheable_prefix=cacheable_prefix,
                         stream=stream,
                     )
@@ -488,21 +510,31 @@ class ModelClient:
         cacheable_prefix: str | None = None,
         stream: bool = False,
     ):
-        """OpenAI API call via openai SDK."""
-        if images:
-            image_blocks = _build_image_blocks_openai(
-                images,
-                use_url=_should_use_presigned_url(),
-            )
-            # Prepend cacheable head so auto-cache sees the same prefix on repeats.
-            head_text = cacheable_prefix or ""
-            content = _interleave_text_and_images(
-                head_text + prompt,
-                image_blocks,
-                lambda s: {"type": "text", "text": s},
-            )
-        else:
-            content = (cacheable_prefix or "") + prompt
+        """OpenAI API call via openai SDK.
+
+        The cacheable head always leads the prompt. Earlier models cache it
+        implicitly at 2,048-token intervals. Models flagged
+        explicit_prompt_cache (GPT-5.6 and later) cache only at message ends
+        by default, and our single message grows every turn, so the head
+        (up to the start of its last line; see _cache_breakpoint_offset) goes
+        in its own text part carrying an explicit breakpoint and the request
+        runs in explicit-only mode: the head is written once and read on
+        later turns, and the changing tail is never written. A call with no
+        cacheable head is not cached at all -- nothing in it is declared
+        reusable, so a write would be pure 1.25x overhead.
+        """
+        image_blocks = (
+            _build_image_blocks_openai(images, use_url=_should_use_presigned_url())
+            if images
+            else None
+        )
+        explicit_cache = explicit_prompt_cache(self.model)
+        content = _openai_user_content(
+            prompt,
+            cacheable_prefix,
+            image_blocks,
+            explicit_cache=explicit_cache,
+        )
 
         kwargs = {
             "model": self.model,
@@ -510,6 +542,8 @@ class ModelClient:
             "max_completion_tokens": max_tokens,
             "timeout": timeout,
         }
+        if explicit_cache:
+            kwargs["prompt_cache_options"] = {"mode": "explicit"}
         if json_mode:
             kwargs["response_format"] = {"type": "json_object"}
         if wire.openai_reasoning_effort:
@@ -532,15 +566,21 @@ class ModelClient:
         json_mode,
         max_tokens,
         timeout,
+        wire: WireThinking,
         cacheable_prefix: str | None = None,
         stream: bool = False,
     ):
         """Together (open-weight) call via OpenAI-compatible chat completions.
 
-        Together uses `max_tokens` (not `max_completion_tokens`) and does not
-        accept `reasoning_effort`. Open-weight reasoners (DeepSeek-V4, Kimi)
-        produce their own chain-of-thought internally; there's no depth knob
-        to pass. There is no cache_control-style API, so the cacheable head is
+        Together uses `max_tokens` (not `max_completion_tokens`) and imposes
+        no output cap of its own -- only input + output <= context -- so
+        max_tokens=None (the benchmark's "no cap") omits the param unless the
+        registry states a per-model max_output_cap. Hybrid reasoners
+        (DeepSeek-V4-Pro-0813) take `reasoning_effort` and return their chain
+        of thought in a separate reasoning field that the content-only text
+        capture skips.
+        Older open-weight reasoners (DeepSeek-V4-Pro, Kimi) expose no knob
+        and think inline (see _InlineThinkGate). There is no cache_control-style API, so the cacheable head is
         just concatenated into the prompt (same as the Gemini path); Together
         still reports server-side cache hits via cached_tokens (observed live
         on DeepSeek-V4-Pro), whether or not a billing discount applies.
@@ -549,9 +589,17 @@ class ModelClient:
         kwargs = {
             "model": self.model,
             "messages": [{"role": "user", "content": content}],
-            "max_tokens": min(max_tokens, MAX_OUTPUT_TOKENS["together"]),
             "timeout": timeout,
         }
+        cap = max_output_cap(self.model)
+        if max_tokens and cap is not None:
+            max_tokens = min(max_tokens, cap)
+        elif not max_tokens:
+            max_tokens = cap
+        if max_tokens:
+            kwargs["max_tokens"] = max_tokens
+        if wire.together_reasoning_effort:
+            kwargs["reasoning_effort"] = wire.together_reasoning_effort
         if json_mode:
             kwargs["response_format"] = {"type": "json_object"}
 
@@ -571,14 +619,66 @@ class ModelClient:
         )
         return ModelResponse(text=text, usage=usage)
 
+    def _generate_meta(
+        self,
+        prompt,
+        json_mode,
+        max_tokens,
+        timeout,
+        wire: WireThinking,
+        cacheable_prefix: str | None = None,
+        stream: bool = False,
+    ):
+        """Meta Model API call via OpenAI-compatible chat completions.
+
+        Meta takes `max_completion_tokens` as an optional hard cap and
+        otherwise bounds only input + output by the context window, so
+        max_tokens=None (the benchmark's "no cap") omits the param unless the
+        registry states a per-model max_output_cap. Reasoning stays private:
+        it is billed and reported under
+        completion_tokens_details.reasoning_tokens but never streamed, so the
+        first content delta is the first visible token. Prompt caching is
+        automatic (no breakpoints to place), so the cacheable head is just
+        concatenated into the prompt; hits come back as
+        prompt_tokens_details.cached_tokens.
+        """
+        content = (cacheable_prefix or "") + prompt
+        kwargs = {
+            "model": self.model,
+            "messages": [{"role": "user", "content": content}],
+            "timeout": timeout,
+        }
+        cap = max_output_cap(self.model)
+        if max_tokens and cap is not None:
+            max_tokens = min(max_tokens, cap)
+        elif not max_tokens:
+            max_tokens = cap
+        if max_tokens:
+            kwargs["max_completion_tokens"] = max_tokens
+        if wire.meta_reasoning_effort:
+            kwargs["reasoning_effort"] = wire.meta_reasoning_effort
+        if json_mode:
+            kwargs["response_format"] = {"type": "json_object"}
+
+        if stream:
+            return self._stream_openai_compatible(kwargs, inline_think=False)
+
+        response = self._client.chat.completions.create(**kwargs)
+
+        text = response.choices[0].message.content or ""
+        usage = _openai_style_usage(
+            response.usage, provider=self.provider, model=self.model, endpoint="sync"
+        )
+        return ModelResponse(text=text, usage=usage)
+
     def _stream_openai_compatible(self, kwargs: dict, *, inline_think: bool):
         """Stream an OpenAI-compatible chat completion, timing the deltas.
 
-        Shared by the OpenAI and Together paths -- same wire protocol, one
-        difference that matters for TTFT:
+        Shared by the OpenAI, Together and Meta paths -- same wire protocol,
+        one difference that matters for TTFT:
 
-        - OpenAI (chat.completions) never streams reasoning tokens, so the
-          first content delta is both ttfc and ttft.
+        - OpenAI (chat.completions) and Meta never stream reasoning tokens, so
+          the first content delta is both ttfc and ttft.
         - Together's open-weight reasoners emit ``<think>...</think>`` inline
           in the content stream, so `inline_think=True` gates ttft past the
           closing tag (see _InlineThinkGate).
@@ -810,7 +910,7 @@ def _reset_client_cache() -> None:
     _CLIENT_CACHE.clear()
 
 
-def resolve_max_tokens(client: "ModelClient", max_tokens: int) -> int:
+def resolve_max_tokens(client: "ModelClient", max_tokens: int) -> int | None:
     """Resolve ``max_tokens <= 0`` to the model's maximum output.
 
     Zero means "no limit we impose" -- the benchmark must not cap tutor
@@ -821,13 +921,16 @@ def resolve_max_tokens(client: "ModelClient", max_tokens: int) -> int:
 
     Takes the client rather than a model string so it reuses the provider the
     client already resolved at construction, instead of re-parsing the name.
+
+    Returns None for a provider with no output cap of its own (Together, Meta):
+    the caller then omits the param rather than inventing a limit.
     """
     if max_tokens <= 0:
         max_tokens = MAX_OUTPUT_TOKENS.get(client.provider, 8192)
     model = getattr(client, "model", "") or ""
     cap = max_output_cap(model)
     if cap is not None:
-        return min(max_tokens, cap)
+        return cap if max_tokens is None else min(max_tokens, cap)
     return max_tokens
 
 
@@ -836,7 +939,12 @@ MAX_OUTPUT_TOKENS = {
     "gemini": 65536,
     "openai": 128000,
     "anthropic": 128000,
-    "together": 16384,  # open-weight reasoners (DeepSeek/Kimi) need room to think
+    # None = no provider output cap: Together bounds only input + output by
+    # the context window, so the param is omitted (see _generate_together).
+    "together": None,
+    # Meta likewise: max_completion_tokens is an optional cap, input + output
+    # share the context window, so the param is omitted (see _generate_meta).
+    "meta": None,
 }
 
 
@@ -970,7 +1078,7 @@ def _gemini_batch_usage(usage_meta: dict, *, model: str) -> dict:
 
 
 def _openai_style_usage(usage_obj, *, provider: str, model: str, endpoint: str) -> dict:
-    """Normalize an OpenAI-shaped usage object (OpenAI + Together, sync/stream).
+    """Normalize an OpenAI-shaped usage object (OpenAI, Together, Meta; sync/stream).
 
     prompt_tokens includes the cached share, reported under
     prompt_tokens_details.cached_tokens. Together populates it too (observed
@@ -979,7 +1087,11 @@ def _openai_style_usage(usage_obj, *, provider: str, model: str, endpoint: str) 
     additionally meter cache writes (billed at 1.25x input) under
     prompt_tokens_details.cache_write_tokens -- also a subset of
     prompt_tokens, disjoint from cached_tokens (verified live on
-    gpt-5.6-luna: prompt 1120 = 1117 written + 3 uncached). usage_obj may be
+    gpt-5.6-luna: prompt 1120 = 1117 written + 3 uncached). Those models cache
+    at message ends, so the benchmark's single growing message reads nothing
+    back unless the client places an explicit breakpoint (see
+    _generate_openai): without one, gpt-6 tutor calls metered ~98% of prompt
+    tokens as writes and ~2% as reads. usage_obj may be
     None (Together streams sometimes never deliver the usage chunk): every
     bucket records 0 rather than a guess.
     """
@@ -1167,6 +1279,92 @@ def _interleave_text_and_images(
             parts.append(block)
 
     return parts if parts else [text_block(prompt)]
+
+
+def _openai_text_part(text: str) -> dict:
+    return {"type": "text", "text": text}
+
+
+def _openai_user_content(
+    prompt: str,
+    cacheable_prefix: str | None,
+    image_blocks: list[dict] | None,
+    *,
+    explicit_cache: bool,
+):
+    """Build the OpenAI user-message content: cacheable head, then prompt.
+
+    Without explicit_cache this is the head + prompt concatenation (a plain
+    string, or text/image parts when images are present). With it, the
+    cached prefix (see _cache_breakpoint_offset) ends a text part of its own
+    marked with an explicit cache breakpoint. Text parts of one message
+    render as their concatenation (verified live on gpt-6-luna: identical
+    prompt_tokens either way), so the model reads the same text; only where
+    the cache boundary sits changes.
+    """
+    head = cacheable_prefix or ""
+    full = head + prompt
+    cut = _cache_breakpoint_offset(head) if explicit_cache else 0
+    if image_blocks:
+        parts = _interleave_text_and_images(full, image_blocks, _openai_text_part)
+    elif cut:
+        parts = [_openai_text_part(full)]
+    else:
+        return full
+    if cut:
+        parts = _mark_cache_breakpoint(parts, cut)
+    return parts
+
+
+def _cache_breakpoint_offset(head: str) -> int:
+    """Where the explicit breakpoint goes: the start of the head's last line.
+
+    A breakpoint forces a token boundary. The head ends with the last context
+    turn's text and the tail starts with a newline, and the tokenizer merges
+    closing punctuation with the newlines after it (`?\\n\\n` is one token),
+    so a breakpoint at the end of the head would change the token sequence
+    the model reads versus the plain concatenation. Just after a newline,
+    before a line's first character, is not a merge point, so the model reads
+    the same tokens either way; the head's last line is simply billed as
+    uncached tail. Trailing blank lines are skipped so the breakpoint never
+    splits a run of newlines. 0 (no newline to break after) means no
+    breakpoint.
+    """
+    return head.rstrip("\r\n").rfind("\n") + 1
+
+
+def _mark_cache_breakpoint(parts: list[dict], offset: int) -> list[dict]:
+    """Put an explicit cache breakpoint at character `offset` of the text.
+
+    `parts` are OpenAI content parts whose text parts, in order, concatenate
+    to the full prompt (images occupy no text positions). The text part
+    spanning `offset` is split there if needed, and the part ending at
+    `offset` is marked.
+    """
+    out: list[dict] = []
+    pos = 0
+    marked = False
+    for part in parts:
+        if marked or part.get("type") != "text":
+            out.append(part)
+            continue
+        text = part["text"]
+        end = pos + len(text)
+        if end < offset:
+            out.append(part)
+            pos = end
+            continue
+        cut = offset - pos
+        out.append(
+            {
+                **_openai_text_part(text[:cut]),
+                "prompt_cache_breakpoint": {"mode": "explicit"},
+            }
+        )
+        if text[cut:]:
+            out.append(_openai_text_part(text[cut:]))
+        marked = True
+    return out
 
 
 # ===================================================================

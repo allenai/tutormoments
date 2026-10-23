@@ -475,6 +475,49 @@ def test_run_conversation_latencies_collected(monkeypatch):
     assert result.student_latencies == [0.5]
 
 
+def test_run_conversation_student_gate_wraps_only_student_calls(monkeypatch):
+    """student_gate is held around each hosted student call and never around
+    a tutor call; recorded latency is the response's own, excluding the wait."""
+    from tutormoments.conversation import run_conversation
+
+    class _Gate:
+        def __init__(self):
+            self.held = False
+            self.entries = 0
+
+        def __enter__(self):
+            self.held = True
+            self.entries += 1
+
+        def __exit__(self, *exc):
+            self.held = False
+
+    gate = _Gate()
+    held_during = {"tutor": [], "student": []}
+
+    def _tutor(*_a, **_kw):
+        held_during["tutor"].append(gate.held)
+        return tutor_resps.pop(0)
+
+    def _student(*_a, **_kw):
+        held_during["student"].append(gate.held)
+        return student_resps.pop(0)
+
+    tutor_resps = [_resp("T1", latency=1.0), _resp("T2", latency=1.0), _resp("[END]")]
+    student_resps = [_resp("S1", latency=0.5), _resp("S2", latency=0.7)]
+    tutor_client, student_client = _patch_all(monkeypatch, [], [])
+    tutor_client.generate.side_effect = _tutor
+    student_client.generate.side_effect = _student
+
+    result = run_conversation(
+        _make_scenario(cut_turn=5), "fake-tutor", max_turns=10, student_gate=gate
+    )
+
+    assert held_during == {"tutor": [False, False, False], "student": [True, True]}
+    assert gate.entries == 2 and not gate.held
+    assert result.student_latencies == [0.5, 0.7]
+
+
 def test_run_conversation_none_latency_not_appended(monkeypatch):
     """None latency is not appended to the list."""
     from tutormoments.conversation import run_conversation
@@ -558,6 +601,37 @@ def test_run_conversation_no_timing_leaves_list_empty(monkeypatch):
 
     assert result.tutor_timings == []
     assert result.tutor_latencies == [1.0], "latency still recorded"
+
+
+def test_run_conversation_timings_carry_each_calls_own_usage(monkeypatch):
+    """Per-call usage rides on the timing entry; the sum is the transcript's.
+
+    tutor_usage alone loses the per-call split, so any per-response cost
+    would have to assume a call count -- this records it.
+    """
+    from tutormoments.conversation import run_conversation
+
+    scenario = _make_scenario(cut_turn=5)
+    u1 = {"input_uncached": 900, "output": 40, "total": 940, "model": "m"}
+    u2 = {
+        "input_uncached": 10,
+        "cache_read": 900,
+        "output": 60,
+        "total": 970,
+        "model": "m",
+    }
+    tutor_resp = [
+        _resp("T1", usage=u1, timing=_timing()),
+        _resp("[END]", usage=u2, timing=_timing()),
+    ]
+    _patch_all(monkeypatch, tutor_resp, [_resp("S1", timing=_timing())])
+
+    result = run_conversation(scenario, "fake-tutor", max_turns=6)
+
+    assert [t["usage"] for t in result.tutor_timings] == [u1, u2]
+    assert result.tutor_usage["total"] == 940 + 970
+    # A copy, not the response's own dict: later accumulation must not alias.
+    assert result.tutor_timings[0]["usage"] is not u1
 
 
 def test_run_conversation_requests_streaming(monkeypatch):

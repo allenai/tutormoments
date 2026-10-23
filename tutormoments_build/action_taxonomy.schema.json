@@ -1,0 +1,257 @@
+{
+ "$schema": "https://json-schema.org/draft/2020-12/schema",
+ "title": "action_taxonomy.jsonl (Hugging Face release -- facet-level tutor-action classifications)",
+ "description": "One row per decomposed tutor action (facet): every item of `action_decomposed` for the scaffolding moments of the human tutors (`ground_truth`) and of the paper's AI-tutor replays (`benchmark_520`: 7 models x 2 prompts). Kept facets carry a model-generated category from the 13-letter A-M action taxonomy (scheme lm_extended_v1); facets removed by the pre-classification filter carry category null and an excluded_reason. Distributions are computed over kept facets only (macro mean over moments).",
+ "$comment": "Regenerated classifications, not the paper's pools: they do not reproduce the paper's Fig 4 or KL-divergence table exactly (the paper's canonical numbers are v1_action_taxonomy_distribution.csv and kl_divergence_table.tex in the code repo). The companion action_taxonomy.manifest.json records the input dataset revision and file hashes, the classifier model/config and prompt hash, counts, token usage, and this file's hashes. Rows are sorted by (source, tutor_model, prompt_mode, moment_id, key_moment_index, statement_index), which is unique.",
+ "type": "object",
+ "additionalProperties": false,
+ "required": [
+  "source",
+  "tutor_model",
+  "prompt_mode",
+  "moment_id",
+  "key_moment_index",
+  "transcript_id",
+  "turn_start",
+  "turn_end",
+  "statement_index",
+  "statement",
+  "situation_label",
+  "action_label",
+  "result_label",
+  "stance_prefixed",
+  "category",
+  "category_name",
+  "orientation",
+  "excluded_reason"
+ ],
+ "properties": {
+  "source": {
+   "type": "string",
+   "enum": [
+    "human",
+    "benchmark_520"
+   ],
+   "description": "`human`: a human tutor's moment from ground_truth. `benchmark_520`: an AI tutor's replay from benchmark_520."
+  },
+  "tutor_model": {
+   "type": [
+    "string",
+    "null"
+   ],
+   "description": "AI tutor model id (benchmark_520.tutor_model); null for human rows."
+  },
+  "prompt_mode": {
+   "type": [
+    "string",
+    "null"
+   ],
+   "enum": [
+    "plain",
+    "scaffolding_rigor",
+    null
+   ],
+   "description": "AI tutor prompt (benchmark_520.prompt_mode); null for human rows."
+  },
+  "moment_id": {
+   "type": "string",
+   "description": "Human: `{conversation_id}__{turn_start}_{turn_end}__{annotator_id}` -- each annotator's pass is its own moment; a few ground_truth key-moment records share an id and are pooled as one moment. benchmark_520: moments.id, i.e. `balanced_520:{scenario_id}`, unique within a (tutor_model, prompt_mode) cell."
+  },
+  "key_moment_index": {
+   "type": [
+    "integer",
+    "null"
+   ],
+   "minimum": 0,
+   "description": "Human: index of the source record in the ground_truth row's `key_moments` list. Null for benchmark_520 rows."
+  },
+  "transcript_id": {
+   "type": "string",
+   "description": "Source transcript id (ground_truth.conversation_id; for benchmark_520, the trailing UUID of conv_id)."
+  },
+  "turn_start": {
+   "type": "integer",
+   "description": "First turn of the annotated span."
+  },
+  "turn_end": {
+   "type": "integer",
+   "description": "Last turn of the annotated span."
+  },
+  "statement_index": {
+   "type": "integer",
+   "minimum": 0,
+   "description": "Position of the statement in the source `action_decomposed` list."
+  },
+  "statement": {
+   "type": "string",
+   "description": "The `action_decomposed` item: one sentence of an LLM decomposition of the free-text `action` description (the human annotator's for human rows, the scoring pipeline's for benchmark_520 rows)."
+  },
+  "situation_label": {
+   "type": "string",
+   "description": "The moment's gold situation. Human: ground_truth `situation_label_agg` (scaffolding | rigor | mixed | neither | both | unknown). benchmark_520: moments.dimension (scaffolding | rigor)."
+  },
+  "action_label": {
+   "type": [
+    "string",
+    "null"
+   ],
+   "description": "Overall direction of the tutor's action for the moment (scaffolding | rigor | both | neither | unknown). Human: ground_truth `action_direction_agg`; benchmark_520: annotation `action_label`."
+  },
+  "result_label": {
+   "type": [
+    "string",
+    "null"
+   ],
+   "description": "Student outcome for the moment (pos | neg | no_evidence). Human: ground_truth `student_outcome_agg`; benchmark_520: annotation `result_label`."
+  },
+  "stance_prefixed": {
+   "type": "boolean",
+   "description": "The statement contains a stance phrase (e.g. `scaffolds`, `pushes for rigor`). Audit flag set by the filter."
+  },
+  "category": {
+   "type": [
+    "string",
+    "null"
+   ],
+   "enum": [
+    "A",
+    "B",
+    "C",
+    "D",
+    "E",
+    "F",
+    "G",
+    "H",
+    "I",
+    "J",
+    "K",
+    "L",
+    "M",
+    null
+   ],
+   "description": "Model-assigned action category (A-M); null for excluded facets."
+  },
+  "category_name": {
+   "type": [
+    "string",
+    "null"
+   ],
+   "enum": [
+    "Guiding/funneling questions toward an answer",
+    "Breaking the problem into steps",
+    "Explaining, modeling, or co-solving",
+    "Alternative representations and analogies",
+    "Hints, reminders, and narrowing support",
+    "Supplying answers, steps, or corrections",
+    "Prompting for explanation, justification, or reasoning",
+    "Withdrawing support / independent work",
+    "Increasing complexity or challenge",
+    "Prompting self-assessment / reconsideration",
+    "Affirmations, check-ins, and confirming answers",
+    "Transitioning to a new problem or topic",
+    "Other",
+    null
+   ],
+   "description": "Name of `category`."
+  },
+  "orientation": {
+   "type": [
+    "string",
+    "null"
+   ],
+   "enum": [
+    "scaffolding",
+    "rigor",
+    "neutral",
+    null
+   ],
+   "description": "Orientation of `category` (A-F scaffolding, G-J rigor, K-M neutral)."
+  },
+  "excluded_reason": {
+   "type": [
+    "string",
+    "null"
+   ],
+   "enum": [
+    "non_tutor_actor",
+    "pure_stance",
+    "stance_negation",
+    "non_action",
+    null
+   ],
+   "description": "Why the pre-classification filter removed the facet, or null if kept. non_tutor_actor: the subject is not `the tutor` (e.g. `The student correctly identifies 3/8.`, `There is no scaffolding.`). pure_stance: a stance with no concrete move (`The tutor is scaffolding throughout.`). stance_negation: a negated stance (`The tutor does not push for rigor.`). non_action: something the tutor did not do (`The tutor does not increase complexity.`)."
+  }
+ },
+ "allOf": [
+  {
+   "if": {
+    "properties": {
+     "excluded_reason": {
+      "type": "null"
+     }
+    }
+   },
+   "then": {
+    "properties": {
+     "category": {
+      "type": "string"
+     },
+     "category_name": {
+      "type": "string"
+     },
+     "orientation": {
+      "type": "string"
+     }
+    }
+   },
+   "else": {
+    "properties": {
+     "category": {
+      "type": "null"
+     },
+     "category_name": {
+      "type": "null"
+     },
+     "orientation": {
+      "type": "null"
+     }
+    }
+   }
+  },
+  {
+   "if": {
+    "properties": {
+     "source": {
+      "const": "human"
+     }
+    }
+   },
+   "then": {
+    "properties": {
+     "tutor_model": {
+      "type": "null"
+     },
+     "prompt_mode": {
+      "type": "null"
+     },
+     "key_moment_index": {
+      "type": "integer"
+     }
+    }
+   },
+   "else": {
+    "properties": {
+     "tutor_model": {
+      "type": "string"
+     },
+     "prompt_mode": {
+      "type": "string"
+     },
+     "key_moment_index": {
+      "type": "null"
+     }
+    }
+   }
+  }
+ ]
+}

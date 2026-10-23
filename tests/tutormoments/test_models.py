@@ -11,6 +11,7 @@ import pytest
 from tutormoments.models import (
     ThinkingConfigError,
     _validate_registry,
+    explicit_prompt_cache,
     get_pricing,
     infer_provider,
     max_output_cap,
@@ -94,14 +95,45 @@ WIRE_MATRIX = [
 ]
 
 
-@pytest.mark.parametrize("model,thinking,expected", WIRE_MATRIX)
-def test_wire_matrix(model, thinking, expected):
-    wire = resolve_thinking(model, thinking)
-    anth_thinking, anth_effort, gem_config, oai_effort = expected
-    assert wire.anthropic_thinking == anth_thinking
-    assert wire.anthropic_effort == anth_effort
-    assert wire.gemini_thinking_config == gem_config
-    assert wire.openai_reasoning_effort == oai_effort
+@pytest.mark.parametrize(
+    "thinking,effort", [({}, None), ({"reasoning_effort": "max"}, "max")]
+)
+def test_together_wire(thinking, effort):
+    wire = resolve_thinking("deepseek-ai/DeepSeek-V4-Pro-0813", thinking)
+    assert wire.provider == "together"
+    assert wire.together_reasoning_effort == effort
+    assert wire.openai_reasoning_effort is None
+
+
+def test_meta_wire():
+    wire = resolve_thinking("muse-wonder-1.0", {"reasoning_effort": "high"})
+    assert wire.provider == "meta"
+    assert wire.meta_reasoning_effort == "high"
+    assert wire.openai_reasoning_effort is None
+    assert wire.together_reasoning_effort is None
+    assert wire.describe() == "reasoning_effort=high"
+
+
+def test_meta_requires_a_stated_effort():
+    # Omitting reasoning_effort still reasons, at a model-chosen level, so an
+    # empty mapping would leave the condition unstated.
+    with pytest.raises(ThinkingConfigError, match="must set reasoning_effort"):
+        resolve_thinking("muse-wonder-1.0", {})
+    with pytest.raises(ThinkingConfigError, match="non-empty"):
+        resolve_thinking("muse-wonder-1.0", {"reasoning_effort": ""})
+    with pytest.raises(ThinkingConfigError, match="unknown key"):
+        resolve_thinking("muse-wonder-1.0", {"reasoning": "high"})
+
+
+def test_together_rejects_malformed_effort_and_ignored_switch():
+    with pytest.raises(ThinkingConfigError, match="non-empty"):
+        resolve_thinking("deepseek-ai/DeepSeek-V4-Pro-0813", {"reasoning_effort": ""})
+    # Together ignores reasoning.enabled on DeepSeek-V4-Pro-0813 (thinking.md),
+    # so config must not accept a switch that would not be honoured.
+    with pytest.raises(ThinkingConfigError, match="unknown key"):
+        resolve_thinking(
+            "deepseek-ai/DeepSeek-V4-Pro-0813", {"reasoning": {"enabled": False}}
+        )
 
 
 # ---------------------------------------------------------------------------
@@ -160,10 +192,20 @@ def test_rejects_bad_anthropic_shapes():
         )
     with pytest.raises(ThinkingConfigError, match="effort requires"):
         resolve_thinking(
-            "claude-opus-4-8", {"thinking": {"type": "disabled"}, "effort": "high"}
+            "claude-opus-4-8",
+            {"thinking": {"type": "enabled", "budget_tokens": 4096}, "effort": "high"},
         )
     with pytest.raises(ThinkingConfigError, match="effort requires"):
         resolve_thinking("claude-opus-4-8", {"thinking": None, "effort": "high"})
+
+
+def test_anthropic_effort_allowed_with_thinking_disabled():
+    # Effort also sets answer length, so a thinking-off arm can still state it.
+    wire = resolve_thinking(
+        "claude-haiku-5-5", {"thinking": {"type": "disabled"}, "effort": "low"}
+    )
+    assert wire.anthropic_thinking == {"type": "disabled"}
+    assert wire.anthropic_effort == "low"
 
 
 def test_rejects_retired_ladder_levels():
@@ -196,6 +238,7 @@ def test_infer_provider_registered_models():
     assert infer_provider("gemini-3.5-flash") == "gemini"
     assert infer_provider("gpt-5.5-2026-04-23") == "openai"
     assert infer_provider("deepseek-ai/DeepSeek-V4-Pro") == "together"
+    assert infer_provider("muse-wonder-1.0") == "meta"
 
 
 def test_infer_provider_unregistered_falls_back_to_prefixes():
@@ -203,6 +246,7 @@ def test_infer_provider_unregistered_falls_back_to_prefixes():
     assert infer_provider("gpt-4o") == "openai"
     assert infer_provider("o3-mini") == "openai"
     assert infer_provider("qwen/Qwen3-235B") == "together"
+    assert infer_provider("muse-spark-1.3") == "meta"
 
 
 def test_infer_provider_is_case_insensitive():
@@ -230,10 +274,27 @@ def test_max_output_cap():
     assert max_output_cap("not-registered") is None
 
 
+def test_explicit_prompt_cache_flags_only_message_end_cachers():
+    # GPT-6 caches at message ends (needs explicit breakpoints); GPT-5.5
+    # caches at fixed intervals and rejects them.
+    assert explicit_prompt_cache("gpt-6-astra") is True
+    assert explicit_prompt_cache("gpt-6-luna") is True
+    assert explicit_prompt_cache("gpt-5.5-2026-04-23") is False
+    assert explicit_prompt_cache("claude-opus-4-8") is False
+    assert explicit_prompt_cache("not-registered") is False
+
+
 def test_get_pricing_shape():
-    # Pricing is schema-room for the cost-tracking workstream: present, dict,
-    # empty until populated. Empty means "not priced yet", never "free".
-    assert get_pricing("claude-opus-4-8") == {}
+    # Populated entries carry the full rate grid plus lookup provenance;
+    # empty means "not priced yet", never "free".
+    opus = get_pricing("claude-opus-4-8")
+    assert opus["input"] == 5.00
+    assert opus["output"] == 25.00
+    assert opus["cache_read"] == 0.50
+    assert opus["cache_write"] == 6.25
+    assert opus["batch_multiplier"] == 0.5
+    assert opus["as_of"] and opus["source"]
+    assert get_pricing("claude-sonnet-5") == {}
     assert get_pricing("unregistered-model") == {}
 
 
@@ -249,6 +310,12 @@ def test_describe_renders_wire_form():
     )
     assert (
         resolve_thinking("deepseek-ai/DeepSeek-V4-Pro", {}).describe() == "(none sent)"
+    )
+    assert (
+        resolve_thinking(
+            "deepseek-ai/DeepSeek-V4-Pro-0813", {"reasoning_effort": "max"}
+        ).describe()
+        == "reasoning_effort=max"
     )
 
 
@@ -290,10 +357,60 @@ def test_validate_registry_rejects_bad_output_cap():
         _validate_registry(bad)
 
 
+@pytest.mark.parametrize(
+    "provider,value",
+    [("openai", "yes"), ("anthropic", True)],
+)
+def test_validate_registry_rejects_bad_explicit_prompt_cache(provider, value):
+    bad = _minimal_registry()
+    bad["models"]["claude-x"]["provider"] = provider
+    bad["models"]["claude-x"]["explicit_prompt_cache"] = value
+    with pytest.raises(ValueError, match="explicit_prompt_cache"):
+        _validate_registry(bad)
+
+
 def test_validate_registry_rejects_bad_pricing():
     bad = _minimal_registry()
     bad["models"]["claude-x"]["pricing"] = "cheap"
     with pytest.raises(ValueError, match="pricing"):
+        _validate_registry(bad)
+
+
+def _priced_registry():
+    reg = _minimal_registry()
+    reg["models"]["claude-x"]["pricing"] = {
+        "input": 5.00,
+        "output": 25.00,
+        "cache_read": 0.50,
+        "cache_write": 6.25,
+        "batch_multiplier": 0.5,
+        "as_of": "2026-09-16",
+        "source": "https://example.com/pricing",
+    }
+    return reg
+
+
+def test_validate_registry_accepts_populated_pricing():
+    assert _validate_registry(_priced_registry())
+
+
+@pytest.mark.parametrize(
+    ("mutate", "match"),
+    [
+        (lambda p: p.pop("cache_read"), "missing"),
+        (lambda p: p.update(cache_hit=0.5), "unknown"),
+        (lambda p: p.update(input=-1), "non-negative"),
+        (lambda p: p.update(output=True), "non-negative"),
+        (lambda p: p.update(batch_multiplier=0), "batch_multiplier"),
+        (lambda p: p.update(batch_multiplier=2.0), "batch_multiplier"),
+        (lambda p: p.update(as_of="Sep 16"), "YYYY-MM-DD"),
+        (lambda p: p.update(source=""), "source"),
+    ],
+)
+def test_validate_registry_rejects_malformed_pricing(mutate, match):
+    bad = _priced_registry()
+    mutate(bad["models"]["claude-x"]["pricing"])
+    with pytest.raises(ValueError, match=match):
         _validate_registry(bad)
 
 

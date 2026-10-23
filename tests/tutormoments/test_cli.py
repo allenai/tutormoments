@@ -190,6 +190,7 @@ def _make_run_config(
     cfg.modes = ["plain"]
     cfg.trials = 1
     cfg.replay_concurrency = replay_concurrency
+    cfg.max_student_concurrency = None
     cfg.student = StudentSpec(
         model="claude-haiku", mode="oracle", thinking={"thinking": None}
     )
@@ -456,6 +457,99 @@ def test_run_cell_writes_latency_and_tokens(tmp_path):
     assert tutor_tok["provider"] == "anthropic"
     assert tutor_tok["endpoint"] == "sync"
 
+    # Cost block: always written, but the legacy-only second transcript makes
+    # the tutor aggregate pre-vector-contaminated (canonical total 150 < legacy
+    # 450), so every figure is null rather than an understated dollar amount.
+    cost = summary["cost"]
+    assert cost["tutor_list_cost_usd"] is None
+    assert cost["tutor_cost_per_conversation_usd"] is None
+    assert cost["run_billed_cost_estimate_usd"] is None
+    assert cost["n_conversations"] == 2
+    assert cost["pricing_version"]
+
+
+def test_run_cell_writes_cost_block(tmp_path):
+    """A run whose usage all carries the canonical vector + provenance gets
+    real dollar figures: tutor list cost from the registry's rates, divided by
+    the number of conversations. The scorer's legacy-only mocked usage keeps
+    the all-roles billed estimate null (any unpriceable role nulls it)."""
+    from tutormoments.cli import run_cell
+    from tutormoments.models import get_pricing, pricing_version
+
+    scenarios = list(FIXTURE_SCENARIOS)
+
+    def _vector(input_uncached, cache_read, output):
+        total = input_uncached + cache_read + output
+        return {
+            "input_tokens": input_uncached,
+            "output_tokens": output,
+            "total_tokens": input_uncached + output,
+            "input_uncached": input_uncached,
+            "cache_read": cache_read,
+            "cache_write": 0,
+            "output": output,
+            "reasoning": 0,
+            "total": total,
+            "provider": "anthropic",
+            "model": "claude-opus-4-8",
+            "endpoint": "sync",
+        }
+
+    transcripts = [
+        _make_transcript(
+            "scenario_001",
+            tutor_usage=_vector(20, 80, 50),
+            student_usage=_vector(100, 0, 30),
+        ),
+        _make_transcript(
+            "scenario_002",
+            tutor_usage=_vector(200, 0, 100),
+            student_usage=_vector(120, 0, 40),
+        ),
+    ]
+    annotations = [_make_annotation(s.id) for s in scenarios]
+    cfg_mock = _make_run_config(sample=2)
+
+    with (
+        patch(_CFG_PATCH, return_value=cfg_mock),
+        patch(_LOAD_PATCH, return_value=_load_result(scenarios)),
+        patch(_CONV_PATCH, side_effect=transcripts),
+        patch(_SCORE_PATCH, side_effect=_score_batch_from(annotations)),
+        patch(_TAX_PATCH, return_value=_TAX_RESULT),
+    ):
+        run_id = run_cell(
+            tutor="claude-opus-4-8",
+            mode="plain",
+            run_cfg=None,
+            date="20260626",
+            results_root=str(tmp_path),
+        )
+
+    summary = json.loads(
+        (tmp_path / run_id / "summary.json").read_text(encoding="utf-8")
+    )
+    cost = summary["cost"]
+
+    # tutor aggregate: uncached 220, cache_read 80, output 150 at opus-4-8 rates
+    rates = get_pricing("claude-opus-4-8")
+    expected_list = (
+        220 * rates["input"] + 80 * rates["cache_read"] + 150 * rates["output"]
+    ) / 1_000_000
+    assert cost["tutor_list_cost_usd"] == pytest.approx(expected_list)
+    assert cost["n_conversations"] == 2
+    assert cost["tutor_cost_per_conversation_usd"] == pytest.approx(expected_list / 2)
+    # Scorer usage is legacy-only in these mocks -> the whole-run billed
+    # estimate is null, never a partial (understated) sum.
+    assert cost["run_billed_cost_estimate_usd"] is None
+    assert cost["pricing_version"] == pricing_version()
+    assert cost["rates"]["claude-opus-4-8"] == rates
+
+    # The terminal summary echoes the per-conversation figure.
+    from tutormoments.report import format_run_summary
+
+    text = format_run_summary(summary, tutor_model="claude-opus-4-8", mode="plain")
+    assert f"${expected_list / 2:.4f}" in text
+
 
 # ---------------------------------------------------------------------------
 # Test 2: run_cell resumes (second call skips already-done scenarios)
@@ -703,65 +797,199 @@ def test_cell_expansion_arm_key_that_is_not_a_model_id(arm_config):
 
 
 # ---------------------------------------------------------------------------
-# Test 5: scheduler -- within-lane sequential, lanes can run independently
+# Test 5: scheduler -- a lane replays one cell at a time; scoring overlaps
 # ---------------------------------------------------------------------------
 
+_WAIT = 5  # seconds; an upper bound so a hung scheduler fails instead of hanging
 
-def test_scheduler_within_lane_sequential(tmp_path, arm_config):
-    """Cells within a lane are called in order; all 6 run_cell calls complete."""
-    from tutormoments.cli import expand_cells, run_sweep
 
-    # 2 tutors in the same lane (anthropic), 1 mode each -> 2 cells in 1 lane
-    tutors = ["claude-opus-4-8", "claude-sonnet-4-6"]
-    modes = ["plain"]
+class _ControlledCells:
+    """Fake run_cell whose replay and scoring phases the test releases by hand.
 
-    cells = expand_cells(tutors, modes)
-    # Both claude models -> anthropic lane
-    assert all(c["lane"] == "anthropic" for c in cells)
+    Each tutor's fake blocks until `release_replay[tutor]` is set, calls
+    on_replay_done, then blocks until `release_score[tutor]` is set. `events`
+    records the phase transitions in the order they happen.
+    """
 
-    call_order = []
+    def __init__(self, tutors, fail_before_replay=()):
+        import threading
 
-    def fake_run_cell(tutor, mode, run_cfg, *, date, results_root):
-        call_order.append((tutor, mode))
+        self._lock = threading.Lock()
+        self.events = []
+        self.started = {t: threading.Event() for t in tutors}
+        self.scored = {t: threading.Event() for t in tutors}
+        self.release_replay = {t: threading.Event() for t in tutors}
+        self.release_score = {t: threading.Event() for t in tutors}
+        self.gates = {}
+        self._fail = set(fail_before_replay)
+
+    def _log(self, event):
+        with self._lock:
+            self.events.append(event)
+
+    def __call__(
+        self, tutor, mode, run_cfg, *, date, results_root, on_replay_done, student_gate
+    ):
+        self.gates[tutor] = student_gate
+        self._log(f"{tutor}:start")
+        self.started[tutor].set()
+        if tutor in self._fail:
+            raise RuntimeError(f"{tutor} exploded")
+        assert self.release_replay[tutor].wait(_WAIT)
+        self._log(f"{tutor}:replay_done")
+        on_replay_done()
+        assert self.release_score[tutor].wait(_WAIT)
+        self._log(f"{tutor}:scored")
+        self.scored[tutor].set()
         return f"{tutor}_{mode}_run_id"
+
+    def release_all(self):
+        for ev in [*self.release_replay.values(), *self.release_score.values()]:
+            ev.set()
+
+
+def _start_sweep(cells, fake, run_cfg=None):
+    """Run run_sweep on a background thread; returns (thread, outcome dict)."""
+    import threading
+    from types import SimpleNamespace
+
+    from tutormoments.cli import run_sweep
+
+    if run_cfg is None:
+        run_cfg = SimpleNamespace(max_student_concurrency=None)
+    outcome = {}
+
+    def _target():
+        try:
+            outcome["run_ids"] = run_sweep(
+                cells=cells,
+                run_cfg=run_cfg,
+                date="20260626",
+                results_root="unused",
+                _run_cell_fn=fake,
+            )
+        except Exception as e:  # noqa: BLE001 -- surfaced to the test
+            outcome["error"] = e
+
+    thread = threading.Thread(target=_target, daemon=True)
+    thread.start()
+    return thread, outcome
+
+
+def _cell(tutor, lane, mode="plain"):
+    return {"tutor": tutor, "mode": mode, "lane": lane}
+
+
+def test_scheduler_lane_replays_one_cell_at_a_time_but_scoring_overlaps():
+    """Same lane: B's replay waits for A's replay, not for A's scoring."""
+    fake = _ControlledCells(["a", "b"])
+    thread, outcome = _start_sweep([_cell("a", "openai"), _cell("b", "openai")], fake)
+    try:
+        assert fake.started["a"].wait(_WAIT)
+        # A is still replaying: the lane is held, so B must not have started.
+        assert not fake.started["b"].wait(0.2)
+
+        fake.release_replay["a"].set()
+        # A is now scoring (release_score["a"] not set), yet B starts...
+        assert fake.started["b"].wait(_WAIT)
+        fake.release_replay["b"].set()
+        fake.release_score["b"].set()
+        # ...and finishes while A is still waiting on its scoring.
+        assert fake.scored["b"].wait(_WAIT)
+        assert not fake.scored["a"].is_set()
+        fake.release_score["a"].set()
+    finally:
+        fake.release_all()
+        thread.join(_WAIT)
+
+    assert fake.events == [
+        "a:start",
+        "a:replay_done",
+        "b:start",
+        "b:replay_done",
+        "b:scored",
+        "a:scored",
+    ]
+    # Returned in expansion order even though B finished first.
+    assert outcome["run_ids"] == ["a_plain_run_id", "b_plain_run_id"]
+
+
+def test_scheduler_separate_lanes_replay_concurrently():
+    """Different lanes start without waiting for each other's replay."""
+    fake = _ControlledCells(["a", "b"])
+    thread, outcome = _start_sweep([_cell("a", "openai"), _cell("b", "gemini")], fake)
+    try:
+        assert fake.started["a"].wait(_WAIT)
+        assert fake.started["b"].wait(_WAIT)
+    finally:
+        fake.release_all()
+        thread.join(_WAIT)
+    assert outcome["run_ids"] == ["a_plain_run_id", "b_plain_run_id"]
+
+
+def test_scheduler_all_cells_run_in_expansion_order():
+    """3 tutors x 2 modes on mixed lanes: every cell yields a run_id, in order."""
+    from tutormoments.cli import run_sweep
+
+    cells = [
+        _cell(t, lane, m)
+        for t, lane in [("c", "anthropic"), ("g", "gemini"), ("o", "openai")]
+        for m in ["plain", "scaffolding_rigor"]
+    ]
+
+    def fake(tutor, mode, run_cfg, *, on_replay_done, **_kw):
+        on_replay_done()
+        return f"{tutor}_{mode}"
 
     run_ids = run_sweep(
         cells=cells,
-        run_cfg=MagicMock(),
+        run_cfg=None,
         date="20260626",
-        results_root=str(tmp_path),
-        _run_cell_fn=fake_run_cell,
+        results_root="unused",
+        _run_cell_fn=fake,
     )
-
-    # All 2 cells produced a run_id
-    assert len(run_ids) == 2
-
-    # Within-lane sequential: claude-opus-4-8 before claude-sonnet-4-6 (sweep order)
-    tutors_in_order = [t for t, m in call_order]
-    assert tutors_in_order == ["claude-opus-4-8", "claude-sonnet-4-6"]
+    assert run_ids == [f"{c['tutor']}_{c['mode']}" for c in cells]
 
 
-def test_scheduler_multiple_lanes_all_cells_run(tmp_path):
-    """3 tutors x 2 modes = 6 cells; all 6 get a run_id regardless of parallelism."""
-    from tutormoments.cli import expand_cells, run_sweep
+def test_scheduler_failed_cell_frees_lane_and_reraises_after_others_finish():
+    """A cell failing before on_replay_done must not stall its lane; the
+    sweep still runs the rest and re-raises the failure at the end."""
+    fake = _ControlledCells(["a", "b"], fail_before_replay={"a"})
+    fake.release_all()
+    thread, outcome = _start_sweep([_cell("a", "openai"), _cell("b", "openai")], fake)
+    thread.join(_WAIT)
+    assert not thread.is_alive()
 
-    tutors = ["claude-opus-4-8", "gemini-3.1-pro-preview", "gpt-5.4"]
-    modes = ["plain", "scaffolding_rigor"]
+    assert fake.scored["b"].is_set()
+    assert isinstance(outcome.get("error"), RuntimeError)
+    assert "a exploded" in str(outcome["error"])
 
-    cells = expand_cells(tutors, modes)
 
-    def fake_run_cell(tutor, mode, run_cfg, *, date, results_root):
-        return f"{tutor}_{mode}_run_id"
+def test_scheduler_shares_one_student_gate_across_cells():
+    """A configured cap becomes ONE BoundedSemaphore handed to every cell."""
+    import threading
+    from types import SimpleNamespace
 
-    run_ids = run_sweep(
-        cells=cells,
-        run_cfg=MagicMock(),
-        date="20260626",
-        results_root=str(tmp_path),
-        _run_cell_fn=fake_run_cell,
+    fake = _ControlledCells(["a", "b"])
+    fake.release_all()
+    thread, outcome = _start_sweep(
+        [_cell("a", "openai"), _cell("b", "gemini")],
+        fake,
+        run_cfg=SimpleNamespace(max_student_concurrency=3),
     )
+    thread.join(_WAIT)
 
-    assert len(run_ids) == 6
+    assert outcome["run_ids"] == ["a_plain_run_id", "b_plain_run_id"]
+    assert isinstance(fake.gates["a"], threading.BoundedSemaphore)
+    assert fake.gates["a"] is fake.gates["b"]
+
+
+def test_scheduler_no_student_gate_by_default():
+    fake = _ControlledCells(["a"])
+    fake.release_all()
+    thread, _ = _start_sweep([_cell("a", "openai")], fake)
+    thread.join(_WAIT)
+    assert fake.gates["a"] is None
 
 
 # ---------------------------------------------------------------------------
@@ -783,6 +1011,7 @@ def _make_run_config_trials(
     cfg.modes = ["plain"]
     cfg.trials = n_trials
     cfg.replay_concurrency = replay_concurrency
+    cfg.max_student_concurrency = None
     cfg.student = StudentSpec(model="claude-haiku", mode="oracle", thinking="dynamic")
     cfg.scorer = ScorerSpec(model="claude-opus-4-6", thinking="dynamic")
     cfg.resolved_tutors = {
@@ -833,6 +1062,155 @@ def test_trials_3_calls_conversation_n_times(tmp_path):
     # scoring pooled into ONE score_batch call per trial
     assert conv_mock.call_count == n_trials * n_scenarios
     assert score_mock.call_count == n_trials
+
+
+def test_run_cell_fails_fast_when_first_trial_replay_all_fails(tmp_path):
+    """trials=3 with every replay failing (e.g. a bad tutor key): raise after
+    trial 1's replay instead of retrying every moment in trials 2 and 3."""
+    from tutormoments.cli import run_cell
+
+    scenarios = list(FIXTURE_SCENARIOS)
+    cfg_mock = _make_run_config_trials(n_trials=3, sample=len(scenarios))
+    conv_mock = MagicMock(side_effect=RuntimeError("401 invalid api key"))
+    score_mock = MagicMock()
+
+    with (
+        patch(_CFG_PATCH, return_value=cfg_mock),
+        patch(_LOAD_PATCH, return_value=_load_result(scenarios)),
+        patch(_CONV_PATCH, new=conv_mock),
+        patch(_SCORE_PATCH, new=score_mock),
+        patch(_TAX_PATCH, return_value=_TAX_RESULT),
+    ):
+        with pytest.raises(RuntimeError, match="No scenarios completed.*trial 1"):
+            run_cell(
+                tutor="claude-opus-4-8",
+                mode="plain",
+                run_cfg=None,
+                date="20260626",
+                results_root=str(tmp_path),
+            )
+
+    assert conv_mock.call_count == len(scenarios)
+    score_mock.assert_not_called()
+
+
+@pytest.mark.parametrize("n_trials", [1, 2])
+def test_run_cell_on_replay_done_fires_once_between_replay_and_scoring(
+    tmp_path, n_trials
+):
+    """Every trial replays (and its transcripts land on disk) before
+    on_replay_done fires exactly once; only then does any scoring start."""
+    from tutormoments.cli import run_cell
+
+    scenarios = list(FIXTURE_SCENARIOS)
+    transcripts = [_make_transcript(s.id) for s in scenarios for _ in range(n_trials)]
+    annotations = [_make_annotation(s.id) for s in scenarios for _ in range(n_trials)]
+    cfg_mock = _make_run_config_trials(n_trials=n_trials, sample=len(scenarios))
+
+    order = []
+    conv_fixtures = iter(transcripts)
+    score_fake = _score_batch_from(annotations)
+
+    def _conv(scenario, **_kw):
+        order.append("replay")
+        return next(conv_fixtures)
+
+    def _score(pairs):
+        order.append("score")
+        return score_fake(pairs)
+
+    def _on_replay_done():
+        order.append("replay_done")
+        written = list(tmp_path.glob("*/transcripts/*.json"))
+        assert len(written) == n_trials * len(scenarios)
+        assert not list(tmp_path.glob("*/scores/*.json"))
+
+    with (
+        patch(_CFG_PATCH, return_value=cfg_mock),
+        patch(_LOAD_PATCH, return_value=_load_result(scenarios)),
+        patch(_CONV_PATCH, side_effect=_conv),
+        patch(_SCORE_PATCH, side_effect=_score),
+        patch(_TAX_PATCH, return_value=_TAX_RESULT),
+    ):
+        run_cell(
+            tutor="claude-opus-4-8",
+            mode="plain",
+            run_cfg=None,
+            date="20260626",
+            results_root=str(tmp_path),
+            on_replay_done=_on_replay_done,
+        )
+
+    n_replays = n_trials * len(scenarios)
+    assert order == ["replay"] * n_replays + ["replay_done"] + ["score"] * n_trials
+
+
+def test_run_cell_passes_student_gate_to_every_conversation(tmp_path):
+    from tutormoments.cli import run_cell
+
+    scenarios = list(FIXTURE_SCENARIOS)
+    transcripts = {s.id: _make_transcript(s.id) for s in scenarios}
+    annotations = [_make_annotation(s.id) for s in scenarios]
+    cfg_mock = _make_run_config_trials(n_trials=1, sample=len(scenarios))
+    gate = object()
+
+    with (
+        patch(_CFG_PATCH, return_value=cfg_mock),
+        patch(_LOAD_PATCH, return_value=_load_result(scenarios)),
+        patch(_CONV_PATCH, side_effect=lambda s, **kw: transcripts[s.id]) as conv,
+        patch(_SCORE_PATCH, side_effect=_score_batch_from(annotations)),
+        patch(_TAX_PATCH, return_value=_TAX_RESULT),
+    ):
+        run_cell(
+            tutor="claude-opus-4-8",
+            mode="plain",
+            run_cfg=None,
+            date="20260626",
+            results_root=str(tmp_path),
+            student_gate=gate,
+        )
+
+    assert conv.call_count == len(scenarios)
+    assert all(c.kwargs["student_gate"] is gate for c in conv.call_args_list)
+
+
+def test_config_json_records_student_cap_outside_config_hash(tmp_path):
+    """The cap only changes timing: recorded in config.json, not hashed."""
+    from tutormoments.cli import run_cell
+
+    scenarios = list(FIXTURE_SCENARIOS)
+    configs = {}
+    for cap in (None, 6):
+        cfg_mock = _make_run_config_trials(n_trials=1, sample=len(scenarios))
+        cfg_mock.max_student_concurrency = cap
+        root = tmp_path / f"cap_{cap}"
+        with (
+            patch(_CFG_PATCH, return_value=cfg_mock),
+            patch(_LOAD_PATCH, return_value=_load_result(scenarios)),
+            patch(_CONV_PATCH, side_effect=lambda s, **kw: _make_transcript(s.id)),
+            patch(
+                _SCORE_PATCH,
+                side_effect=_score_batch_from(
+                    [_make_annotation(s.id) for s in scenarios]
+                ),
+            ),
+            patch(_TAX_PATCH, return_value=_TAX_RESULT),
+        ):
+            run_id = run_cell(
+                tutor="claude-opus-4-8",
+                mode="plain",
+                run_cfg=None,
+                date="20260626",
+                results_root=str(root),
+            )
+        configs[cap] = json.loads((root / run_id / "config.json").read_text("utf-8"))
+
+    assert configs[None]["max_student_concurrency"] is None
+    assert configs[6]["max_student_concurrency"] == 6
+    assert (
+        configs[None]["reproducibility"]["config_hash"]
+        == configs[6]["reproducibility"]["config_hash"]
+    )
 
 
 def test_trials_summary_has_mean_and_spread(tmp_path):
@@ -1164,6 +1542,123 @@ def test_report_warns_when_probes_mix_subsamples(tmp_path, caplog):
 
 
 # ---------------------------------------------------------------------------
+# report / view: S-vs-R KL columns and the human reference row
+# ---------------------------------------------------------------------------
+
+_HUMAN_REF = {
+    "label": "balanced_520 human tutors",
+    "dataset": "allenai/tutormoments-preview",
+    "revision": "3bb0c104d65e29facffca7ba864ef10fa22d0e78",
+    "kl": {"s_r": 0.5236, "r_s": 0.5907, "n_scaffolding": 260, "n_rigor": 258},
+}
+
+
+def _report_rows(tmp_path, results_root, *extra):
+    import csv
+
+    from tutormoments.cli import main
+
+    out_stem = str(tmp_path / "leaderboard")
+    main(["report", "--results-root", str(results_root), "--out", out_stem, *extra])
+    with open(out_stem + ".csv", encoding="utf-8") as f:
+        return list(csv.DictReader(f))
+
+
+def test_report_adds_the_human_reference_row_at_the_requested_revision(
+    tmp_path, monkeypatch
+):
+    from tutormoments import taxonomy
+
+    calls = []
+
+    def fake_reference(dataset, revision):
+        calls.append((dataset, revision))
+        return _HUMAN_REF
+
+    monkeypatch.setattr(taxonomy, "human_reference", fake_reference)
+    results_root = tmp_path / "results"
+    _make_fake_run(results_root, "model_alpha_plain_ds_1", "model-alpha", "plain")
+
+    rows = _report_rows(tmp_path, results_root)
+    assert [r["tutor_model"] for r in rows] == [
+        "balanced_520 human tutors",
+        "model-alpha",
+    ]
+    assert rows[0]["kl_s_r"] == "0.524" and rows[0]["n"] == "518"
+    assert calls == [taxonomy.HUMAN_REFERENCE]
+
+    other = "b" * 40
+    _report_rows(tmp_path, results_root, "--human-reference-revision", other)
+    assert calls[-1] == (taxonomy.HUMAN_REFERENCE[0], other)
+
+
+def test_report_omits_the_human_row_when_the_reference_fails(tmp_path, capsys):
+    """Offline (the suite's autouse stub makes every download fail): the row is
+    dropped with a printed note, and the report is still written."""
+    results_root = tmp_path / "results"
+    _make_fake_run(results_root, "model_alpha_plain_ds_1", "model-alpha", "plain")
+
+    rows = _report_rows(tmp_path, results_root)
+    assert [r["tutor_model"] for r in rows] == ["model-alpha"]
+    assert "Human reference row omitted" in capsys.readouterr().out
+
+
+def test_report_fills_kl_for_old_runs_from_classified_csv(tmp_path):
+    """A pre-KL run gets its KL from taxonomy/classified.csv on the fly;
+    summary.json is left untouched."""
+    from tutormoments import taxonomy
+
+    results_root = tmp_path / "results"
+    run_dir = _make_fake_run(
+        results_root, "model_alpha_plain_ds_1", "model-alpha", "plain"
+    )
+    summary_path = run_dir / "summary.json"
+    summary = json.loads(summary_path.read_text("utf-8"))
+    summary["taxonomy"] = {"n_facets": 2, "excluded": 0}
+    summary_path.write_text(json.dumps(summary), encoding="utf-8")
+    before = summary_path.read_text("utf-8")
+
+    def facet(mid, sit, cat):
+        return taxonomy.Facet(
+            moment_id=mid,
+            transcript_id="t",
+            turn_start=0,
+            turn_end=1,
+            statement_index=0,
+            statement="The tutor acts.",
+            annotation_type="scaffolding",
+            situation_label=sit,
+            category=cat,
+        )
+
+    facets = [facet("s1", "scaffolding", "A"), facet("r1", "rigor", "G")]
+    taxonomy.write_classified_csv(facets, run_dir / "taxonomy" / "classified.csv")
+    expected = taxonomy.kl_situation(facets)
+
+    # A second run with no classified.csv stays "-".
+    _make_fake_run(results_root, "model_beta_plain_ds_1", "model-beta", "plain")
+
+    rows = {r["tutor_model"]: r for r in _report_rows(tmp_path, results_root)}
+    assert rows["model-alpha"]["kl_s_r"] == f"{expected['s_r']:.3f}"
+    assert rows["model-alpha"]["kl_r_s"] == f"{expected['r_s']:.3f}"
+    assert rows["model-beta"]["kl_s_r"] == ""
+    assert summary_path.read_text("utf-8") == before
+
+
+def test_view_includes_the_human_reference(tmp_path, monkeypatch):
+    from tutormoments import taxonomy
+    from tutormoments.cli import main
+
+    monkeypatch.setattr(taxonomy, "human_reference", lambda d, r: _HUMAN_REF)
+    results_root = tmp_path / "results"
+    _make_fake_run(results_root, "model_alpha_plain_ds_1", "model-alpha", "plain")
+    out_html = tmp_path / "viewer.html"
+    main(["view", "--results-root", str(results_root), "--out", str(out_html)])
+    html = out_html.read_text(encoding="utf-8")
+    assert "balanced_520 human tutors" in html and "kl_s_r" in html
+
+
+# ---------------------------------------------------------------------------
 # Test 8: view subcommand writes non-empty HTML
 # ---------------------------------------------------------------------------
 
@@ -1252,6 +1747,18 @@ def test_main_run_smoke(tmp_path):
 
     # Verify run_sweep was called (proving main() wired through correctly)
     mock_sweep.assert_called_once()
+
+
+def test_main_run_forwards_max_student_concurrency():
+    from tutormoments.cli import main
+
+    with (
+        patch(_CFG_PATCH, return_value=_make_run_config(sample=1)) as mock_cfg,
+        patch("tutormoments.cli.run_sweep", return_value=[]),
+    ):
+        main(["run", "--tutors", "claude-opus-4-8", "--max-student-concurrency", "8"])
+
+    assert mock_cfg.call_args.kwargs["max_student_concurrency"] == 8
 
 
 def test_main_run_missing_dataset_exits_cleanly(capsys):

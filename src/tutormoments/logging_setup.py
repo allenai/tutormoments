@@ -147,21 +147,40 @@ def _file_only_record(handler: logging.Handler, message: str) -> None:
     handler.emit(record)
 
 
+# Run-log membership, per thread: the tokens of every per_run_log_file block
+# this thread logs into. Thread-local rather than keyed on thread ids, because
+# idents are recycled once a thread exits -- a new thread (e.g. the next sweep
+# cell's replay worker) starts with no tokens even if it reuses the ident of
+# a dead registered worker.
+_run_log_membership = threading.local()
+
+
+def _current_run_logs() -> frozenset:
+    return getattr(_run_log_membership, "tokens", frozenset())
+
+
+def _join_run_log(token: object) -> None:
+    _run_log_membership.tokens = _current_run_logs() | {token}
+
+
+def _leave_run_log(token: object) -> None:
+    _run_log_membership.tokens = _current_run_logs() - {token}
+
+
 class RunLogHandle:
     """Handle yielded by per_run_log_file for adopting worker threads.
 
-    The run-log filter passes only registered thread ids (initially just the
-    thread that opened the log). A worker-pool thread that should log into
-    this run's file calls register_current_thread() -- typically via
-    bind_worker_logging() in a ThreadPoolExecutor initializer.
+    The run-log filter passes only threads that joined this run's log
+    (initially just the thread that opened it). A worker-pool thread that
+    should log into this run's file calls register_current_thread() --
+    typically via bind_worker_logging() in a ThreadPoolExecutor initializer.
     """
 
-    def __init__(self, thread_ids: set):
-        self._thread_ids = thread_ids
+    def __init__(self, token: object):
+        self._token = token
 
     def register_current_thread(self) -> None:
-        # set.add is atomic under the GIL; the filter only reads membership.
-        self._thread_ids.add(threading.get_ident())
+        _join_run_log(self._token)
 
 
 def bind_worker_logging(handle: "RunLogHandle | None", tag: str) -> None:
@@ -170,8 +189,8 @@ def bind_worker_logging(handle: "RunLogHandle | None", tag: str) -> None:
     Intended as (part of) a ThreadPoolExecutor initializer: registers the
     worker with the run-log thread filter so its records reach run.log, and
     sets the [tag] contextvar (contextvars don't cross thread boundaries, so
-    the spawning thread's log_context() tag is otherwise lost). The worker
-    thread dies with the pool, so neither needs undoing.
+    the spawning thread's log_context() tag is otherwise lost). Both are
+    per-thread state that dies with the worker, so neither needs undoing.
     """
     if handle is not None:
         handle.register_current_thread()
@@ -210,12 +229,13 @@ def per_run_log_file(
     handler = logging.FileHandler(log_file, mode="a", encoding="utf-8")
     handler.setFormatter(logging.Formatter(_FILE_FORMAT, datefmt=_DATE_FORMAT))
     handler.addFilter(_CellTagFilter())
-    # Registered ids assume the threads outlive the block: a recycled id from a
-    # dead registered thread would wrongly pass this filter. The opening thread
-    # and worker-pool threads are long-lived, so that holds in practice.
-    thread_ids = {threading.get_ident()}
+    # Filters run on the emitting thread, so this checks that thread's own
+    # membership. Not record.thread: a registered replay worker exits while
+    # the block stays open for scoring, and a later thread that reuses its
+    # ident (e.g. the next sweep cell's worker) must not inherit it.
+    token = object()
     if current_thread_only:
-        handler.addFilter(lambda record: record.thread in thread_ids)
+        handler.addFilter(lambda record: token in _current_run_logs())
     if header:
         _file_only_record(handler, header)
 
@@ -232,9 +252,11 @@ def per_run_log_file(
 
     root = logging.getLogger()
     root.addHandler(handler)
+    _join_run_log(token)
     try:
-        yield RunLogHandle(thread_ids)
+        yield RunLogHandle(token)
     finally:
+        _leave_run_log(token)
         root.removeHandler(handler)
         handler.close()
         for pkg_logger in bumped:

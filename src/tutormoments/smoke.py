@@ -4,7 +4,9 @@ The offline test suite mocks every provider SDK, so it can prove the code
 agrees with itself but never that a provider accepts what we send. This
 module is the live half: one tiny real call per configured arm/role (and one
 submit-then-cancel batch per provider) with the arm's EXACT configured
-thinking condition. Run it via `tutormoments smoke` before merging changes to
+thinking condition, plus a two-call prompt-cache check for models whose
+caching the client steers with explicit breakpoints (explicit_prompt_cache).
+Run it via `tutormoments smoke` before merging changes to
 core API logic (see AGENTS.md).
 
 It deliberately calls only models already present in the active config --
@@ -21,12 +23,16 @@ import json
 import logging
 from dataclasses import dataclass, field
 
-from tutormoments.models import resolve_thinking
+from tutormoments.models import explicit_prompt_cache, resolve_thinking
 from tutormoments.resources import resource_text
 
 logger = logging.getLogger(__name__)
 
 _BATCH_PROVIDERS = ("gemini", "openai", "anthropic")
+
+# OpenAI's minimum cacheable prefix on explicit-breakpoint models; the cache
+# check's static head (prompts/smoke/cache_head.md) is sized above it.
+_MIN_CACHED_HEAD_TOKENS = 1024
 
 PASS = "PASS"
 WARN = "WARN"
@@ -49,11 +55,20 @@ class BatchCheck:
     thinking: dict | None
 
 
+@dataclass(frozen=True)
+class CacheCheck:
+    label: str  # "cache:" + the sync check's label
+    model: str
+    provider: str
+    thinking: dict | None
+
+
 @dataclass
 class SmokePlan:
     sync_checks: list
     batch_checks: list
     skipped: list  # (label, reason) pairs surfaced in the report
+    cache_checks: list = field(default_factory=list)
 
 
 @dataclass
@@ -204,10 +219,25 @@ def build_smoke_plan(
             else:
                 skipped.append((f"batch:{provider}", "provider has no batch API"))
 
+    # The explicit-breakpoint wire path is only exercised by a call that
+    # carries a cacheable head, which the ping never does -- so flagged models
+    # get their own check that the head is actually read back.
+    cache_checks = [
+        CacheCheck(
+            label=f"cache:{check.label}",
+            model=check.model,
+            provider=check.provider,
+            thinking=check.thinking,
+        )
+        for check in sync_checks
+        if explicit_prompt_cache(check.model)
+    ]
+
     return SmokePlan(
         sync_checks=sync_checks if include_sync else [],
         batch_checks=batch_checks,
         skipped=skipped,
+        cache_checks=cache_checks if include_sync else [],
     )
 
 
@@ -225,7 +255,11 @@ def _thinking_expectation(wire) -> str:
             return "off"
         if budget == -1:
             return "optional"
-        return "required"  # positive budget or thinking_level string
+        # minimal asks for as little thinking as possible and may use none
+        # (observed on gemini-3.6-flash); it is not an off switch either.
+        if str(cfgd.get("thinking_level", "")).lower() == "minimal":
+            return "optional"
+        return "required"  # positive budget or low/medium/high level
     if wire.anthropic_thinking is not None:
         kind = wire.anthropic_thinking.get("type")
         if kind == "disabled":
@@ -235,6 +269,14 @@ def _thinking_expectation(wire) -> str:
         return "optional"  # adaptive: the model decides
     if wire.openai_reasoning_effort is not None:
         return "off" if wire.openai_reasoning_effort == "none" else "required"
+    if wire.together_reasoning_effort is not None:
+        return "required"  # Together offers no working off switch (thinking.md)
+    if wire.meta_reasoning_effort is not None:
+        # Meta has no off switch (none is a 400); minimal asks for the
+        # shortest reasoning pass, which may use none, like Gemini's minimal.
+        if wire.meta_reasoning_effort == "minimal":
+            return "optional"
+        return "required"
     return "na"  # nothing sent: provider default / internal reasoners
 
 
@@ -243,13 +285,13 @@ def _thinking_evidence(usage: dict) -> "int | None":
     reasoning = usage.get("reasoning", 0) or 0
     if reasoning:
         return int(reasoning)
-    # Anthropic: thinking blocks; OpenAI: the informational reasoning_tokens
-    # subset of completion_tokens. Either key's presence means the provider
-    # reported the dimension, so zero IS the observation.
+    # Anthropic: thinking blocks; OpenAI/Together: the informational
+    # reasoning_tokens subset of completion_tokens. Either key's presence
+    # means the provider reported the dimension, so zero IS the observation.
     for key in ("thinking_blocks", "reasoning_tokens"):
         if key in usage:
             return int(usage.get(key) or 0)
-    # Together never reports a reasoning dimension at all.
+    # Usage recorded without a reasoning dimension at all.
     if usage.get("provider") == "together":
         return None
     return int(reasoning)
@@ -335,6 +377,13 @@ def run_smoke(
             row.detail = f"{type(e).__name__}: {e}"
         report.results.append(row)
 
+    if plan.cache_checks:
+        cache_head = resource_text("prompts/smoke/cache_head.md")
+    for check in plan.cache_checks:
+        report.results.append(
+            _run_cache_check(check, client_factory, cache_head, ping, max_tokens)
+        )
+
     for check in plan.batch_checks:
         wire = resolve_thinking(check.model, check.thinking)
         row = CheckResult(
@@ -389,6 +438,59 @@ def run_smoke(
         )
 
     return report
+
+
+def _run_cache_check(
+    check: CacheCheck, client_factory, cache_head: str, ping: str, max_tokens: int
+) -> CheckResult:
+    """Two streamed calls sharing a static head; the second must read it back.
+
+    Mirrors a tutor turn's request shape (cacheable head + short tail,
+    streamed). Passes only when call 2 reads at least the minimum cacheable
+    prefix from cache and writes nothing -- the signature of the explicit
+    breakpoint working. Implicit caching on these models would instead write
+    the whole prompt on both calls.
+    """
+    wire = resolve_thinking(check.model, check.thinking)
+    row = CheckResult(
+        label=check.label,
+        model=check.model,
+        provider=check.provider,
+        wire=wire.describe(),
+        status=PASS,
+    )
+    try:
+        client = client_factory(check.model)
+        usages = []
+        for _ in range(2):
+            resp = client.generate(
+                ping,
+                json_mode=False,
+                max_tokens=max_tokens,
+                thinking=check.thinking,
+                cacheable_prefix=cache_head,
+                stream=True,
+            )
+            usages.append(resp.usage or {})
+        first, second = usages
+        row.input_tokens = int(second.get("input_tokens", 0) or 0)
+        row.output_tokens = int(second.get("output_tokens", 0) or 0)
+        read = int(second.get("cache_read", 0) or 0)
+        written = int(second.get("cache_write", 0) or 0)
+        summary = (
+            f"call 1 wrote {int(first.get('cache_write', 0) or 0)}, "
+            f"read {int(first.get('cache_read', 0) or 0)}; "
+            f"call 2 read {read}, wrote {written}"
+        )
+        if read >= _MIN_CACHED_HEAD_TOKENS and written == 0:
+            row.detail = f"head read back ({summary})"
+        else:
+            row.status = FAIL
+            row.detail = f"head not read back from cache ({summary})"
+    except Exception as e:  # noqa: BLE001 -- isolate per check
+        row.status = FAIL
+        row.detail = f"{type(e).__name__}: {e}"
+    return row
 
 
 def format_smoke_report(report: SmokeReport) -> str:

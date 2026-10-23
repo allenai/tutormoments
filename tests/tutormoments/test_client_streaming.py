@@ -424,6 +424,39 @@ def test_together_stream_defers_ttft_past_inline_think(monkeypatch):
     assert "<think>" in resp.text, "reasoning stays in text; only timing skips it"
 
 
+def test_together_stream_reasoning_field_is_not_visible_text(monkeypatch):
+    """Hybrid reasoners (DeepSeek-V4-Pro-0813) stream their chain of thought in
+    a separate reasoning field with no content: those deltas are chunks, not
+    visible text, and never enter resp.text."""
+    monkeypatch.setenv("TOGETHER_API_KEY", "sk-test")
+
+    def reasoning_chunk(text):
+        delta = SimpleNamespace(content=None, reasoning=text)
+        return SimpleNamespace(choices=[SimpleNamespace(delta=delta)], usage=None)
+
+    chunks = [
+        reasoning_chunk("the student is stuck"),
+        reasoning_chunk(" on step 2"),
+        _oai_chunk("What did you try first?"),
+        _oai_chunk(usage=_oai_usage(cached=0)),
+    ]
+    # call_t0, t0, first reasoning delta (0.5); the second reads no clock
+    # (ttfc already set), so the answer delta reads 4.0.
+    ticks = [0.0, 0.0, 0.5, 4.0]
+    with (
+        patch("openai.OpenAI") as MockOpenAI,
+        patch("tutormoments.client.time.monotonic", side_effect=_clock_from(ticks)),
+    ):
+        MockOpenAI.return_value = _openai_client_with_chunks(chunks)
+        resp = ModelClient("deepseek-ai/DeepSeek-V4-Pro-0813").generate(
+            "Q", json_mode=False, stream=True
+        )
+
+    assert resp.timing["ttfc_seconds"] == pytest.approx(0.5)
+    assert resp.timing["ttft_seconds"] == pytest.approx(4.0)
+    assert resp.text == "What did you try first?"
+
+
 def test_together_stream_missing_usage_records_no_tps(monkeypatch):
     """include_usage support is inconsistent on Together -- degrade, don't guess."""
     monkeypatch.setenv("TOGETHER_API_KEY", "sk-test")

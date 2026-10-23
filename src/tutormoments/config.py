@@ -474,6 +474,8 @@ class RunConfig:
         max_turns: Maximum turns per conversation.
         replay_concurrency: Number of per-moment replays to run concurrently
             within a cell. Result-preserving (only overlaps network round-trips).
+        max_student_concurrency: Process-wide cap on in-flight hosted student
+            calls across every cell of a sweep (None = no cap). Timing only.
         student: Normalized StudentSpec.
         scorer: Normalized ScorerSpec.
         resolved_tutors: Dict[arm name -> ArmSpec] for roster arms; a
@@ -495,6 +497,7 @@ class RunConfig:
     scorer: ScorerSpec
     resolved_tutors: dict[str, ArmSpec | None]
     config_source: str
+    max_student_concurrency: int | None = None
 
 
 def build_run_config(
@@ -509,6 +512,7 @@ def build_run_config(
     trials: int | None = None,
     max_turns: int | None = None,
     replay_concurrency: int | None = None,
+    max_student_concurrency: int | None = None,
     config_path: str | os.PathLike | None = None,
 ) -> RunConfig:
     """Build a RunConfig from CLI arguments and config defaults.
@@ -527,13 +531,17 @@ def build_run_config(
         max_turns: Max turns per conversation. Default: read from config defaults.
         replay_concurrency: Concurrent per-moment replays within a cell.
             Default: read from config `execution.replay_concurrency`, then 4.
+        max_student_concurrency: Cap on in-flight student calls across all
+            cells. Default: config `execution.max_student_concurrency`, then
+            None (no cap).
         config_path: Optional explicit config path.
 
     Returns:
         RunConfig with all fields filled.
 
     Raises:
-        ValueError: If any tutor arm name is not in the roster.
+        ValueError: If any tutor arm name is not in the roster, or
+            max_student_concurrency is set but not a positive integer.
     """
     cfg = load_config(config_path)
     d = cfg["defaults"]
@@ -555,6 +563,19 @@ def build_run_config(
     if replay_concurrency is None:
         # Fall back to 4 if the execution block is absent (older configs).
         replay_concurrency = (cfg.get("execution") or {}).get("replay_concurrency", 4)
+    if max_student_concurrency is None:
+        max_student_concurrency = (cfg.get("execution") or {}).get(
+            "max_student_concurrency"
+        )
+    if max_student_concurrency is not None and (
+        isinstance(max_student_concurrency, bool)
+        or not isinstance(max_student_concurrency, int)
+        or max_student_concurrency < 1
+    ):
+        raise ValueError(
+            "max_student_concurrency must be a positive integer or null, got "
+            f"{max_student_concurrency!r}"
+        )
 
     # Resolve tutors (check registry first, then roster). All thinking
     # validation already happened at load_config time.
@@ -580,4 +601,5 @@ def build_run_config(
         scorer=scorer_spec(config_path),
         resolved_tutors=resolved_tutors,
         config_source=describe_config_source(config_path),
+        max_student_concurrency=max_student_concurrency,
     )

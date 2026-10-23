@@ -1,0 +1,55 @@
+{
+  "comment": "Moments shown in the site's moment explorer, hand-picked to span how many models handle them well (eval-aware prompt, all 17 site models) and to cover both situations. Each comes from a different transcript and has consistent ground truth at its span. Summaries were written for the site from each moment's context and name no one. scripts/refresh-data.py assembles everything else from the release and the runs.",
+  "moments": [
+    {
+      "id": "balanced_520:93dbbbb8-ff65-5c73-94cd-8a386a1ccb32_16c06104-4239-534f-9d9e-4100d7337e02_d21c3b8f-6333-5b8f-b632-7f6aed0ef517__hum_67_74",
+      "title": "x + 5 = 15",
+      "summary": "Early in the school year, the student works through a timed set of 15 multiplication, division and algebra problems, finishing on time and asking for help on one algebra item (the tutor reminds them that the opposite of subtraction is addition). The tutor then opens an algebra review: a variable is just a placeholder, and to solve for it you do the opposite operation. Asked how to find x in x + 5 = 15, the student pauses for 20 seconds and says \"I don't know.\""
+    },
+    {
+      "id": "balanced_520:434dbd9f-7fe8-5ea6-94ab-e3d68728ddd1_5c346a15-0e32-57f2-8081-96ff9d9563b8_d177d006-1314-58f2-9576-33b9e025d543__hum_235_238",
+      "title": "Reading a three-digit number",
+      "summary": "An early-elementary session with frequent connection drops. After recapping odd and even numbers with a game of hangman, the tutor builds up the place-value names for 599 (hundreds, tens, ones) one question at a time while the student's attention wanders. The tutor then writes a new number and asks whether the student can now name it the same way, on their own."
+    },
+    {
+      "id": "balanced_520:4f9c07d0-d5ee-5c85-b84c-dd5649dae741_ddf22426-058a-5a4b-8e60-3f7ae6d7945f_e719b588-b1e4-5cd4-ae53-efd57d78a602__hum_324_327",
+      "title": "\"I just guessed, like always\"",
+      "summary": "The session opens with division vocabulary and fact families, then drifts while the student talks about a toy spear made from a mop. On a word problem (5 bags with c candy bars each, 40 in total: which equation fits?), the student switches between answers without giving reasons as the tutor keeps asking why. The student lands on B, the correct equation, and the tutor asks whether the student knows why it is B."
+    },
+    {
+      "id": "balanced_520:5ed91b05-935e-5367-a370-4f8ae9dee79f_54cc8df7-d9eb-5741-99e6-6abfcf591bca_56fde3ca-55ae-51ce-a9ab-b35d4f793d15__hum_135_139",
+      "title": "Angles around a point",
+      "summary": "A geometry session on angles. Across several problems the student has picked correct answers by judging how big an angle looks, and each time the tutor has shown the equation instead (angles on a line sum to 180°, around a point to 360°). On the last problem the student guessed 64° before getting 54°, and the tutor said to do the math when the choices are close. After 104 seconds on a new problem, the student says: \"I think it will be D.\""
+    },
+    {
+      "id": "balanced_520:46a653eb-0895-5fc1-b990-2bd149aaaf39_39ac115b-2fe5-5787-9ca7-1e2174cf337e_d39b6568-2a41-5787-bc9b-9d9490406a1f__hum_133_139",
+      "title": "5 ÷ ⅙",
+      "summary": "A lesson on dividing whole numbers by unit fractions. The tutor reviews dividend, divisor and quotient, then works through two problems with bar models, \"how many fifths in one whole?\" and \"2 ÷ ⅓\", which the student answers correctly. The next problem gives no model, only the calculation ⅙ × ? = 5, and asks for 5 ÷ ⅙. The student answers \"Thirty\" at once."
+    },
+    {
+      "id": "balanced_520:fb5ba1d4-bc48-5f4e-8b37-69eb67671729_d206debb-e1f5-50db-bc3f-33c0ad14afb2_9a4efc06-de32-568f-b668-fcda67d8f994__hum_70_77",
+      "title": "Skip counting from 780",
+      "summary": "After a friendly check-in about the student's drawing and favorite anime, the tutor opens a lesson on skip counting in tens. The student answers the first question (what comes after 590?) quickly and correctly, and the tutor calls it super easy: you're just adding ten. The student has just read the second question aloud: counting in tens from 780, which of these numbers would you not say?"
+    },
+    {
+      "id": "balanced_520:ab026e75-8a2b-51e1-90ff-61c3819c30a4_6aaa8c0e-2d55-5aed-9a67-542f0cea7390_a54feca8-5736-586e-b154-4fab26e80208__hum_92_96",
+      "title": "Perimeter of a square sign",
+      "summary": "After a check-in about swimming lessons and pets, the student works through a run of area problems, mostly correctly and sometimes explaining the formula unprompted. The set moves on to perimeter, where the student misses two of four, once saying \"I'm not sure\" before picking the right letter. On a square traffic sign with 5-foot sides, the student answers \"B\" (20 feet) and says nothing more."
+    },
+    {
+      "id": "balanced_520:2a7d8ede-7bba-510b-a7f9-c73986d1256f_303a5298-1da1-500d-849a-c6d7eb2f5221_bdb8e2ee-0bdd-5717-bdb0-2e478fc21d22__hum_126_147",
+      "title": "Missing vertices of a rectangle",
+      "summary": "A lesson on finding the missing coordinates of rectangles and squares. The student starts out unsure (\"like two maybe?\" for an x-coordinate), and the tutor has been walking through each problem with small questions (which point lines up, which number comes first), plotting points together when needed. On a new rectangle with two missing vertices, the student has just found an x-coordinate, −3, by looking at the point on the left."
+    },
+    {
+      "id": "balanced_520:fce0bf42-dce2-568e-b271-3149f5a0dbe6_26cec584-a869-58bf-8cf5-51fbb49e323f_a2e0105d-553c-525b-8a15-4db2e668acd2__hum_133_139",
+      "title": "Twelve apples, even or odd?",
+      "summary": "An early-elementary session. After a fractions warm-up, the student races through sums and properties of numbers to 20, calling them too easy. Then comes 12 apples in 3 columns: which fact will not help show the number is even? The student has been jumping between options while the tutor rules them out one by one, and now tentatively offers \"there are three apples in each column.\""
+    },
+    {
+      "id": "balanced_520:2aba7a56-440c-5dcc-b7eb-95bca38eb2df_cb3a3184-ab32-5b22-a8d0-159264c97184_f9df4a74-e518-51f7-8c4f-0b182ce91085__hum_74_111",
+      "title": "What comes after 590?",
+      "summary": "After a chat about a new laptop and Roblox, the tutor reviews a skip-counting strategy and opens a lesson on counting in tens. The first question asks what number comes after 590. The tutor works through 590 + 10 on the whiteboard and rules out one option, but when asked for the right one, the student shows they think the question is about multiplying by ten."
+    }
+  ]
+}

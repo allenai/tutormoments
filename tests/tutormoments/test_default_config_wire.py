@@ -35,6 +35,10 @@ EXPECTED_ARM_WIRE = {
     "claude-opus-4-8": ("claude-opus-4-8", ADAPTIVE, "xhigh", None, None),
     "claude-sonnet-4-6": ("claude-sonnet-4-6", ADAPTIVE, "high", None, None),
     "claude-sonnet-5": ("claude-sonnet-5", ADAPTIVE, "xhigh", None, None),
+    "claude-opus-5-5": ("claude-opus-5-5", ADAPTIVE, "high", None, None),
+    "claude-fable-5-1": ("claude-fable-5-1", ADAPTIVE, "high", None, None),
+    "claude-sonnet-5-5": ("claude-sonnet-5-5", ADAPTIVE, "low", None, None),
+    "claude-haiku-5-5-none": ("claude-haiku-5-5", DISABLED, "low", None, None),
     "gemini-2.5-pro": (
         "gemini-2.5-pro",
         None,
@@ -49,26 +53,58 @@ EXPECTED_ARM_WIRE = {
         {"include_thoughts": True, "thinking_budget": -1},
         None,
     ),
-    "gpt-5.4-mini-2026-03-17": ("gpt-5.4-mini-2026-03-17", None, None, None, "high"),
-    "gpt-5.5-2026-04-23": ("gpt-5.5-2026-04-23", None, None, None, "high"),
-    "deepseek-v4-pro": (
-        "deepseek-ai/DeepSeek-V4-Pro",
+    "gemini-3.8-flash": (
+        "gemini-3.8-flash",
         None,
         None,
-        None,
+        {"include_thoughts": True, "thinking_level": "high"},
         None,
     ),
+    "gemini-3.6-flash": (
+        "gemini-3.6-flash",
+        None,
+        None,
+        {"include_thoughts": True, "thinking_level": "minimal"},
+        None,
+    ),
+    "gemini-4-argon": (
+        "gemini-4-argon",
+        None,
+        None,
+        {"include_thoughts": True, "thinking_level": "high"},
+        None,
+    ),
+    "gpt-5.4-mini-2026-03-17": ("gpt-5.4-mini-2026-03-17", None, None, None, "high"),
+    "gpt-5.5-2026-04-23": ("gpt-5.5-2026-04-23", None, None, None, "high"),
+    "gpt-5.5-2026-04-23-none": ("gpt-5.5-2026-04-23", None, None, None, "none"),
+    "gpt-6-astra": ("gpt-6-astra", None, None, None, "high"),
+    "gpt-6-sol-none": ("gpt-6-sol", None, None, None, "none"),
+    "gpt-6-luna-none": ("gpt-6-luna", None, None, None, "none"),
+    "deepseek-v4-pro-0813": (
+        "deepseek-ai/DeepSeek-V4-Pro-0813",
+        None,
+        None,
+        None,
+        None,
+        "max",
+    ),
+    "muse-wonder-1.0": ("muse-wonder-1.0", None, None, None, None, None, "high"),
 }
 
 
 def _assert_wire(model, level, expected):
-    exp_model, anth, effort, gem, oai = expected
+    # The Together and Meta efforts are optional trailing entries (None when
+    # omitted).
+    exp_model, anth, effort, gem, oai, *rest = expected
+    tog_effort, meta_effort = (rest + [None, None])[:2]
     assert model == exp_model
     wire = resolve_thinking(model, level)
     assert wire.anthropic_thinking == anth
     assert wire.anthropic_effort == effort
     assert wire.gemini_thinking_config == gem
     assert wire.openai_reasoning_effort == oai
+    assert wire.together_reasoning_effort == tog_effort
+    assert wire.meta_reasoning_effort == meta_effort
 
 
 def test_default_roster_covers_expected_arms():

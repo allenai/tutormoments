@@ -384,6 +384,39 @@ def test_classifier_resume_skips_completed_batches(tmp_path):
     assert second.calls == []
 
 
+@pytest.mark.parametrize(
+    "probe,expected_calls,announced",
+    [(2, 2, True), (3, 3, False), (10**9, 3, False)],
+)
+def test_first_run_probe_announced_only_when_it_stops_short(
+    tmp_path, caplog, probe, expected_calls, announced
+):
+    """The sanity-probe log line appears only when the probe actually stops
+    before the last batch; integrated runs (probe disabled) classify every
+    batch and must not claim they stopped early."""
+    facets = [_mk_facet(f"Statement {i}.", moment_id=f"m{i}") for i in range(3)]
+    client = _FakeClient()
+    with caplog.at_level("INFO", logger="tutormoments.taxonomy"):
+        tx.classify_pool(
+            facets,
+            tmp_path,
+            client=client,
+            model="fake-model",
+            thinking={},
+            batch_size=1,
+            first_run_probe=probe,
+        )
+    assert len(client.calls) == expected_calls
+    probe_msgs = [r.message for r in caplog.records if "sanity probe" in r.message]
+    if announced:
+        assert probe_msgs == [
+            "First run with no prior progress -> stopping after 2 of 3 "
+            "batches as a sanity probe. Re-run to continue."
+        ]
+    else:
+        assert probe_msgs == []
+
+
 def test_classifier_requires_taxonomy_config(tmp_path, monkeypatch):
     """A config without a taxonomy block raises; the classifier must never
     silently substitute its own LM settings (there is no module fallback)."""
@@ -523,6 +556,55 @@ def test_classify_run_writes_classified_and_counts(tmp_path):
     # A and E are both scaffolding-oriented categories
     assert summary["orientation"] == {"scaffolding": 2, "rigor": 0, "neutral": 0}
     assert summary["usage"]["total_tokens"] > 0
+
+
+def test_classify_run_summary_records_kl_over_unique_moments(tmp_path):
+    """The run's own KL lands in the summary; n counts unique moments, so a
+    second trial of the same moment does not double it."""
+    anns = [
+        _ann(
+            scenario_id="s1", action_decomposed=["The tutor asks a guiding question."]
+        ),
+        _ann(
+            scenario_id="s1", action_decomposed=["The tutor asks a guiding question."]
+        ),
+        _ann(scenario_id="r1", action_decomposed=["The tutor asks for a proof."]),
+    ]
+    moments = [
+        _moment(id="s1", dimension="scaffolding"),
+        _moment(id="s1", dimension="scaffolding"),
+        _moment(id="r1", dimension="rigor"),
+    ]
+    client = _FakeClient(
+        payloads=['{"assignments":[{"id":1,"category":"A"},{"id":2,"category":"G"}]}']
+    )
+    summary = tx.classify_run(
+        anns, moments, tmp_path / "taxonomy", model="m", mode="plain", client=client
+    )
+    kl = summary["kl"]
+    assert (kl["n_scaffolding"], kl["n_rigor"]) == (1, 1)
+    classified = tx.read_classified_csv(tmp_path / "taxonomy" / "classified.csv")
+    assert kl == tx.kl_situation(classified)
+    assert kl["s_r"] > 0 and kl["r_s"] > 0
+
+
+def test_taxonomy_cli_has_only_classify():
+    """`taxonomy headline` / `taxonomy run` were removed; classify remains."""
+    parser = tx._build_argparser()
+    for gone in ("headline", "run"):
+        with pytest.raises(SystemExit):
+            parser.parse_args([gone, "--output", "x"])
+    args = parser.parse_args(
+        ["classify", "--kind", "key_moments", "--input", "gt.jsonl", "--output", "o"]
+    )
+    assert args.cmd == "classify" and args.kind == "key_moments"
+    for name in (
+        "build_headline_tables",
+        "run_headline",
+        "run_all",
+        "macro_orientation",
+    ):
+        assert not hasattr(tx, name)
 
 
 def test_taxonomy_spec_reads_config():

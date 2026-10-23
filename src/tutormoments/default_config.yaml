@@ -12,6 +12,7 @@ providers:
   openai:    { env: OPENAI_API_KEY }
   gemini:    { env: GEMINI_API_KEY }
   together:  { env: TOGETHER_API_KEY }
+  meta:      { env: META_API_KEY }
 
 # Tutor roster: each key is an ARM -- a benchmark condition. `model` names the
 # provider model id, provider-native keys state the exact request parameters,
@@ -24,13 +25,45 @@ benchmark_models:
   claude-sonnet-4-6:       { model: claude-sonnet-4-6, thinking: { type: adaptive }, effort: high, condition: high }
   # Sonnet 5: first Sonnet model with an xhigh effort option.
   claude-sonnet-5:         { model: claude-sonnet-5, thinking: { type: adaptive }, effort: xhigh, condition: xhigh }
-  # Gemini and DeepSeek arms run model-paced thinking: Gemini sends
-  # thinking_budget -1; DeepSeek-V4-Pro reasons internally with no wire knob.
+  # Claude 5.x range. Thinking can't be disabled on any of the three
+  # ({type: disabled} is a 400), so effort is the only knob. Opus 5.5
+  # defaults to medium, so effort is always stated. Sonnet 5.5's effort
+  # levels are recalibrated from Sonnet 5; low is its lowest level.
+  # Haiku 5.5, unlike the three above, accepts {type: disabled}; this arm
+  # runs it with thinking off, keeping effort low (the default is medium).
+  claude-opus-5-5:         { model: claude-opus-5-5, thinking: { type: adaptive }, effort: high, condition: high }
+  claude-fable-5-1:        { model: claude-fable-5-1, thinking: { type: adaptive }, effort: high, condition: high }
+  claude-sonnet-5-5:       { model: claude-sonnet-5-5, thinking: { type: adaptive }, effort: low, condition: low }
+  claude-haiku-5-5-none:   { model: claude-haiku-5-5, thinking: { type: disabled }, effort: low, condition: none }
+  # Gemini 2.5 Pro / 3.5 Flash run model-paced thinking (thinking_budget -1).
   gemini-2.5-pro:          { model: gemini-2.5-pro, include_thoughts: true, thinking_budget: -1, condition: dynamic }
   gemini-3.5-flash:        { model: gemini-3.5-flash, include_thoughts: true, thinking_budget: -1, condition: dynamic }
+  # Later 3.x Flash arms use thinking_level (Google's replacement for
+  # thinking_budget). 3.8 Flash accepts low/medium/high (no minimal); 3.6
+  # Flash is the newest Flash that still accepts minimal. See docs/thinking.md.
+  gemini-3.8-flash:        { model: gemini-3.8-flash, include_thoughts: true, thinking_level: high, condition: high }
+  gemini-3.6-flash:        { model: gemini-3.6-flash, include_thoughts: true, thinking_level: minimal, condition: minimal }
+  # Gemini 4 Argon accepts low/medium/high (default medium); no off level.
+  gemini-4-argon:          { model: gemini-4-argon, include_thoughts: true, thinking_level: high, condition: high }
   gpt-5.4-mini-2026-03-17: { model: gpt-5.4-mini-2026-03-17, reasoning: high, condition: high }
   gpt-5.5-2026-04-23:      { model: gpt-5.5-2026-04-23, reasoning: high, condition: high }
-  deepseek-v4-pro:         { model: deepseek-ai/DeepSeek-V4-Pro, condition: dynamic }
+  # Same model with reasoning off (reasoning_effort=none); smoke asserts zero
+  # reasoning tokens for this condition.
+  gpt-5.5-2026-04-23-none: { model: gpt-5.5-2026-04-23, reasoning: none, condition: none }
+  # GPT-6 range: top-tier Astra at high; mid-tier Sol and cheapest/fastest
+  # Luna with reasoning off. Undated ids -- OpenAI publishes no dated snapshots for GPT-6 yet, so
+  # the alias may move; config.json records the run date.
+  gpt-6-astra:             { model: gpt-6-astra, reasoning: high, condition: high }
+  gpt-6-sol-none:          { model: gpt-6-sol, reasoning: none, condition: none }
+  gpt-6-luna-none:         { model: gpt-6-luna, reasoning: none, condition: none }
+  # DeepSeek-V4-Pro-0813 (thinking on by default) at Together's documented
+  # top effort tier. Replaces the DeepSeek-V4-Pro arm, which Together no
+  # longer serves serverless. See docs/thinking.md for observed behaviour.
+  deepseek-v4-pro-0813:    { model: deepseek-ai/DeepSeek-V4-Pro-0813, reasoning_effort: max, condition: max }
+  # Muse Wonder (Meta Model API). It always reasons: reasoning_effort none is
+  # a 400, and an omitted effort runs at a model-chosen level, so it is
+  # always stated. Levels run minimal..max.
+  muse-wonder-1.0:         { model: muse-wonder-1.0, reasoning_effort: high, condition: high }
 
 # Role blocks state provider-native thinking parameters the same way arms do.
 # "Off" is stated explicitly ({type: disabled}) rather than by omitting the
@@ -54,7 +87,10 @@ batch:    { timeout: 86400 }
 # across threads (result-preserving: same model/params/prompts, only network
 # round-trips overlap). Default 4 for painless replication; --concurrency
 # overrides. Lower it on smaller API tiers that hit rate limits.
-execution: { replay_concurrency: 4 }
+# max_student_concurrency caps in-flight student calls across every cell of a
+# sweep (they all share one student account); null = no cap.
+# --max-student-concurrency overrides. Timing only, like replay_concurrency.
+execution: { replay_concurrency: 4, max_student_concurrency: null }
 
 # v2 annotation-round classification (dev-only
 # `python -m tutormoments_build.v2.classify_excerpts`). Runs the

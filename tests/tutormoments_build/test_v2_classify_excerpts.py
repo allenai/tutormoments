@@ -398,22 +398,22 @@ def test_a_comparison_model_resolves_to_its_arm_on_the_tutor_roster():
 
 
 def test_an_arm_name_that_differs_from_its_model_id_resolves_either_way():
-    """deepseek-v4-pro is the arm; deepseek-ai/DeepSeek-V4-Pro is the model id
-    --model would naturally be given. Both have to reach the same arm."""
-    by_arm = C.phase_config(model="deepseek-v4-pro")
-    by_id = C.phase_config(model="deepseek-ai/DeepSeek-V4-Pro")
+    """deepseek-v4-pro-0813 is the arm; deepseek-ai/DeepSeek-V4-Pro-0813 is the
+    model id --model would naturally be given. Both have to reach the same arm."""
+    by_arm = C.phase_config(model="deepseek-v4-pro-0813")
+    by_id = C.phase_config(model="deepseek-ai/DeepSeek-V4-Pro-0813")
 
-    assert by_arm.thinking == by_id.thinking == {}
+    assert by_arm.thinking == by_id.thinking == {"reasoning_effort": "max"}
     assert by_arm.provider == "together"
 
 
 def test_an_override_does_not_inherit_the_baselines_parameters():
-    """Otherwise a model configured with no reasoning knobs would silently run
-    at the v2 block's adaptive/xhigh, and the record would name the wrong
-    setting -- or, across vendors, a knob the API rejects."""
-    cfg = C.phase_config(model="deepseek-ai/DeepSeek-V4-Pro")
+    """Otherwise another vendor's model would carry the v2 block's
+    adaptive/xhigh on top of its own knobs, and the record would name the wrong
+    setting -- or a knob the API rejects."""
+    cfg = C.phase_config(model="deepseek-ai/DeepSeek-V4-Pro-0813")
 
-    assert cfg.thinking == {}
+    assert cfg.thinking == {"reasoning_effort": "max"}
 
 
 def test_the_v2_model_needs_no_roster_entry():

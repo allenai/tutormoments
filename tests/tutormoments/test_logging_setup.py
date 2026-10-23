@@ -282,3 +282,46 @@ def test_per_run_log_file_registered_worker_thread_captured(tmp_path):
     assert "retry warning from worker" in content
     assert "[tutor-x/plain]" in content
     assert "record from unregistered thread" not in content
+
+
+def test_per_run_log_file_ignores_recycled_worker_thread_id(tmp_path):
+    """A registered worker that exits while the block stays open (a replay pool
+    ending before scoring) must not let a later thread with the same ident --
+    e.g. the next sweep cell's replay worker -- into this run's log."""
+    from tutormoments.logging_setup import bind_worker_logging
+
+    setup_logging()
+    log_file = tmp_path / "run.log"
+    log = logging.getLogger("tutormoments.client")
+
+    with per_run_log_file(str(log_file)) as handle:
+        dead_ident = []
+
+        def worker():
+            bind_worker_logging(handle, "tutor-x/plain")
+            dead_ident.append(threading.get_ident())
+
+        t = threading.Thread(target=worker)
+        t.start()
+        t.join()
+
+        def stranger():
+            # Ident reuse after a thread exits is up to the OS, so pin the
+            # dead worker's ident on the record to make the collision certain.
+            record = log.makeRecord(
+                log.name,
+                logging.WARNING,
+                __file__,
+                0,
+                "record from recycled thread id",
+                (),
+                None,
+            )
+            record.thread = dead_ident[0]
+            log.handle(record)
+
+        t = threading.Thread(target=stranger)
+        t.start()
+        t.join()
+
+    assert "record from recycled thread id" not in log_file.read_text(encoding="utf-8")

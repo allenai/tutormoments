@@ -42,16 +42,34 @@ def _with_roster(tmp_path, roster_yaml: str):
 def test_packaged_default_config_parses_and_has_expected_roster():
     cfgmod._reset_config_cache()
     cfg = cfgmod.load_config()
-    assert set(cfg["providers"]) == {"anthropic", "openai", "gemini", "together"}
+    assert set(cfg["providers"]) == {
+        "anthropic",
+        "openai",
+        "gemini",
+        "together",
+        "meta",
+    }
     assert set(cfg["benchmark_models"]) == {
         "claude-opus-4-8",
         "claude-sonnet-4-6",
         "claude-sonnet-5",
+        "claude-opus-5-5",
+        "claude-fable-5-1",
+        "claude-sonnet-5-5",
+        "claude-haiku-5-5-none",
         "gemini-2.5-pro",
         "gemini-3.5-flash",
+        "gemini-3.8-flash",
+        "gemini-3.6-flash",
+        "gemini-4-argon",
         "gpt-5.4-mini-2026-03-17",
         "gpt-5.5-2026-04-23",
-        "deepseek-v4-pro",
+        "gpt-5.5-2026-04-23-none",
+        "gpt-6-astra",
+        "gpt-6-sol-none",
+        "gpt-6-luna-none",
+        "deepseek-v4-pro-0813",
+        "muse-wonder-1.0",
     }
     assert cfg["benchmark_models"]["claude-opus-4-8"] == {
         "model": "claude-opus-4-8",
@@ -64,9 +82,15 @@ def test_packaged_default_config_parses_and_has_expected_roster():
         "reasoning": "high",
         "condition": "high",
     }
-    assert cfg["benchmark_models"]["deepseek-v4-pro"] == {
-        "model": "deepseek-ai/DeepSeek-V4-Pro",
-        "condition": "dynamic",
+    assert cfg["benchmark_models"]["gpt-5.5-2026-04-23-none"] == {
+        "model": "gpt-5.5-2026-04-23",
+        "reasoning": "none",
+        "condition": "none",
+    }
+    assert cfg["benchmark_models"]["deepseek-v4-pro-0813"] == {
+        "model": "deepseek-ai/DeepSeek-V4-Pro-0813",
+        "reasoning_effort": "max",
+        "condition": "max",
     }
     assert cfg["student"] == {
         "model": "claude-opus-4-6",
@@ -129,11 +153,19 @@ def test_resolve_arm_known():
 
 
 def test_resolve_arm_together():
-    arm = cfgmod.resolve_arm("deepseek-v4-pro")
+    arm = cfgmod.resolve_arm("deepseek-v4-pro-0813")
     assert arm.provider == "together"
-    assert arm.model == "deepseek-ai/DeepSeek-V4-Pro"
-    assert arm.thinking == {}
-    assert arm.condition == "dynamic"
+    assert arm.model == "deepseek-ai/DeepSeek-V4-Pro-0813"
+    assert arm.thinking == {"reasoning_effort": "max"}
+    assert arm.condition == "max"
+
+
+def test_resolve_arm_meta():
+    arm = cfgmod.resolve_arm("muse-wonder-1.0")
+    assert arm.provider == "meta"
+    assert arm.model == "muse-wonder-1.0"
+    assert arm.thinking == {"reasoning_effort": "high"}
+    assert arm.condition == "high"
 
 
 def test_resolve_arm_gemini():
@@ -187,6 +219,23 @@ def test_build_run_config_overrides():
     assert arm.provider == "openai"
     assert arm.thinking == {"reasoning": "high"}
     assert arm.condition == "high"
+
+
+def test_build_run_config_max_student_concurrency_defaults_to_no_cap():
+    cfgmod._reset_config_cache()
+    rc = cfgmod.build_run_config(tutors=["claude-opus-4-8"])
+    assert rc.max_student_concurrency is None
+
+
+def test_build_run_config_max_student_concurrency_override():
+    rc = cfgmod.build_run_config(tutors=["claude-opus-4-8"], max_student_concurrency=12)
+    assert rc.max_student_concurrency == 12
+
+
+@pytest.mark.parametrize("bad", [0, -1, 2.5, "8", True])
+def test_build_run_config_rejects_bad_max_student_concurrency(bad):
+    with pytest.raises(ValueError, match="max_student_concurrency"):
+        cfgmod.build_run_config(tutors=["claude-opus-4-8"], max_student_concurrency=bad)
 
 
 def test_register_and_lookup_tutor():
