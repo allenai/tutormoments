@@ -17,7 +17,7 @@ cd data/ground_truth
 aws s3 cp s3://ai-tutor-bench-deidentified/synthetic/ground_truth_v2/*.jsonl ./ 
 ```
 
-Excerpts exist because they format what's shown to LMs (the tutor and action classifiers): the entire transcript up to the moment to the moment's end.
+Excerpts exist because they format what's shown to LMs (the tutor and action classifiers): the entire transcript up to the moment to the moment's end. Once created, these are saved in `data/excerpts/`. 
 
 ```
 python -m tutormoments_build.v2.excerpts

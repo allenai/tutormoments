@@ -164,11 +164,8 @@ def agreed_records(
     subset, so it is counted and dropped.
 
     For over-scaffolding the flag is agreement on the *declared* amount, the
-    only over-scaffolding question annotators answer. That is the right flag
-    here: the moments whose gold over-scaffolding is inferred from the rule
-    rather than declared are exactly the ones the classifier is never asked
-    about (both gate on scaffolding_appropriate), so none of them reach these
-    pairs to be mislabelled agreed.
+    only over-scaffolding question annotators answer, and the only thing the
+    gold ``over_scaffolding_present`` is built from.
     """
     kept, unknown = [], 0
     for record in records:

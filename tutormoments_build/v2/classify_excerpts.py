@@ -14,8 +14,8 @@ Together they predict ``scaffolding_present``, ``rigor_present``, ``over_scaffol
 in a manner that allows for comparison w/ gold labels.
 
 **The over-scaffolding prompt is gated on the gold labels**.
-It is sent only where the annotators marked
-``scaffolding_appropriate`` *and* ``scaffolding_present``.
+It is sent only where the gold marks ``scaffolding_present``, and its answer is
+scored against ``over_scaffolding_present``.
 
 Both prompts are run in one batch, and both read the same excerpt: the whole
 transcript from its first row through the moment's last 
@@ -427,29 +427,13 @@ def excerpt_at(record: dict, width: str = EXCERPT_WIDTH) -> str:
 def wants_over_scaffolding(record: dict) -> bool:
     """Whether the over-scaffolding prompt applies to this moment.
 
-    Gold-gated on both halves of the premise -- see the module docstring. The
-    prompt asks whether a tutor who *should* have scaffolded scaffolded too
-    much, so it is asked only where the annotators marked both
-    ``scaffolding_appropriate`` and ``scaffolding_present``.
+    Gold-gated -- see the module docstring. The prompt asks whether the tutor
+    scaffolded too much, which presumes they scaffolded, so it is asked only
+    where the gold marks ``scaffolding_present``. The gold never marks
+    over-scaffolding without it, so the gate drops no positive.
     """
     labels = record.get("labels") or {}
-    return bool(labels.get("scaffolding_appropriate")) and bool(
-        labels.get("scaffolding_present")
-    )
-
-
-def skip_reason(record: dict) -> str:
-    """Which half of the over-scaffolding premise this moment fails.
-
-    Reported separately because the two are different situations, not one
-    exclusion: "no scaffolding" is a moment the prompt has nothing to weigh in,
-    while "not appropriate" is one the ground truth already labels
-    over-scaffolding by rule.
-    """
-    labels = record.get("labels") or {}
-    if not labels.get("scaffolding_present"):
-        return "no_scaffolding"
-    return "not_appropriate"
+    return bool(labels.get("scaffolding_present"))
 
 
 def has_post_cut_content(record: dict) -> bool:
@@ -461,9 +445,8 @@ def has_post_cut_content(record: dict) -> bool:
     Tutor writes 3x7 on the board" is a pedagogical move, so a moment whose
     post-cut span is all enrichment is still classified.
 
-    This has excluded nothing so far -- every annotated moment has had at least
-    one post-cut row. It is a guard for later rounds, where a redrawn boundary
-    could put the cut on a moment's last row. The run report counts what it
+    It does exclude moments: an annotator can draw the cut on the moment's last
+    turn, often in a moment only one turn long. The run report counts what it
     actually excludes.
 
     Excerpt files built before ``post_cut_rows`` existed have no field to read;
@@ -513,7 +496,6 @@ def build_entries(
             counts["over_scaffolding"] += 1
         else:
             counts["over_scaffolding_not_asked"] += 1
-            counts[f"over_scaffolding_skip_{skip_reason(record)}"] += 1
 
     if counts["post_cut_field_missing"]:
         logger.warning(
@@ -852,19 +834,7 @@ def write_split(out_dir: str, stem: str, records: list[dict]) -> str:
 
 
 # Why a moment fell outside the over-scaffolding gate, in report wording.
-_SKIP_LABELS = {
-    "no_scaffolding": "gold says no scaffolding here",
-    "not_appropriate": "scaffolding not called for (gold labels it over-scaffolding by rule)",
-}
-
-
-def _skip_breakdown(counts: Counter) -> list[str]:
-    """Per-reason lines for the moments the over-scaffolding gate excluded."""
-    return [
-        f"      {counts[f'over_scaffolding_skip_{reason}']} {label}"
-        for reason, label in _SKIP_LABELS.items()
-        if counts[f"over_scaffolding_skip_{reason}"]
-    ]
+NOT_ASKED_LABEL = "gold says no scaffolding here"
 
 
 def _yes_no_counts(records: list[dict], pass_name: str, field: str) -> str:
@@ -938,9 +908,8 @@ def report(
             lines.append(f"    {name:<28}{counts[name]:>5}")
         lines.append(
             f"    {'(over-scaffolding not asked)':<28}"
-            f"{counts['over_scaffolding_not_asked']:>5}"
+            f"{counts['over_scaffolding_not_asked']:>5}  {NOT_ASKED_LABEL}"
         )
-        lines += _skip_breakdown(counts)
         lines.append("")
         return "\n".join(lines)
 
@@ -972,9 +941,9 @@ def report(
     asked = counts["over_scaffolding"]
     not_asked = counts["over_scaffolding_not_asked"]
     lines.append(
-        f"  over-scaffolding asked on {asked} moment(s); {not_asked} not asked"
+        f"  over-scaffolding asked on {asked} moment(s); {not_asked} not asked "
+        f"({NOT_ASKED_LABEL})"
     )
-    lines += _skip_breakdown(counts)
 
     unparsed = counts["action_direction_unparsed"] + counts["over_scaffolding_unparsed"]
     if unparsed:
@@ -1109,7 +1078,7 @@ def _print_prompts(
     else:
         print(
             f"\n\n===== {over_path} =====\n\n"
-            f"not asked: {_SKIP_LABELS[skip_reason(record)]}"
+            f"not asked: {NOT_ASKED_LABEL}"
         )
     return 0
 

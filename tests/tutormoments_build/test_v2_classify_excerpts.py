@@ -11,7 +11,7 @@ from tutormoments_build.v2 import classify_excerpts as C
 
 
 def _excerpt(
-    moment_id, *, scaffolding_present, scaffolding_appropriate=True, split="iteration"
+    moment_id, *, scaffolding_present, over_scaffolding_present=False, split="iteration"
 ):
     return {
         "moment_id": moment_id,
@@ -43,20 +43,16 @@ def _excerpt(
             },
         },
         "labels": {
-            "scaffolding_appropriate": scaffolding_appropriate,
-            "rigor_appropriate": False,
             "scaffolding_present": scaffolding_present,
             "rigor_present": False,
-            "over_scaffolding_present": False,
+            "over_scaffolding_present": over_scaffolding_present,
         },
     }
 
 
 SCAFFOLDED = _excerpt("aaa", scaffolding_present=True)
 UNSCAFFOLDED = _excerpt("bbb", scaffolding_present=False)
-# Scaffolding delivered where none was called for: the ground truth labels this
-# over-scaffolding by rule, so the prompt is not asked about it either.
-UNCALLED_FOR = _excerpt("ccc", scaffolding_present=True, scaffolding_appropriate=False)
+OVERSCAFFOLDED = _excerpt("ccc", scaffolding_present=True, over_scaffolding_present=True)
 
 
 # ===========================================================================
@@ -86,31 +82,32 @@ def test_over_scaffolding_prompt_carries_the_excerpt():
 # ===========================================================================
 
 
-def test_over_scaffolding_needs_scaffolding_both_present_and_appropriate():
+def test_over_scaffolding_is_asked_wherever_scaffolding_is_present():
+    """Gold over-scaffolding true or false alike: the gate reads the premise,
+    never the answer it is scored against."""
     assert C.wants_over_scaffolding(SCAFFOLDED) is True
+    assert C.wants_over_scaffolding(OVERSCAFFOLDED) is True
     assert C.wants_over_scaffolding(UNSCAFFOLDED) is False
-    assert C.wants_over_scaffolding(UNCALLED_FOR) is False
 
 
 def test_missing_labels_do_not_trigger_the_over_scaffolding_pass():
     assert C.wants_over_scaffolding({"moment_id": "x"}) is False
 
 
-def test_skip_reason_separates_the_two_halves_of_the_premise():
-    assert C.skip_reason(UNSCAFFOLDED) == "no_scaffolding"
-    assert C.skip_reason(UNCALLED_FOR) == "not_appropriate"
-
-
 def test_build_entries_asks_action_of_all_and_over_scaffolding_of_gated_only():
-    entries, counts = C.build_entries([SCAFFOLDED, UNSCAFFOLDED, UNCALLED_FOR], PROMPTS)
+    entries, counts = C.build_entries([SCAFFOLDED, UNSCAFFOLDED, OVERSCAFFOLDED], PROMPTS)
     keys = {entry["key"] for entry in entries}
 
-    assert keys == {"action__aaa", "action__bbb", "action__ccc", "overscaffold__aaa"}
+    assert keys == {
+        "action__aaa",
+        "action__bbb",
+        "action__ccc",
+        "overscaffold__aaa",
+        "overscaffold__ccc",
+    }
     assert counts["action_direction"] == 3
-    assert counts["over_scaffolding"] == 1
-    assert counts["over_scaffolding_not_asked"] == 2
-    assert counts["over_scaffolding_skip_no_scaffolding"] == 1
-    assert counts["over_scaffolding_skip_not_appropriate"] == 1
+    assert counts["over_scaffolding"] == 2
+    assert counts["over_scaffolding_not_asked"] == 1
 
 
 def test_entry_keys_split_back_on_the_first_separator():
@@ -274,15 +271,6 @@ def test_ungated_moment_gets_null_over_scaffolding_not_false():
     assert record["over_scaffolding"] is None
     assert record["over_scaffolding_asked"] is False
     assert record["usage"]["total_tokens"] == 10
-
-
-def test_scaffolding_where_none_was_called_for_is_not_asked_either():
-    """The ground truth labels it over-scaffolding by rule, so the model is not
-    scored on an answer that was fixed before it saw the text."""
-    record = C.build_record(UNCALLED_FOR, RAW, CFG, PROMPTS)
-
-    assert record["over_scaffolding"] is None
-    assert record["over_scaffolding_asked"] is False
 
 
 def test_build_record_keeps_the_raw_response():
@@ -980,17 +968,15 @@ def test_report_names_the_skipped_moments(monkeypatch, capsys):
     assert "1 moment(s) not classified" in C.report(out, counts, dry_run=False)
 
 
-def test_report_breaks_the_over_scaffolding_skips_down_by_reason(monkeypatch, capsys):
+def test_report_says_why_over_scaffolding_was_not_asked(monkeypatch, capsys):
     monkeypatch.setattr(C, "run_entries", lambda entries, cfg, batch_id=None: RAW)
 
     out, counts = C.classify(
-        {"iteration": [SCAFFOLDED, UNSCAFFOLDED, UNCALLED_FOR]}, CFG, PROMPTS
+        {"iteration": [SCAFFOLDED, UNSCAFFOLDED, OVERSCAFFOLDED]}, CFG, PROMPTS
     )
     text = C.report(out, counts, dry_run=False)
 
-    assert "2 not asked" in text
-    assert "1 gold says no scaffolding here" in text
-    assert "1 scaffolding not called for" in text
+    assert "asked on 2 moment(s); 1 not asked (gold says no scaffolding here)" in text
 
 
 def test_missing_field_warns_with_the_rebuild_command(caplog):

@@ -389,18 +389,145 @@ class TestInsideMomentReport:
 
 
 # ===========================================================================
-# Turn-span loss detection
+# Turn -> row resolution
 # ===========================================================================
 
 
-class TestTurnSpanDisagrees:
-    def test_flags_a_span_the_turn_numbers_do_not_cover(self):
-        moment = {"start_turn": 3, "end_turn": 3, "start_index": 3, "end_index": 4}
-        assert E._turn_span_disagrees(moment, SAMPLE) is True
+def _turn_rows(rows):
+    spans = {}
+    for row in rows:
+        if row["turn_number"] is not None:
+            first = spans.get(row["turn_number"], (row["turn_index"],))[0]
+            spans[row["turn_number"]] = (first, row["turn_index"])
+    return spans
 
-    def test_quiet_when_the_turn_span_covers_the_rows(self):
-        moment = {"start_turn": 1, "end_turn": 5, "start_index": 0, "end_index": 7}
-        assert E._turn_span_disagrees(moment, SAMPLE) is False
+
+class TestResolveBoundaries:
+    def test_turns_resolve_to_rows_past_the_enrichments(self):
+        """Turn 4 is row 5 once the two enrichments before it are counted."""
+        moment = {"start_turn": 3, "cut_turn": 4, "end_turn": 5}
+        assert E.resolve_boundaries(moment, _turn_rows(SAMPLE)) == {
+            "start_index": 2,
+            "cut_index": 5,
+            "end_index": 7,
+        }
+
+    def test_an_edge_on_no_row_raises(self):
+        moment = {"start_turn": 9, "cut_turn": 9, "end_turn": 9}
+        with pytest.raises(IndexError, match="start_index"):
+            E.resolve_boundaries(moment, _turn_rows(SAMPLE))
+
+
+# ===========================================================================
+# Building across providers
+# ===========================================================================
+
+
+def _write_jsonl(path, records):
+    path.write_text("".join(json.dumps(r) + "\n" for r in records))
+
+
+def _turn(number, role, text):
+    return {"turn_number": number, "role": role, "text": text, "start_seconds": number}
+
+
+class TestBuildAcrossProviders:
+    """Provider A's export lists enrichments beside its turns; provider C's has none."""
+
+    @pytest.fixture
+    def sources(self, tmp_path):
+        turns = [
+            _turn(1, "tutor", "[TUTOR] What is half of six?"),
+            _turn(2, "student", "[STUDENT] Three?"),
+            _turn(3, "tutor", "[TUTOR] How did you get that?"),
+        ]
+        a = tmp_path / "tutoring_provider_a.jsonl"
+        c = tmp_path / "tutoring_provider_c.jsonl"
+        _write_jsonl(
+            a,
+            [
+                {
+                    "transcript_id": "ta",
+                    "turns": turns,
+                    "enrichments": [
+                        {
+                            "enrichment_number": 1,
+                            "before_turn": 3,
+                            "type": "screen_update",
+                            "content": "The option turns green.",
+                            "start_seconds": 2,
+                        }
+                    ],
+                }
+            ],
+        )
+        _write_jsonl(c, [{"transcript_id": "tc", "turns": turns}])
+
+        gt = tmp_path / "gt"
+        gt.mkdir()
+        moment = {
+            "split": "iteration",
+            "start_turn": 2,
+            "cut_turn": 2,
+            "end_turn": 3,
+            "labels": {},
+        }
+        _write_jsonl(
+            gt / "iteration.jsonl",
+            [
+                moment | {"moment_id": "ma", "source": "tutoring_provider_a", "transcript_id": "ta"},
+                moment | {"moment_id": "mc", "source": "tutoring_provider_c", "transcript_id": "tc"},
+                # Provider C's transcript, but filed under A: must not be found.
+                moment | {"moment_id": "mx", "source": "tutoring_provider_a", "transcript_id": "tc"},
+                moment | {"moment_id": "mz", "source": "tutoring_provider_z", "transcript_id": "tz"},
+            ],
+        )
+        return str(gt), [str(a), str(c)]
+
+    def test_each_moment_is_read_from_its_own_providers_file(self, sources):
+        out, dropped = E.build(*sources, context_widths=(E.FULL,))
+        by_id = {r["moment_id"]: r for r in out["iteration"]}
+
+        assert sorted(by_id) == ["ma", "mc"]
+        assert by_id["ma"]["source"] == "tutoring_provider_a"
+        assert by_id["mc"]["source"] == "tutoring_provider_c"
+        assert dropped == {
+            "transcript_not_in_export": 1,
+            "no_transcripts_for_source": 1,
+        }
+
+    def test_enrichments_render_only_where_the_provider_has_them(self, sources):
+        out, _ = E.build(*sources, context_widths=(E.FULL,))
+        by_id = {r["moment_id"]: r for r in out["iteration"]}
+        a, c = by_id["ma"], by_id["mc"]
+
+        assert a["excerpts"]["full"]["excerpt"].splitlines() == [
+            "Turn 1. TUTOR: What is half of six?",
+            "Turn 2. STUDENT: Three?",
+            ">>> CUT POINT <<<",
+            "[SCREEN UPDATE] The option turns green.",
+            "Turn 3. TUTOR: How did you get that?",
+        ]
+        assert (a["cut_index"], a["end_index"]) == (1, 3)
+        assert a["moment_enrichment_rows"] == 1
+
+        assert "SCREEN" not in c["excerpts"]["full"]["excerpt"]
+        assert (c["cut_index"], c["end_index"]) == (1, 2)
+        assert c["moment_enrichment_rows"] == 0
+
+    def test_report_breaks_each_split_down_by_provider(self, sources):
+        out, dropped = E.build(*sources, context_widths=(E.FULL,))
+        text = E.report(out, dropped, dry_run=True)
+
+        assert any(
+            line.split()[:3] == ["iteration", "tutoring_provider_c", "1"]
+            for line in text.splitlines()
+        )
+
+    def test_two_files_for_one_provider_is_an_error(self, sources):
+        gt, (a, _) = sources
+        with pytest.raises(ValueError, match="tutoring_provider_a"):
+            E.build(gt, [a, a])
 
 
 # ===========================================================================
@@ -444,6 +571,13 @@ class TestContextWidthArg:
     def test_full_parses_to_the_sentinel(self):
         args = E.build_parser().parse_args(["--context-turns", "full", "20"])
         assert args.context_turns == [E.FULL, 20]
+
+    def test_transcripts_default_to_both_providers(self):
+        args = E.build_parser().parse_args([])
+        assert [E.source_of_transcripts(p) for p in args.transcripts] == [
+            "tutoring_provider_a",
+            "tutoring_provider_c",
+        ]
 
     def test_a_non_width_is_rejected(self):
         import argparse

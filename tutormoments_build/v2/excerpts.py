@@ -1,12 +1,22 @@
 """Render transcript excerpts for the v2 ground-truth moments.
 
-This script combines ``data/ground_truth/{iteration,test}.jsonl`` with transcripts in
-``data/v2_annotations/source/*_v2_transcripts.jsonl``.
+This script combines ``data/ground_truth/{iteration,test}.jsonl`` with one
+transcripts file per provider, ``data/v2_annotations/source/<provider>.jsonl``.
+Each moment is read from the file named after its ``source``.
 The output is used to format transcript excerpts for action classification.
 
-**Excerpts are cut on ``*_index``, not ``*_turn``.**
-- ``start_turn``/``end_turn`` count dialogue only
-- ``start_index``/``end_index`` are positions in the rendered row, including enrichments.
+Providers differ in what their transcripts carry: tutoring_provider_a's list
+enrichments (screen activity, pauses) beside the dialogue, and
+tutoring_provider_c's have none. ``TranscriptIndex`` interleaves whatever is
+there into one row list, so a provider C excerpt is dialogue alone.
+
+**Excerpts are cut on ``*_index``, resolved from ``*_turn``.**
+- ``start_turn``/``cut_turn``/``end_turn`` count dialogue only; they are what the
+  ground truth records.
+- ``start_index``/``cut_index``/``end_index`` are positions in the rendered row
+  list, including enrichments. They are resolved here with ``locate_span``, the
+  same placement the annotation viewer draws: the start opens on the first row
+  of its turn, the cut and the end close on the last row of theirs.
 
 Each moment is rendered at every width in ``--context-turns``. 
 ``full`` is no window at all -- the transcript from its first row.
@@ -28,13 +38,19 @@ import sys
 from collections import Counter
 
 from tutormoments.logging_setup import logging_args_parent, setup_logging
-from tutormoments_build.annotation_viewer.transcripts import TranscriptIndex
+from tutormoments_build.annotation_viewer.transcripts import (
+    TranscriptIndex,
+    locate_span,
+)
 
 logger = logging.getLogger("tutormoments_build.v2.excerpts")
 
 DEFAULT_GROUND_TRUTH_DIR = "data/ground_truth"
+# One file per provider, named ``<provider>.jsonl`` after the ``source`` its
+# moments carry in the ground truth.
 DEFAULT_TRANSCRIPTS = (
-    "data/v2_annotations/source/tutoring_provider_a_v2_transcripts.jsonl"
+    "data/v2_annotations/source/tutoring_provider_a.jsonl",
+    "data/v2_annotations/source/tutoring_provider_c.jsonl",
 )
 DEFAULT_OUT_DIR = "data/excerpts"
 
@@ -247,6 +263,32 @@ def render_excerpt(
 # ===========================================================================
 
 
+def source_of_transcripts(path: str) -> str:
+    """``.../tutoring_provider_a.jsonl`` -> ``tutoring_provider_a``."""
+    return os.path.splitext(os.path.basename(path))[0]
+
+
+def resolve_boundaries(moment: dict, turn_rows: dict) -> dict:
+    """The moment's ``*_turn`` values as ``*_index`` row positions.
+
+    ``turn_rows`` is ``TranscriptIndex.turn_rows``. Raises ``IndexError`` when an
+    edge resolves to no row -- the transcript has no dialogue on that side of it.
+    """
+    located = locate_span(turn_rows, moment)
+    resolved = {
+        "start_index": located["start_row"],
+        "cut_index": located["cut_row"],
+        "end_index": located["end_row"],
+    }
+    missing = [field for field, row in resolved.items() if row is None]
+    if missing:
+        raise IndexError(
+            f"turns {moment['start_turn']}/{moment['cut_turn']}/{moment['end_turn']} "
+            f"resolve to no row for {', '.join(missing)}"
+        )
+    return resolved
+
+
 def build_record(
     moment: dict,
     rows: list[dict],
@@ -302,6 +344,7 @@ def build_record(
 
     return {
         "moment_id": moment["moment_id"],
+        "source": moment.get("source"),
         "transcript_id": moment["transcript_id"],
         "conversation_id": conversation_id,
         "split": moment["split"],
@@ -321,72 +364,70 @@ def build_record(
     }
 
 
-def _turn_span_disagrees(moment: dict, rows: list[dict]) -> bool:
-    """Whether cutting this moment on turn numbers would lose annotated rows.
-
-    True when the dialogue-turn span does not reach as far as the index span --
-    the all-screen-activity moments the module docstring describes. Reported so
-    the count stays visible rather than being silently absorbed.
-    """
-    spans: dict[int, list[int]] = {}
-    for row in rows:
-        number = row["turn_number"]
-        if number is None:
-            continue
-        spans.setdefault(number, [row["turn_index"], row["turn_index"]])
-        spans[number][1] = row["turn_index"]
-    start, end = moment["start_turn"], moment["end_turn"]
-    if start not in spans or end not in spans:
-        return True
-    return (
-        spans[start][0] > moment["start_index"] or spans[end][1] < moment["end_index"]
-    )
-
-
 def build(
     ground_truth_dir: str,
-    transcripts_path: str,
+    transcripts_paths: "tuple[str, ...] | list[str]",
     *,
     context_widths: "tuple[int | None, ...]" = DEFAULT_CONTEXT_WIDTHS,
     max_context_rows: int | None = None,
 ) -> tuple[dict[str, list[dict]], Counter]:
-    """Return ({output stem: [excerpt record, ...]}, per-reason drop counts)."""
+    """Return ({output stem: [excerpt record, ...]}, per-reason drop counts).
+
+    ``transcripts_paths`` holds one file per provider; a moment is looked up only
+    in the file named after its ``source``.
+    """
     ground_truth = load_ground_truth(ground_truth_dir)
-    wanted = {
-        moment["transcript_id"]
-        for records in ground_truth.values()
-        for moment in records
-    }
-    index = TranscriptIndex(transcripts_path, wanted)
-    logger.info(
-        "%d of %d transcript(s) found in %s (%d in the file)",
-        len(index),
-        len(wanted),
-        transcripts_path,
-        index.total,
-    )
+    moments = [moment for records in ground_truth.values() for moment in records]
+
+    indexes: dict[str, TranscriptIndex] = {}
+    for path in transcripts_paths:
+        source = source_of_transcripts(path)
+        if source in indexes:
+            raise ValueError(f"two transcripts files for provider {source!r}")
+        wanted = {m["transcript_id"] for m in moments if m.get("source") == source}
+        index = indexes[source] = TranscriptIndex(path, wanted)
+        logger.info(
+            "%s: %d of %d transcript(s) found in %s (%d in the file)",
+            source,
+            len(index),
+            len(wanted),
+            path,
+            index.total,
+        )
 
     out: dict[str, list[dict]] = {stem: [] for stem in ground_truth}
     dropped: Counter = Counter()
-    turn_span_lossy = 0
 
     for stem, records in ground_truth.items():
         for moment in records:
+            source = moment.get("source")
             transcript_id = moment["transcript_id"]
+            index = indexes.get(source)
+            if index is None:
+                dropped["no_transcripts_for_source"] += 1
+                logger.warning(
+                    "no transcripts file given for source %r; skipping moment %s",
+                    source,
+                    moment["moment_id"],
+                )
+                continue
             if transcript_id not in index:
                 dropped["transcript_not_in_export"] += 1
                 logger.warning(
                     "transcript %s is not in %s; skipping moment %s",
                     transcript_id,
-                    transcripts_path,
+                    index.path,
                     moment["moment_id"],
                 )
                 continue
 
             rows = index.rows(transcript_id)
             try:
+                resolved = moment | resolve_boundaries(
+                    moment, index.turn_rows(transcript_id)
+                )
                 record = build_record(
-                    moment,
+                    resolved,
                     rows,
                     index.conversation_id(transcript_id) or transcript_id,
                     context_widths=context_widths,
@@ -396,17 +437,8 @@ def build(
                 dropped["boundaries_out_of_range"] += 1
                 logger.warning("moment %s: %s", moment["moment_id"], error)
                 continue
-
-            if _turn_span_disagrees(moment, rows):
-                turn_span_lossy += 1
             out[stem].append(record)
 
-    if turn_span_lossy:
-        logger.info(
-            "%d moment(s) reach rows their dialogue-turn span does not cover; "
-            "cut on *_index, as this module does, they are intact",
-            turn_span_lossy,
-        )
     return out, dropped
 
 
@@ -459,27 +491,33 @@ def report(out: dict[str, list[dict]], dropped: Counter, dry_run: bool) -> str:
 
     lead_up = "".join(f"{f'lead-up @{w}':>15}" for w in widths)
     header = (
-        f"  {'split':<12}{'moments':>9}{lead_up}{'moment rows':>14}"
+        f"  {'split':<12}{'source':<24}{'moments':>9}{lead_up}{'moment rows':>14}"
         f"{'enrichment rows':>18}{'with enrichments':>19}"
     )
     lines += [header, f"  {'-' * (len(header) - 2)}"]
 
     for stem, records in out.items():
         if not records:
-            lines.append(f"  {stem:<12}{0:>9}")
+            lines.append(f"  {stem:<12}{'':<24}{0:>9}")
             continue
-        per_width = "".join(
-            f"{sum(r['excerpts'][w]['context_rows'] for r in records) / len(records):>15.1f}"
-            for w in widths
-        )
-        moment = sum(r["moment_rows"] for r in records) / len(records)
-        enrich = sum(r["moment_enrichment_rows"] for r in records) / len(records)
-        with_enrich = sum(1 for r in records if r["moment_enrichment_rows"])
-        share = f"{with_enrich / len(records):.0%}"
-        lines.append(
-            f"  {stem:<12}{len(records):>9}{per_width}{moment:>14.1f}"
-            f"{enrich:>18.1f}{f'{with_enrich} ({share})':>19}"
-        )
+        # Per provider, because enrichments are: a provider whose transcripts
+        # carry none reads as a zero here, not as a broken join.
+        by_source: dict[str, list[dict]] = {}
+        for r in records:
+            by_source.setdefault(r["source"] or "?", []).append(r)
+        for source, group in sorted(by_source.items()):
+            per_width = "".join(
+                f"{sum(r['excerpts'][w]['context_rows'] for r in group) / len(group):>15.1f}"
+                for w in widths
+            )
+            moment = sum(r["moment_rows"] for r in group) / len(group)
+            enrich = sum(r["moment_enrichment_rows"] for r in group) / len(group)
+            with_enrich = sum(1 for r in group if r["moment_enrichment_rows"])
+            share = f"{with_enrich / len(group):.0%}"
+            lines.append(
+                f"  {stem:<12}{source:<24}{len(group):>9}{per_width}{moment:>14.1f}"
+                f"{enrich:>18.1f}{f'{with_enrich} ({share})':>19}"
+            )
 
     lines.append("")
     lines.append(
@@ -524,7 +562,14 @@ def build_parser() -> argparse.ArgumentParser:
     parser.add_argument(
         "--ground-truth", default=DEFAULT_GROUND_TRUTH_DIR, metavar="DIR"
     )
-    parser.add_argument("--transcripts", default=DEFAULT_TRANSCRIPTS, metavar="FILE")
+    parser.add_argument(
+        "--transcripts",
+        nargs="+",
+        default=list(DEFAULT_TRANSCRIPTS),
+        metavar="FILE",
+        help="Transcripts JSONL, one per provider, named <provider>.jsonl after "
+        "the source its moments carry",
+    )
     parser.add_argument("--out-dir", default=DEFAULT_OUT_DIR, metavar="DIR")
     parser.add_argument(
         "--context-turns",
