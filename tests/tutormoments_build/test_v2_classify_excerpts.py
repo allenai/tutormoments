@@ -361,6 +361,42 @@ def test_run_entries_forwards_the_models_generation_knobs(monkeypatch):
     assert seen["poll_interval"] == 30
 
 
+@pytest.mark.parametrize(
+    "provider, model, expected",
+    [
+        ("anthropic", "claude-opus-5", 128000),
+        ("openai", "gpt-5.6-sol", 128000),
+        ("gemini", "gemini-3.5-flash", 65536),
+    ],
+)
+def test_run_entries_asks_for_the_models_full_output(
+    monkeypatch, provider, model, expected
+):
+    """No output cap of our own: build_batch_entry's 65536 default would halve
+    what Anthropic and OpenAI allow, and a thinking model that runs out returns
+    no text. The entries passed in are left as they were."""
+    import tutormoments.client as client
+
+    sent = {}
+    monkeypatch.setattr(client, "ModelClient", lambda model: model)
+    monkeypatch.setattr(
+        client, "run_batch", lambda c, entries, **kwargs: sent.update(e=entries) or {}
+    )
+    entries, _ = C.build_entries([SCAFFOLDED], PROMPTS)
+
+    C.run_entries(
+        entries,
+        C.V2Spec(model=model, provider=provider, thinking=None, poll_interval=30),
+    )
+
+    assert {
+        e["request"]["generation_config"]["max_output_tokens"] for e in sent["e"]
+    } == {expected}
+    assert all(
+        e["request"]["generation_config"]["max_output_tokens"] == 65536 for e in entries
+    )
+
+
 # ===========================================================================
 # Config
 # ===========================================================================
@@ -377,16 +413,29 @@ def test_phase_config_reads_the_v2_block():
     assert cfg.poll_interval == 60
 
 
-def test_the_fallback_spec_matches_the_shipped_v2_block():
-    """The fallback stands in for the v2 block when a stripped custom config has
-    none. Drifting from the shipped block would run the baseline at a different
-    reasoning depth than the default config does, silently."""
-    shipped = C.phase_config()
-    fallback = dict(C.FALLBACK_SPEC)
+@pytest.mark.parametrize("config", [{}, {"v2": {}}, {"v2": {"effort": "xhigh"}}])
+def test_a_config_without_a_v2_model_is_refused(monkeypatch, config):
+    """The model a round scores with is stated in the config or nowhere: no
+    model is picked in code when the block is missing."""
+    import tutormoments.config
 
-    assert shipped.model == fallback.pop("model")
-    assert shipped.poll_interval == fallback.pop("poll_interval")
-    assert shipped.thinking == fallback
+    monkeypatch.setattr(tutormoments.config, "load_config", lambda path=None: config)
+
+    with pytest.raises(ValueError, match="no `v2` block with a `model`"):
+        C.phase_config()
+
+
+def test_a_v2_block_is_not_filled_in_from_code(monkeypatch):
+    """A block that states no effort runs at no effort, not at a value written
+    in Python that the config never named."""
+    import tutormoments.config
+
+    block = {"model": "claude-opus-5", "thinking": {"type": "adaptive"}}
+    monkeypatch.setattr(
+        tutormoments.config, "load_config", lambda path=None: {"v2": block}
+    )
+
+    assert C.phase_config().thinking == {"thinking": {"type": "adaptive"}}
 
 
 def test_a_comparison_model_resolves_to_its_arm_on_the_tutor_roster():

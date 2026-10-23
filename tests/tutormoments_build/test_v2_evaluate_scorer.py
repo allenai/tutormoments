@@ -183,7 +183,7 @@ def test_evaluate_scores_the_agreed_subset_separately():
 
 
 def test_agreed_subset_keeps_the_false_positives_it_inherits():
-    """Gold is a union, so a gold negative is agreed and its FP stays scored."""
+    """A gold negative flagged agreed keeps its FP in the agreed block."""
     records = [
         record("a", gold=GOLD_YES, scaffolding=True, rigor=True),  # contested TP
         record("b", gold=GOLD_NO, scaffolding=True, rigor=True),  # agreed FP
@@ -346,7 +346,7 @@ def test_cli_reports_both_subsets(tmp_path, capsys):
 
     out = capsys.readouterr().out
     assert "all moments" in out
-    assert "both annotation passes agreed on the construct" in out
+    assert "annotators agreed on the construct" in out
     assert "contested moments left out" in out
 
 
@@ -394,6 +394,45 @@ def test_cli_reports_the_full_numbers_without_a_ground_truth(tmp_path, capsys):
     out = capsys.readouterr().out
     assert "all moments" in out
     assert "agreement subset was skipped" in out
+
+
+def test_cli_skips_the_agreed_block_for_majority_vote_ground_truth(tmp_path, capsys):
+    """Ground truth from build_ground_truth carries no agreement flags.
+
+    The agreed block is skipped and said so, rather than scored as an empty
+    subset of zeros with every moment counted as contested.
+    """
+    pred_dir = _write_predictions(tmp_path)
+    gt_dir = tmp_path / "ground_truth"
+    gt_dir.mkdir()
+    records = [
+        {"moment_id": "a", "labels": GOLD_YES, "action_ties": []},
+        {"moment_id": "b", "labels": GOLD_NO, "action_ties": []},
+    ]
+    (gt_dir / "iteration.jsonl").write_text(
+        "".join(json.dumps(r) + "\n" for r in records), encoding="utf-8"
+    )
+    out_json = tmp_path / "scores.json"
+
+    assert (
+        E.main(
+            [
+                "--pred-dir",
+                pred_dir,
+                "--ground-truth-dir",
+                str(gt_dir),
+                "--json",
+                str(out_json),
+            ]
+        )
+        == 0
+    )
+
+    out = capsys.readouterr().out
+    assert "agreement subset was skipped" in out
+    assert "contested moments left out" not in out
+    scores = json.loads(out_json.read_text(encoding="utf-8"))
+    assert all(task["agreed"] is None for task in scores[0]["tasks"])
 
 
 def test_cli_warns_when_the_predictions_are_stale(tmp_path, caplog):

@@ -4,37 +4,26 @@
 ``<pred-dir>/<model>/<prompt version>/<split>.jsonl``, each record carrying the
 gold ``labels`` it was made against, so those files are all that scoring needs.
 
-Every task is reported three times:
+Every task is reported in up to three blocks:
 
   all moments        every moment with a usable prediction
-  both passes agreed only the moments where the first-pass annotator and the
-                     reannotator gave the *same* value for that construct
+  agreed             only the moments the ground truth flags as agreed for that
+                     construct (the per-record ``agreement`` flags)
   short moments      only the moments with fewer than ``--short-turns`` (10 by
                      default) dialogue turns after the cut point
 
-The gold labels are a union across the two passes, so a moment either pass
-called True is labelled True. The agreed subset drops those single-vote moments
-and leaves the ones both teachers saw the same way -- a cleaner target, and the
-gap between the two numbers is how much of the model's error sits on moments the
-humans themselves split on. The subset is per construct: a moment can be agreed
-for rigor and contested for scaffolding, and it is scored in the agreed block of
-the one and not the other.
-
-**Read the two blocks as answering different questions, not as one number
-improving on another.** Under a union, a gold *negative* is a moment neither
-pass called True, so it is agreed by construction: the subset can only ever drop
-contested *positives*. So the agreed block keeps every false positive and true
-negative the full block had -- those columns are identical -- while shedding the
-TPs and FNs from single-vote moments. Recall therefore rises and precision falls
-mechanically, and the interesting quantity is how much. Recall on the agreed
-moments is the model's hit rate on the constructs both teachers actually saw;
-precision there says how much of what the model flags lands outside anything the
-teachers jointly endorsed.
+The agreed block needs ``agreement`` flags on the ground-truth records. The
+current build (``build_ground_truth.py``) resolves each label by majority vote
+over every annotator and does not write them, so against today's ground truth
+the block is skipped and the run says so, rather than scoring an empty subset
+as zeros. Where the flags exist the subset is per construct: a moment can be
+agreed for rigor and contested for scaffolding, and it is scored in the agreed
+block of the one and not the other.
 
 The short-moment block is a different cut of the same predictions: how the
 model does when there is little tutoring after the cut to read. It is a slice on
-the excerpt, not on the labels, so unlike the agreed subset it drops positives
-and negatives alike and its precision and recall both move freely. The turn count
+the excerpt, not on the labels, so it drops positives and negatives alike and
+its precision and recall both move freely. The turn count
 is ``post_cut_dialogue_rows``, written by the excerpt builder -- dialogue turns
 only, so the screen-activity rows in the span are not counted as turns.
 
@@ -156,7 +145,7 @@ def collect(records: list[dict], pass_name: str, field: str, gold_field: str) ->
 def agreed_records(
     records: list[dict], agreement: dict[str, dict], gold_field: str
 ) -> tuple[list[dict], int]:
-    """Records where both annotation passes gave the same value for one construct.
+    """Records the ground truth flags as agreed for one construct.
 
     Returns (kept, n_unknown); unknown is a moment the ground truth has no
     agreement flags for, which is a moment that has left the ground truth since
@@ -225,8 +214,15 @@ def read_ground_truth(ground_truth_dir: str, split: str) -> list[dict] | None:
         return [json.loads(line) for line in fh if line.strip()]
 
 
-def agreement_by_moment(ground_truth: list[dict]) -> dict[str, dict]:
-    """{moment_id: agreement flags} -- per construct, did both passes match."""
+def agreement_by_moment(ground_truth: list[dict]) -> dict[str, dict] | None:
+    """{moment_id: agreement flags} -- per construct, did the annotators match.
+
+    None when no record carries ``agreement``: the majority-vote build does not
+    write it, and reading every moment as "no flags" would empty the agreed
+    block and report it as zeros.
+    """
+    if not any("agreement" in r for r in ground_truth):
+        return None
     return {r["moment_id"]: (r.get("agreement") or {}) for r in ground_truth}
 
 
@@ -291,9 +287,9 @@ def evaluate(
     """Score every task over one split's prediction records.
 
     Each row carries three subsets: ``all``, every moment with a usable
-    prediction; ``agreed``, only the moments where both annotation passes gave
-    that construct the same value, and None when no ground truth was found to
-    join against; and ``short``, only the moments with fewer than
+    prediction; ``agreed``, only the moments the ground truth flags as agreed on
+    that construct, and None when there are no agreement flags to join against;
+    and ``short``, only the moments with fewer than
     ``short_turns`` dialogue turns after the cut point.
     """
     short, short_unknown = short_records(records, short_turns)
@@ -343,7 +339,7 @@ def _score_line(task: str, scores: dict) -> str:
 
 
 def report(model: str, prompt_version: str, split: str, rows: list[dict]) -> str:
-    """One block per subset: all moments, the ones both passes agreed on, and
+    """One block per subset: all moments, the ones flagged as agreed, and
     the ones with a short post-cut span."""
     header = (
         f"  {'task':<18}{'n':>6}{'gold yes':>10}{'TP':>5}{'FP':>5}{'FN':>5}{'TN':>5}"
@@ -361,7 +357,7 @@ def report(model: str, prompt_version: str, split: str, rows: list[dict]) -> str
 
     scored = [row for row in rows if row["agreed"] is not None]
     if scored:
-        lines += ["", "  both annotation passes agreed on the construct"]
+        lines += ["", "  annotators agreed on the construct (ground-truth flags)"]
         lines += [_score_line(row["task"], row["agreed"]) for row in scored]
         dropped = ",  ".join(
             f"{row['task']} {row['agreed']['contested']}" for row in scored
@@ -374,7 +370,10 @@ def report(model: str, prompt_version: str, split: str, rows: list[dict]) -> str
                 "neither block"
             )
     else:
-        lines += ["", "  no ground truth found; the agreement subset was skipped"]
+        lines += [
+            "",
+            "  no agreement flags in the ground truth; the agreement subset was skipped",
+        ]
 
     short = rows[0]["short"]
     lines += ["", f"  fewer than {short['turns']} turns after the cut"]
@@ -394,15 +393,6 @@ def report(model: str, prompt_version: str, split: str, rows: list[dict]) -> str
         "  positive class = True; 'not scored' = no prediction (not asked, "
         "not classified, or unparsed)",
     ]
-    if scored:
-        lines.append(
-            "  gold is a union of the two passes, so only contested positives "
-            "leave the agreed block:"
-        )
-        lines.append(
-            "  FP/TN carry over unchanged, and recall rises where precision "
-            "falls by construction"
-        )
     lines.append(
         "  the short block slices the excerpt, not the labels, so it drops "
         "positives and negatives alike"
@@ -428,8 +418,8 @@ def build_parser() -> argparse.ArgumentParser:
         "--ground-truth-dir",
         default=DEFAULT_GROUND_TRUTH_DIR,
         metavar="DIR",
-        help="Where to read the annotator-agreement flags from, joined on "
-        "moment_id. Without it only the all-moments numbers are reported.",
+        help="Ground truth to check the predictions' gold labels against, and "
+        "to read per-construct agreement flags from where its records carry them.",
     )
     parser.add_argument(
         "--model",
@@ -483,6 +473,12 @@ def main(argv: list[str] | None = None) -> int:
         )
         if ground_truth is not None:
             ground_truths[split] = ground_truth
+            if agreement[split] is None:
+                logger.info(
+                    "%s ground truth carries no agreement flags; skipping the "
+                    "agreement subset",
+                    split,
+                )
 
     results = []
     for model in find_models(args.pred_dir, args.model):
