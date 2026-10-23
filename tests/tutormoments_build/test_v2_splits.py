@@ -80,7 +80,9 @@ def test_summarize_names_the_provider_by_its_file(tmp_path):
 
 def test_summarize_rejects_row_from_another_provider(tmp_path):
     row = {**_moment_row("a"), "source": "tutoring_provider_a"}
-    path = _annotations_file(tmp_path, [row], name="tutoring_provider_c_annotations.jsonl")
+    path = _annotations_file(
+        tmp_path, [row], name="tutoring_provider_c_annotations.jsonl"
+    )
     with pytest.raises(ValueError, match="tutoring_provider_a"):
         S.summarize_transcripts(path)
 
@@ -406,20 +408,29 @@ def test_no_key_moment_transcripts_split_alongside_weighted_ones():
 
 def test_cli_reads_every_provider_in_one_run(tmp_path):
     a = _annotations_file(
-        tmp_path, [_moment_row(f"a{i}") for i in range(6)], name="prov_a_annotations.jsonl"
+        tmp_path,
+        [_moment_row(f"a{i}") for i in range(6)],
+        name="prov_a_annotations.jsonl",
     )
     c = _annotations_file(
-        tmp_path, [_moment_row(f"c{i}") for i in range(4)], name="prov_c_annotations.jsonl"
+        tmp_path,
+        [_moment_row(f"c{i}") for i in range(4)],
+        name="prov_c_annotations.jsonl",
     )
     manifest = str(tmp_path / "splits.json")
     assert S.main(["--annotations", a, c, "--manifest", manifest]) == 0
 
     written = S.load_manifest(manifest)
-    assert {rec["source"] for rec in written["assignments"].values()} == {"prov_a", "prov_c"}
+    assert {rec["source"] for rec in written["assignments"].values()} == {
+        "prov_a",
+        "prov_c",
+    }
     batch = written["batches"][-1]
     assert batch["sources"] == [a, c]
     assert batch["n_assigned_by_source"] == {"prov_a": 6, "prov_c": 4}
 
 
 def test_cli_defaults_to_every_provider():
-    assert S.build_parser().parse_args([]).annotations == list(S.DEFAULT_ANNOTATIONS_FILES)
+    assert S.build_parser().parse_args([]).annotations == list(
+        S.DEFAULT_ANNOTATIONS_FILES
+    )

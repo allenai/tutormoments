@@ -175,7 +175,11 @@ def _enrichment_row(enrichment):
         "turn_number": None,
         "role": "",
         "type": tag,
-        "text": " ".join(part for part in (tag, label + (" —" if label and content else ""), content) if part),
+        "text": " ".join(
+            part
+            for part in (tag, label + (" —" if label and content else ""), content)
+            if part
+        ),
         "timestamp": _clock(start)
         + (f"-{_clock(end)}" if end is not None and end != start else ""),
     }
@@ -183,7 +187,9 @@ def _enrichment_row(enrichment):
 
 def _clock(seconds):
     return (
-        f"{int(seconds) // 60:02d}:{int(seconds) % 60:02d}" if seconds is not None else ""
+        f"{int(seconds) // 60:02d}:{int(seconds) % 60:02d}"
+        if seconds is not None
+        else ""
     )
 
 

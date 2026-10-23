@@ -475,11 +475,31 @@ class TestBuildAcrossProviders:
         _write_jsonl(
             gt / "iteration.jsonl",
             [
-                moment | {"moment_id": "ma", "source": "tutoring_provider_a", "transcript_id": "ta"},
-                moment | {"moment_id": "mc", "source": "tutoring_provider_c", "transcript_id": "tc"},
+                moment
+                | {
+                    "moment_id": "ma",
+                    "source": "tutoring_provider_a",
+                    "transcript_id": "ta",
+                },
+                moment
+                | {
+                    "moment_id": "mc",
+                    "source": "tutoring_provider_c",
+                    "transcript_id": "tc",
+                },
                 # Provider C's transcript, but filed under A: must not be found.
-                moment | {"moment_id": "mx", "source": "tutoring_provider_a", "transcript_id": "tc"},
-                moment | {"moment_id": "mz", "source": "tutoring_provider_z", "transcript_id": "tz"},
+                moment
+                | {
+                    "moment_id": "mx",
+                    "source": "tutoring_provider_a",
+                    "transcript_id": "tc",
+                },
+                moment
+                | {
+                    "moment_id": "mz",
+                    "source": "tutoring_provider_z",
+                    "transcript_id": "tz",
+                },
             ],
         )
         return str(gt), [str(a), str(c)]

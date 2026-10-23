@@ -8,7 +8,7 @@ Using prompts in ``tutormoments_build/prompts/v2/<version>/``:
   over-scaffolding.md    over-scaffolding yes/no, plus a description
 
 The prompts are versioned by directory and ``--prompt-version`` defaults to the newest version present,
-and outputs are saved based on prompt version. 
+and outputs are saved based on prompt version.
 
 Together they predict ``scaffolding_present``, ``rigor_present``, ``over_scaffolding_present``,
 in a manner that allows for comparison w/ gold labels.
@@ -18,18 +18,18 @@ It is sent only where the gold marks ``scaffolding_present``, and its answer is
 scored against ``over_scaffolding_present``.
 
 Both prompts are run in one batch, and both read the same excerpt: the whole
-transcript from its first row through the moment's last 
-(the ``full`` rendering created by ``excerpts.py``). 
+transcript from its first row through the moment's last
+(the ``full`` rendering created by ``excerpts.py``).
 
 ``--model`` sets the model; looking up settings in default_config.yaml.
 Examples of models this script could run with:
 - claude-opus-5
 - gemini-3.5-flash
-- gpt-5.6-sol 
+- gpt-5.6-sol
 
 Predictions are written per model and prompt version:
 ``<out-dir>/<model>/<prompt version>/<split>.jsonl``. An existing file is never
-replaced unless ``--overwrite`` says to. 
+replaced unless ``--overwrite`` says to.
 
 Only the ``iteration`` split runs by default. The ``test`` split is held out
 unless specified w/ ``--splits test``.
@@ -1076,10 +1076,7 @@ def _print_prompts(
         print(f"\n\n===== {over_path} (@{EXCERPT_WIDTH} excerpt) =====\n")
         print(fill(over_template, excerpt_at(record)))
     else:
-        print(
-            f"\n\n===== {over_path} =====\n\n"
-            f"not asked: {NOT_ASKED_LABEL}"
-        )
+        print(f"\n\n===== {over_path} =====\n\nnot asked: {NOT_ASKED_LABEL}")
     return 0
 
 

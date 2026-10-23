@@ -18,7 +18,7 @@ there into one row list, so a provider C excerpt is dialogue alone.
   same placement the annotation viewer draws: the start opens on the first row
   of its turn, the cut and the end close on the last row of theirs.
 
-Each moment is rendered at every width in ``--context-turns``. 
+Each moment is rendered at every width in ``--context-turns``.
 ``full`` is no window at all -- the transcript from its first row.
 
 The excerpt stops at the moment's last row.

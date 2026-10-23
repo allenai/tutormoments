@@ -52,7 +52,9 @@ def _excerpt(
 
 SCAFFOLDED = _excerpt("aaa", scaffolding_present=True)
 UNSCAFFOLDED = _excerpt("bbb", scaffolding_present=False)
-OVERSCAFFOLDED = _excerpt("ccc", scaffolding_present=True, over_scaffolding_present=True)
+OVERSCAFFOLDED = _excerpt(
+    "ccc", scaffolding_present=True, over_scaffolding_present=True
+)
 
 
 # ===========================================================================
@@ -95,7 +97,9 @@ def test_missing_labels_do_not_trigger_the_over_scaffolding_pass():
 
 
 def test_build_entries_asks_action_of_all_and_over_scaffolding_of_gated_only():
-    entries, counts = C.build_entries([SCAFFOLDED, UNSCAFFOLDED, OVERSCAFFOLDED], PROMPTS)
+    entries, counts = C.build_entries(
+        [SCAFFOLDED, UNSCAFFOLDED, OVERSCAFFOLDED], PROMPTS
+    )
     keys = {entry["key"] for entry in entries}
 
     assert keys == {

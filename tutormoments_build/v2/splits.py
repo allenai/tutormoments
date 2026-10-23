@@ -323,7 +323,9 @@ def _totals(assignments: dict[str, dict]) -> dict[str, dict]:
     return out
 
 
-def report(manifest: dict, transcripts: dict[str, dict], n_new: int, dry_run: bool) -> str:
+def report(
+    manifest: dict, transcripts: dict[str, dict], n_new: int, dry_run: bool
+) -> str:
     """Split totals per provider, then over all providers."""
     assignments = manifest["assignments"]
     by_source: dict[str, dict[str, dict]] = {}
@@ -505,7 +507,9 @@ def main(argv: list[str] | None = None) -> int:
             "balance_by": args.balance_by,
             "n_assigned": len(new_ids),
             "n_assigned_by_source": dict(
-                sorted(Counter(rec["source"] for rec in new_assignments.values()).items())
+                sorted(
+                    Counter(rec["source"] for rec in new_assignments.values()).items()
+                )
             ),
         }
     )

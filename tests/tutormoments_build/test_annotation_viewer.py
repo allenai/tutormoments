@@ -1040,7 +1040,6 @@ class TestTranscriptIndex:
         index = self.plain_dialogue(tmp_path / "c.jsonl", ["Tutor", "Student"])
         assert [r["timestamp"] for r in index.rows("t1")] == ["01:01", "02:03"]
 
-
     @staticmethod
     def with_enrichments(path, enrichments, n_turns=3):
         """A provider A transcript: dialogue in `turns`, enrichments listed beside it."""
@@ -1049,7 +1048,9 @@ class TestTranscriptIndex:
             for n in range(1, n_turns + 1)
         ]
         path.write_text(
-            json.dumps({"transcript_id": "t1", "turns": turns, "enrichments": enrichments})
+            json.dumps(
+                {"transcript_id": "t1", "turns": turns, "enrichments": enrichments}
+            )
             + "\n"
         )
         return TranscriptIndex(path, {"t1"})
@@ -1099,7 +1100,9 @@ class TestTranscriptIndex:
         )
         row = index.rows("t1")[1]
         assert row["type"] == "[SCREEN INTERACTION]"
-        assert row["text"] == "[SCREEN INTERACTION] tutor - drawing — Tutor draws a line."
+        assert (
+            row["text"] == "[SCREEN INTERACTION] tutor - drawing — Tutor draws a line."
+        )
         assert row["role"] == ""
         assert row["timestamp"] == "00:05-00:08"
 
@@ -1136,6 +1139,7 @@ class TestTranscriptIndex:
 
     def test_a_provider_that_records_no_problems_has_none(self, path):
         assert TranscriptIndex(path, {"t1"}).problems("t1") == []
+
 
 class TestLocateSpan:
     """Turn numbers, which is all the export records, onto the rows the pane draws."""
@@ -1307,7 +1311,6 @@ class TestBuildPayload:
         assert moment["boundaries"]["start_row"] is None
 
 
-
 class TestSeveralProviders:
     """Each provider's export is read against its own transcripts file and kept apart."""
 
@@ -1378,7 +1381,11 @@ class TestSeveralProviders:
                     "tutoring_provider_c",
                     "tc",
                     problems=[
-                        {"slide_id": 3, "slide_position": 1, "learning_objective": objective}
+                        {
+                            "slide_id": 3,
+                            "slide_position": 1,
+                            "learning_objective": objective,
+                        }
                     ],
                 ),
             ]
@@ -1395,6 +1402,7 @@ class TestSeveralProviders:
                     self.provider(tmp_path, "tutoring_provider_c", "same"),
                 ]
             )
+
 
 class TestBuildSite:
     @pytest.fixture
