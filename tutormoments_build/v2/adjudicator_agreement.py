@@ -645,7 +645,9 @@ def report_file(
         )
 
         overall = score(rows)
-        print(report(f"All doubly adjudicated moments ({_moments(len(rows))})", overall))
+        print(
+            report(f"All doubly adjudicated moments ({_moments(len(rows))})", overall)
+        )
 
         for name, own_rows in by_adjudicator(rows).items():
             per_adjudicator[name] = score(own_rows)
