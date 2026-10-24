@@ -42,8 +42,9 @@ Three binary tasks are scored, positive class = True:
 Over-scaffolding is scored only on the moments it was asked about (the gold gate
 in ``classify_excerpts``): elsewhere there is no prediction, not a "no".
 
-A moment with no usable prediction -- never classified, or a response that would
-not parse -- is left out of the counts and reported separately. Scoring an
+A moment with no usable prediction -- never classified, not asked, a failed
+request, or a response that would not parse -- is left out of the counts and
+reported separately, broken down by reason under each block. Scoring an
 unparsed response as "no" would credit a parse failure as a correct negative on
 the mostly-negative tasks, which reads as a better model rather than a broken
 one.
@@ -66,6 +67,7 @@ import json
 import logging
 import os
 import sys
+from collections import Counter
 
 from tutormoments.logging_setup import logging_args_parent, setup_logging
 from tutormoments_build.v2.build_ground_truth import (
@@ -91,6 +93,17 @@ TASKS = (
         "over_scaffolding_present",
     ),
 )
+
+
+# Why a moment has no (gold, predicted) pair for a task, in the order they are
+# checked, with the report's column header for each. A missing gold label has no
+# column: it should not happen, so it gets a line of its own when it does.
+NOT_SCORED_COLUMNS = {
+    "no_post_cut_content": "empty post-cut",
+    "not_asked": "not asked",
+    "response_failed": "response failed",
+    "unparsed": "response parse failed",
+}
 
 
 # ===========================================================================
@@ -125,21 +138,48 @@ def score(pairs: list[tuple[bool, bool]]) -> dict:
     }
 
 
-def collect(records: list[dict], pass_name: str, field: str, gold_field: str) -> tuple:
-    """Return ([(gold, predicted), ...], n_missing) for one task.
+def not_scored_reason(record: dict, pass_name: str, field: str, gold_field: str):
+    """Why ``record`` has nothing to score for one task, or None if it does.
 
-    A record is missing when the pass did not run for it or its response did not
-    parse -- either way there is no label to score.
+    A ``NOT_SCORED_COLUMNS`` key, or ``"no_gold"``. "not_asked" is the
+    over-scaffolding gold gate; "response_failed" covers both a request that
+    errored and one whose result never made it into the file.
     """
-    pairs, missing = [], 0
+    result = record.get(pass_name)
+    if result is None:
+        if record.get("skipped"):
+            return "no_post_cut_content"
+        if pass_name == "over_scaffolding" and not record.get("over_scaffolding_asked"):
+            return "not_asked"
+        return "response_failed"
+    if result.get(field) is None:
+        return "response_failed" if result.get("error") else "unparsed"
+    if (record.get("labels") or {}).get(gold_field) is None:
+        return "no_gold"
+    return None
+
+
+def collect(records: list[dict], pass_name: str, field: str, gold_field: str) -> tuple:
+    """Return ([(gold, predicted), ...], Counter of not-scored reasons) for one task.
+
+    A record is not scored when there is no prediction or no gold label to pair
+    it with; the reason is counted rather than guessed at as a "no".
+    """
+    pairs, not_scored = [], Counter()
     for record in records:
-        gold = (record.get("labels") or {}).get(gold_field)
-        predicted = (record.get(pass_name) or {}).get(field)
-        if gold is None or predicted is None:
-            missing += 1
+        reason = not_scored_reason(record, pass_name, field, gold_field)
+        if reason:
+            not_scored[reason] += 1
             continue
-        pairs.append((bool(gold), bool(predicted)))
-    return pairs, missing
+        pairs.append(
+            (bool(record["labels"][gold_field]), bool(record[pass_name][field]))
+        )
+    return pairs, not_scored
+
+
+def _not_scored(reasons: Counter) -> dict:
+    """The per-block not-scored fields: the total and its breakdown by reason."""
+    return {"missing": sum(reasons.values()), "not_scored": dict(reasons)}
 
 
 def agreed_records(
@@ -296,24 +336,24 @@ def evaluate(
 
     rows = []
     for name, pass_name, field, gold_field in TASKS:
-        pairs, missing = collect(records, pass_name, field, gold_field)
-        row = {"task": name, "all": {"missing": missing, **score(pairs)}}
+        pairs, reasons = collect(records, pass_name, field, gold_field)
+        row = {"task": name, "all": {**_not_scored(reasons), **score(pairs)}}
 
         if agreement is None:
             row["agreed"] = None
         else:
             kept, unknown = agreed_records(records, agreement, gold_field)
-            pairs, missing = collect(kept, pass_name, field, gold_field)
+            pairs, reasons = collect(kept, pass_name, field, gold_field)
             row["agreed"] = {
-                "missing": missing,
+                **_not_scored(reasons),
                 "unknown": unknown,
                 "contested": len(records) - len(kept) - unknown,
                 **score(pairs),
             }
 
-        pairs, missing = collect(short, pass_name, field, gold_field)
+        pairs, reasons = collect(short, pass_name, field, gold_field)
         row["short"] = {
-            "missing": missing,
+            **_not_scored(reasons),
             "unknown": short_unknown,
             "turns": short_turns,
             "moments": len(short),
@@ -334,8 +374,20 @@ def _score_line(task: str, scores: dict) -> str:
         f"  {task:<18}{scores['n']:>6}{scores['support']:>10}"
         f"{scores['tp']:>5}{scores['fp']:>5}{scores['fn']:>5}{scores['tn']:>5}"
         f"{scores['precision']:>8.2f}{scores['recall']:>7.2f}{scores['f1']:>7.2f}"
-        f"{scores['missing']:>13}"
+    ) + "".join(
+        f"{scores['not_scored'].get(key, 0):>{len(header) + 2}}"
+        for key, header in NOT_SCORED_COLUMNS.items()
     )
+
+
+def _no_gold_lines(rows: list[dict], block: str) -> list[str]:
+    """A warning per task whose ``block`` has moments with no gold label."""
+    return [
+        f"  {row['task']}: {row[block]['not_scored']['no_gold']} moment(s) have "
+        "no gold label and were not scored"
+        for row in rows
+        if row[block]["not_scored"].get("no_gold")
+    ]
 
 
 def report(model: str, prompt_version: str, split: str, rows: list[dict]) -> str:
@@ -343,7 +395,9 @@ def report(model: str, prompt_version: str, split: str, rows: list[dict]) -> str
     the ones with a short post-cut span."""
     header = (
         f"  {'task':<18}{'n':>6}{'gold yes':>10}{'TP':>5}{'FP':>5}{'FN':>5}{'TN':>5}"
-        f"{'prec':>8}{'rec':>7}{'F1':>7}{'not scored':>13}"
+        f"{'prec':>8}{'rec':>7}{'F1':>7}"
+    ) + "".join(
+        f"{header:>{len(header) + 2}}" for header in NOT_SCORED_COLUMNS.values()
     )
     lines = [
         "",
@@ -354,11 +408,13 @@ def report(model: str, prompt_version: str, split: str, rows: list[dict]) -> str
         "  all moments",
     ]
     lines += [_score_line(row["task"], row["all"]) for row in rows]
+    lines += _no_gold_lines(rows, "all")
 
     scored = [row for row in rows if row["agreed"] is not None]
     if scored:
         lines += ["", "  annotators agreed on the construct (ground-truth flags)"]
         lines += [_score_line(row["task"], row["agreed"]) for row in scored]
+        lines += _no_gold_lines(scored, "agreed")
         dropped = ",  ".join(
             f"{row['task']} {row['agreed']['contested']}" for row in scored
         )
@@ -378,6 +434,7 @@ def report(model: str, prompt_version: str, split: str, rows: list[dict]) -> str
     short = rows[0]["short"]
     lines += ["", f"  fewer than {short['turns']} turns after the cut"]
     lines += [_score_line(row["task"], row["short"]) for row in rows]
+    lines += _no_gold_lines(rows, "short")
     lines.append(
         f"  {short['moments']} of {short['of_moments']} moment(s); turns are "
         "dialogue turns after the cut, screen activity not counted"
@@ -390,8 +447,8 @@ def report(model: str, prompt_version: str, split: str, rows: list[dict]) -> str
 
     lines += [
         "",
-        "  positive class = True; 'not scored' = no prediction (not asked, "
-        "not classified, or unparsed)",
+        "  positive class = True; moments in the last four columns have no "
+        "prediction and are left out of n, not counted as 'no'",
     ]
     lines.append(
         "  the short block slices the excerpt, not the labels, so it drops "

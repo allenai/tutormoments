@@ -79,17 +79,16 @@ def test_score_of_nothing_does_not_divide_by_zero():
 
 def test_unparsed_predictions_are_not_scored_as_negatives():
     """A None prediction is missing data, not a "no" answer."""
-    records = [
-        record("a", gold=GOLD_YES, scaffolding=True, rigor=True),
-        record("b", gold=GOLD_YES, scaffolding=None, rigor=None),
-    ]
+    unparsed = record("b", gold=GOLD_YES)
+    unparsed["action_direction"] = {"scaffolding": None, "rigor": None, "error": None}
+    records = [record("a", gold=GOLD_YES, scaffolding=True, rigor=True), unparsed]
 
-    pairs, missing = E.collect(
+    pairs, not_scored = E.collect(
         records, "action_direction", "scaffolding", "scaffolding_present"
     )
 
     assert pairs == [(True, True)]
-    assert missing == 1
+    assert not_scored == {"unparsed": 1}
 
 
 def test_over_scaffolding_is_scored_only_where_it_was_asked():
@@ -98,12 +97,59 @@ def test_over_scaffolding_is_scored_only_where_it_was_asked():
         record("b", gold=GOLD_NO, asked=False),
     ]
 
-    pairs, missing = E.collect(
+    pairs, not_scored = E.collect(
         records, "over_scaffolding", "over_scaffolding", "over_scaffolding_present"
     )
 
     assert pairs == [(True, True)]
-    assert missing == 1
+    assert not_scored == {"not_asked": 1}
+
+
+def test_not_scored_reasons_tell_the_causes_apart():
+    """Each way a moment can go unscored is counted under its own reason."""
+    skipped = {**record("skip", gold=GOLD_NO), "skipped": "no_post_cut_content"}
+    failed = record("fail", gold=GOLD_YES)
+    failed["action_direction"] = {"scaffolding": None, "error": "overloaded"}
+    no_gold = record("gold", gold={}, scaffolding=True, rigor=True)
+    absent = record("absent", gold=GOLD_YES)
+
+    _, not_scored = E.collect(
+        [skipped, failed, no_gold, absent],
+        "action_direction",
+        "scaffolding",
+        "scaffolding_present",
+    )
+
+    assert not_scored == {
+        "no_post_cut_content": 1,
+        "response_failed": 2,
+        "no_gold": 1,
+    }
+
+
+def test_an_unclassified_moment_is_not_blamed_on_the_over_scaffolding_gate():
+    """No post-cut content outranks the gate: neither pass ran for it."""
+    skipped = {**record("skip", gold=GOLD_NO), "skipped": "no_post_cut_content"}
+
+    _, not_scored = E.collect(
+        [skipped], "over_scaffolding", "over_scaffolding", "over_scaffolding_present"
+    )
+
+    assert not_scored == {"no_post_cut_content": 1}
+
+
+def test_report_gives_each_not_scored_reason_its_own_column():
+    records = [
+        record("a", gold=GOLD_YES, scaffolding=True, rigor=True, over=True, asked=True),
+        record("b", gold=GOLD_NO, scaffolding=False, rigor=False),
+    ]
+
+    text = E.report("m", "1", "iteration", E.evaluate(records))
+
+    header = next(line for line in text.splitlines() if "not asked" in line)
+    over = next(line for line in text.splitlines() if "over-scaffolding" in line)
+    assert all(name in header for name in E.NOT_SCORED_COLUMNS.values())
+    assert over.split()[-4:] == ["0", "1", "0", "0"]
 
 
 def test_evaluate_scores_every_task():
