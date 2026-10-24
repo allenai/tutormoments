@@ -15,7 +15,12 @@ Reports four things:
 
 Usage:
     python -m tutormoments_build.v2.adjudicator_agreement
+    python -m tutormoments_build.v2.adjudicator_agreement --verbose
     python -m tutormoments_build.v2.adjudicator_agreement --json-out agreement.json
+
+Each annotation file (by default, providers C and A) is reported separately,
+never pooled. Without ``--verbose`` only the pooled-adjudicator kappa table is
+printed per file; ``--json-out`` always carries every number, keyed by file.
 """
 
 import argparse
@@ -40,7 +45,10 @@ from tutormoments_build.v2.build_ground_truth import (
 
 logger = logging.getLogger("tutormoments_build.v2.adjudicator_agreement")
 
-DEFAULT_ANNOTATIONS = "data/v2_annotations/source/tutoring_provider_a_annotations.jsonl"
+DEFAULT_ANNOTATIONS = (
+    "data/v2_annotations/source/tutoring_provider_c_annotations.jsonl",
+    "data/v2_annotations/source/tutoring_provider_a_annotations.jsonl",
+)
 
 # (label, section, key) for the four yes/no questions.
 BOOLEAN_FIELDS = (
@@ -579,7 +587,12 @@ def build_parser() -> argparse.ArgumentParser:
         formatter_class=argparse.RawDescriptionHelpFormatter,
         parents=[logging_args_parent()],
     )
-    parser.add_argument("--annotations", default=DEFAULT_ANNOTATIONS)
+    parser.add_argument(
+        "--annotations",
+        nargs="+",
+        default=list(DEFAULT_ANNOTATIONS),
+        help="one or more annotation files; each is reported separately",
+    )
     parser.add_argument(
         "--annotator-labels",
         default=DEFAULT_ANNOTATOR_LABELS,
@@ -591,24 +604,33 @@ def build_parser() -> argparse.ArgumentParser:
         default=DEFAULT_EXCLUDED_ANNOTATORS,
         help="JSON list of project staff annotator_ids to drop",
     )
-    parser.add_argument("--json-out", help="also write the numbers to this path")
+    parser.add_argument(
+        "--verbose",
+        action="store_true",
+        help="print every table, not just the pooled adjudicator kappa table",
+    )
+    parser.add_argument(
+        "--json-out",
+        help="also write the numbers to this path, keyed by annotation file",
+    )
     return parser
 
 
-def main(argv: list[str] | None = None) -> int:
-    args = build_parser().parse_args(argv)
-    setup_logging(level=args.log_level, log_file=args.log_file)
+def _moments(n: int) -> str:
+    return f"{n} moment" if n == 1 else f"{n} moments"
 
-    labels = load_annotator_labels(args.annotator_labels)
-    excluded = load_excluded_annotators(args.excluded_annotators)
-    rows = doubly_adjudicated(args.annotations, labels, excluded)
-    all_adjudications = adjudications(args.annotations, labels, excluded)
+
+def report_file(
+    path: str, labels: dict[str, str], excluded: frozenset[str], verbose: bool
+) -> dict | None:
+    """Print the tables for one annotation file and return its numbers, or None
+    if it has no adjudicated moments. Without ``verbose`` only the pooled kappa
+    table is printed; the returned numbers are the same either way."""
+    rows = doubly_adjudicated(path, labels, excluded)
+    all_adjudications = adjudications(path, labels, excluded)
     if not rows and not all_adjudications:
-        logger.error("no adjudicated moments in %s", args.annotations)
-        return 1
-
-    def moments(n: int) -> str:
-        return f"{n} moment" if n == 1 else f"{n} moments"
+        logger.error("no adjudicated moments in %s", path)
+        return None
 
     overall, per_adjudicator = {}, {}
     if rows:
@@ -617,22 +639,24 @@ def main(argv: list[str] | None = None) -> int:
             "%d doubly adjudicated moment(s) in %s; %d had at least one adjudicator "
             "throw the moment out, so only the throw_out row is scored on all %d",
             len(rows),
-            args.annotations,
+            path,
             thrown_out,
             len(rows),
         )
 
         overall = score(rows)
-        print(report(f"All doubly adjudicated moments ({moments(len(rows))})", overall))
+        print(report(f"All doubly adjudicated moments ({_moments(len(rows))})", overall))
 
         for name, own_rows in by_adjudicator(rows).items():
             per_adjudicator[name] = score(own_rows)
+            if not verbose:
+                continue
             partners = Counter(row["raters"][1] for row in own_rows)
             print()
             print(
                 report(
                     f"{name} vs every other adjudicator "
-                    f"({moments(len(own_rows))})\n  paired with: "
+                    f"({_moments(len(own_rows))})\n  paired with: "
                     + ", ".join(
                         f"{partner} {count}"
                         for partner, count in sorted(partners.items())
@@ -642,8 +666,7 @@ def main(argv: list[str] | None = None) -> int:
             )
     else:
         logger.warning(
-            "no doubly adjudicated moments in %s; skipping the kappa tables",
-            args.annotations,
+            "no doubly adjudicated moments in %s; skipping the kappa tables", path
         )
 
     finalised = [row for row in all_adjudications if row["final"]]
@@ -652,7 +675,7 @@ def main(argv: list[str] | None = None) -> int:
     resolution = resolution_counts(all_adjudications)
     throw_out_rates = throw_out_resolution(all_adjudications)
     edits = text_edits(all_adjudications)
-    adjudicated_moments = moments(len({row["moment_id"] for row in all_adjudications}))
+    adjudicated_moments = _moments(len({row["moment_id"] for row in all_adjudications}))
 
     logger.info(
         "%d adjudication(s) over %s; %d threw the moment out and answered nothing. "
@@ -666,63 +689,83 @@ def main(argv: list[str] | None = None) -> int:
         len(finalised) - len(comparable),
     )
 
-    print()
-    print(
-        report_resolution(
-            f"How often the adjudicator backed the first and second pass "
-            f"({len(comparable)} final calls over {adjudicated_moments})",
-            resolution,
+    if verbose:
+        print()
+        print(
+            report_resolution(
+                f"How often the adjudicator backed the first and second pass "
+                f"({len(comparable)} final calls over {adjudicated_moments})",
+                resolution,
+            )
         )
-    )
 
-    print()
-    print(
-        report_throw_out(
-            "How the adjudicator answered the second pass's throw-out call "
-            "(the selector is never asked)",
-            throw_out_rates,
+        print()
+        print(
+            report_throw_out(
+                "How the adjudicator answered the second pass's throw-out call "
+                "(the selector is never asked)",
+                throw_out_rates,
+            )
         )
-    )
 
-    kinds_table, distance_table = report_text_edits(
-        f"What the adjudicator did with the annotators' free text "
-        f"({len(finalised)} final calls)",
-        edits,
-    )
-    print()
-    print(kinds_table)
-    print()
-    print(distance_table)
+        kinds_table, distance_table = report_text_edits(
+            f"What the adjudicator did with the annotators' free text "
+            f"({len(finalised)} final calls)",
+            edits,
+        )
+        print()
+        print(kinds_table)
+        print()
+        print(distance_table)
 
-    written = [row["rationale"] for row in finalised if row["rationale"]]
-    print()
-    print(
-        "Adjudicator's own rationale note (no annotator draft to compare against): "
-        f"{_count_pct(len(written), len(finalised))} of final calls carry one, "
-        f"median {_number(_median(len(text) for text in written), '.0f')} characters."
-    )
+        written = [row["rationale"] for row in finalised if row["rationale"]]
+        print()
+        print(
+            "Adjudicator's own rationale note (no annotator draft to compare "
+            f"against): {_count_pct(len(written), len(finalised))} of final calls "
+            "carry one, median "
+            f"{_number(_median(len(text) for text in written), '.0f')} characters."
+        )
+
+    return {
+        "n_moments": len(rows),
+        "overall": overall,
+        "by_adjudicator": per_adjudicator,
+        "n_adjudications": len(all_adjudications),
+        "n_final_calls": len(finalised),
+        "n_comparable_final_calls": len(comparable),
+        "resolution": resolution,
+        "throw_out_resolution": throw_out_rates,
+        "text_edits": edits,
+    }
+
+
+def main(argv: list[str] | None = None) -> int:
+    args = build_parser().parse_args(argv)
+    setup_logging(level=args.log_level, log_file=args.log_file)
+
+    labels = load_annotator_labels(args.annotator_labels)
+    excluded = load_excluded_annotators(args.excluded_annotators)
+
+    # Each file is reported on its own; numbers are never pooled across files.
+    results, failed = {}, False
+    for i, path in enumerate(args.annotations):
+        if i:
+            print("\n")
+        print(f"=== {path} ===\n")
+        numbers = report_file(path, labels, excluded, args.verbose)
+        if numbers is None:
+            failed = True
+        else:
+            results[path] = numbers
 
     if args.json_out:
         with open(args.json_out, "w", encoding="utf-8") as fh:
-            json.dump(
-                {
-                    "n_moments": len(rows),
-                    "overall": overall,
-                    "by_adjudicator": per_adjudicator,
-                    "n_adjudications": len(all_adjudications),
-                    "n_final_calls": len(finalised),
-                    "n_comparable_final_calls": len(comparable),
-                    "resolution": resolution,
-                    "throw_out_resolution": throw_out_rates,
-                    "text_edits": edits,
-                },
-                fh,
-                indent=1,
-            )
+            json.dump(results, fh, indent=1)
             fh.write("\n")
         logger.info("wrote %s", args.json_out)
 
-    return 0
+    return 1 if failed else 0
 
 
 if __name__ == "__main__":

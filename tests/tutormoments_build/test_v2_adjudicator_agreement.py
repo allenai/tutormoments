@@ -477,11 +477,57 @@ def test_main_runs_and_writes_json(tmp_path, capsys):
     ]
     assert A.main(argv) == 0
 
-    written = json.loads(out.read_text(encoding="utf-8"))
+    written = json.loads(out.read_text(encoding="utf-8"))[path]
     assert written["n_moments"] == 4
     assert written["overall"]["rigor_present"]["kappa"] == pytest.approx(1.0)
     assert list(written["by_adjudicator"]) == ["A01", "A03"]
-    assert "rigor_present" in capsys.readouterr().out
+    printed = capsys.readouterr().out
+    assert "All doubly adjudicated moments (4 moments)" in printed
+    # the per-adjudicator tables are --verbose only, but still in the JSON
+    assert "vs every other adjudicator" not in printed
+
+    assert A.main([*argv, "--verbose"]) == 0
+    assert "A01 vs every other adjudicator" in capsys.readouterr().out
+
+
+def test_main_reports_each_file_separately(tmp_path, capsys):
+    def pair(moment_id, rigor):
+        return _row(
+            moment_id,
+            [
+                _adjudication("Carol", rigor_present=rigor),
+                _adjudication("Heidi", rigor_present=rigor),
+            ],
+        )
+
+    first_dir, second_dir = tmp_path / "c", tmp_path / "a"
+    first_dir.mkdir()
+    second_dir.mkdir()
+    first = _write(first_dir, [pair(f"c{i}", i % 2 == 0) for i in range(4)])
+    second = _write(second_dir, [pair(f"a{i}", True) for i in range(2)])
+    out = tmp_path / "agreement.json"
+    argv = [
+        "--annotations",
+        first,
+        second,
+        "--annotator-labels",
+        "missing.json",
+        "--excluded-annotators",
+        "missing.json",
+        "--json-out",
+        str(out),
+    ]
+    assert A.main(argv) == 0
+
+    written = json.loads(out.read_text(encoding="utf-8"))
+    assert list(written) == [first, second]
+    assert written[first]["n_moments"] == 4
+    assert written[second]["n_moments"] == 2
+
+    printed = capsys.readouterr().out
+    assert printed.index(f"=== {first} ===") < printed.index(f"=== {second} ===")
+    assert "(4 moments)" in printed and "(2 moments)" in printed
+    assert "(6 moments)" not in printed  # never pooled
 
 
 def test_main_reports_when_there_is_nothing_to_compare(tmp_path):
@@ -1028,12 +1074,13 @@ def test_main_reports_resolution_and_editing(tmp_path, capsys):
                 "missing.json",
                 "--json-out",
                 str(out),
+                "--verbose",
             ]
         )
         == 0
     )
 
-    written = json.loads(out.read_text(encoding="utf-8"))
+    written = json.loads(out.read_text(encoding="utf-8"))[path]
     assert written["n_adjudications"] == written["n_final_calls"] == 3
     assert written["resolution"]["rigor_present"]["disagreed"] == 3
     assert written["resolution"]["rigor_present"]["picked"] == 3
