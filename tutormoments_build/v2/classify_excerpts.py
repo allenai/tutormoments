@@ -57,6 +57,7 @@ import re
 import sys
 from collections import Counter
 from dataclasses import dataclass
+from types import SimpleNamespace
 
 from tutormoments.logging_setup import logging_args_parent, setup_logging
 from tutormoments.models import (
@@ -112,15 +113,6 @@ EXCERPT_WIDTH = excerpts.FULL_KEY
 # a key splits back apart on the first "__".
 ACTION_PREFIX = "action"
 OVER_SCAFFOLDING_PREFIX = "overscaffold"
-
-# Used when the config carries no `v2` block, so the script still runs against a
-# stripped-down custom config. The config file is the source of truth.
-FALLBACK_SPEC = {
-    "model": "claude-opus-5",
-    "thinking": {"type": "adaptive"},
-    "effort": "xhigh",
-    "poll_interval": 60,
-}
 
 ZERO_USAGE = {"input_tokens": 0, "output_tokens": 0, "total_tokens": 0}
 
@@ -330,14 +322,17 @@ def phase_config(config_path=None, model: str | None = None) -> V2Spec:
     """
     from tutormoments.config import load_config
 
-    cfg = dict(FALLBACK_SPEC)
+    # The config is the only place the scoring model and its parameters are
+    # stated. No defaults are filled in from code: a fallback here would run a
+    # round on a model, or at an effort, that no config names.
     block = load_config(config_path).get("v2")
-    if not block:
-        logger.warning(
-            "no `v2` block in the config; falling back to %s", FALLBACK_SPEC["model"]
+    if not block or not block.get("model"):
+        raise ValueError(
+            "config has no `v2` block with a `model`. State the classification "
+            "model and its provider-native reasoning parameters there "
+            "(see docs/thinking.md)."
         )
-    else:
-        cfg.update(block)
+    cfg = dict(block)
 
     # `v2.models` is a lookup table for --model, not a setting of the round.
     scoped = cfg.pop("models", None) or {}
@@ -612,6 +607,16 @@ def parse_over_scaffolding(text: str) -> tuple[dict, bool]:
 # ===========================================================================
 
 
+def with_max_tokens(entry: dict, max_tokens: int) -> dict:
+    """A copy of one batch entry asking for ``max_tokens`` of output.
+
+    Copied, not mutated: the caller keeps the entries to parse results against.
+    """
+    request = entry["request"]
+    config = {**request.get("generation_config", {}), "max_output_tokens": max_tokens}
+    return {**entry, "request": {**request, "generation_config": config}}
+
+
 def run_entries(entries: list[dict], cfg: V2Spec, batch_id: str | None = None) -> dict:
     """Submit one batch and return {key: {"text", "usage"} | {"error", ...}}.
 
@@ -619,9 +624,20 @@ def run_entries(entries: list[dict], cfg: V2Spec, batch_id: str | None = None) -
     one; the entries passed must be the ones that batch was submitted with,
     since they drive result parsing.
     """
-    from tutormoments.client import ModelClient, run_batch
+    from tutormoments.client import ModelClient, resolve_max_tokens, run_batch
 
     client = ModelClient(cfg.model)
+
+    # No output cap of our own: every entry asks for the model's maximum.
+    # build_batch_entry's default (65536) is half what Anthropic and OpenAI
+    # allow, and a thinking model that exhausts it returns no text to parse.
+    # Resolved here rather than passed as 0 because the Gemini batch path sends
+    # the entry's value through as is.
+    max_tokens = (
+        resolve_max_tokens(SimpleNamespace(provider=cfg.provider, model=cfg.model), 0)
+        or 0
+    )
+    entries = [with_max_tokens(entry, max_tokens) for entry in entries]
 
     def _created(created_id):
         logger.info(
