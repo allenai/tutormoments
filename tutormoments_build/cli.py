@@ -7,6 +7,7 @@ Subcommands:
   dataset build-action-taxonomy
                               released dataset @ revision -> facet-level A-M
                               classifications (action_taxonomy.jsonl + manifest)
+  viewer                      annotation review site (maintainer-local, never committed)
 
 These create or package the benchmark; the runtime `tutormoments` CLI only
 consumes released datasets.
@@ -35,6 +36,48 @@ def _build_parser() -> argparse.ArgumentParser:
     )
     subs = parser.add_subparsers(dest="command")
     log_parent = logging_args_parent()
+
+    # -- viewer ----------------------------------------------------------------
+    viewer_p = subs.add_parser(
+        "viewer",
+        help="Build the annotation review site (contains real names; keep it out of git)",
+        parents=[log_parent],
+    )
+    viewer_p.add_argument(
+        "--annotations",
+        nargs="+",
+        default=[
+            "data/v2_annotations/source/tutoring_provider_a_annotations.jsonl",
+            "data/v2_annotations/source/tutoring_provider_c_annotations.jsonl",
+        ],
+        metavar="FILE",
+        help="Raw annotations JSONL, one per provider (<provider>_annotations.jsonl) "
+        "(default: %(default)s)",
+    )
+    viewer_p.add_argument(
+        "--transcripts",
+        nargs="+",
+        default=[
+            "data/v2_annotations/source/tutoring_provider_a.jsonl",
+            "data/v2_annotations/source/tutoring_provider_c.jsonl",
+        ],
+        metavar="FILE",
+        help="Transcripts JSONL, one per --annotations file and in the same order "
+        "(default: %(default)s)",
+    )
+    viewer_p.add_argument(
+        "--out",
+        default="data/annotation_viewer/index.html",
+        metavar="FILE",
+        help="Where to write the page; must stay under data/ (default: %(default)s)",
+    )
+    viewer_p.add_argument(
+        "--exclude",
+        nargs="*",
+        default=[],
+        metavar="ANNOTATOR",
+        help="Annotator ids whose annotations are dropped",
+    )
 
     dataset_p = subs.add_parser(
         "dataset",
@@ -327,12 +370,55 @@ def _cmd_build_ground_truth(args, command_line: str) -> None:
         )
 
 
+def _cmd_viewer(args) -> None:
+    """Build the annotation review site.
+
+    The page embeds real annotator names and student transcript text, so it is written
+    under data/ (gitignored) and must never be committed or shared outside the team.
+    """
+    from tutormoments_build.annotation_viewer import build_site
+
+    if len(args.annotations) != len(args.transcripts):
+        raise SystemExit(
+            "viewer: give one --transcripts file per --annotations file, in the same order"
+        )
+    payload = build_site(
+        list(zip(args.annotations, args.transcripts)),
+        args.out,
+        excluded=set(args.exclude),
+    )
+    logger.info(
+        "Wrote %s: %d moments over %d transcripts, %d annotators, %d 'no key moments' verdicts",
+        args.out,
+        len(payload["moments"]),
+        len(payload["transcripts"]),
+        len(payload["annotators"]),
+        len(payload["no_key_moments"]),
+    )
+    # A span whose end precedes its start covers no dialogue turn at all, so the page
+    # can only draw it as an empty stretch. Said here rather than patched over: it is
+    # the export to fix, not the drawing.
+    inverted = [
+        m["id"]
+        for m in payload["moments"]
+        if m["boundaries"]["end_turn"] < m["boundaries"]["start_turn"]
+    ]
+    if inverted:
+        logger.warning(
+            "%d moment(s) carry an end turn before their start and highlight nothing: %s",
+            len(inverted),
+            ", ".join(inverted),
+        )
+
+
 def main(argv=None) -> None:
     """Parse args and dispatch subcommand."""
     parser = _build_parser()
     args = parser.parse_args(argv)
 
-    if args.command != "dataset" or not getattr(args, "dataset_command", None):
+    if args.command is None or (
+        args.command == "dataset" and not getattr(args, "dataset_command", None)
+    ):
         parser.print_help()
         sys.exit(0 if args.command is None else 1)
 
@@ -341,6 +427,10 @@ def main(argv=None) -> None:
         argv if argv is not None else sys.argv[1:]
     )
     logger.info("%s", command_line)
+
+    if args.command == "viewer":
+        _cmd_viewer(args)
+        return
 
     from tutormoments_build.moments_build import (
         _cli_build,

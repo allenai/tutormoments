@@ -1,0 +1,649 @@
+"""Render transcript excerpts for the v2 ground-truth moments.
+
+This script combines ``data/ground_truth/{iteration,test}.jsonl`` with one
+transcripts file per provider, ``data/v2_annotations/source/<provider>.jsonl``.
+Each moment is read from the file named after its ``source``.
+The output is used to format transcript excerpts for action classification.
+
+Providers differ in what their transcripts carry: tutoring_provider_a's list
+enrichments (screen activity, pauses) beside the dialogue, and
+tutoring_provider_c's have none. ``TranscriptIndex`` interleaves whatever is
+there into one row list, so a provider C excerpt is dialogue alone.
+
+**Excerpts are cut on ``*_index``, resolved from ``*_turn``.**
+- ``start_turn``/``cut_turn``/``end_turn`` count dialogue only; they are what the
+  ground truth records.
+- ``start_index``/``cut_index``/``end_index`` are positions in the rendered row
+  list, including enrichments. They are resolved here with ``locate_span``, the
+  same placement the annotation viewer draws: the start opens on the first row
+  of its turn, the cut and the end close on the last row of theirs.
+
+Each moment is rendered at every width in ``--context-turns``.
+``full`` is no window at all -- the transcript from its first row.
+
+The excerpt stops at the moment's last row.
+
+Usage:
+    python -m tutormoments_build.v2.excerpts --dry-run
+    python -m tutormoments_build.v2.excerpts --context-turns 8
+    python -m tutormoments_build.v2.excerpts --context-turns full 20
+    python -m tutormoments_build.v2.excerpts --print 02e89625-9d6b-5e00-b40d-5d38a6adb2b3
+"""
+
+import argparse
+import json
+import logging
+import os
+import sys
+from collections import Counter
+
+from tutormoments.logging_setup import logging_args_parent, setup_logging
+from tutormoments_build.annotation_viewer.transcripts import (
+    TranscriptIndex,
+    locate_span,
+)
+
+logger = logging.getLogger("tutormoments_build.v2.excerpts")
+
+DEFAULT_GROUND_TRUTH_DIR = "data/ground_truth"
+# One file per provider, named ``<provider>.jsonl`` after the ``source`` its
+# moments carry in the ground truth.
+DEFAULT_TRANSCRIPTS = (
+    "data/v2_annotations/source/tutoring_provider_a.jsonl",
+    "data/v2_annotations/source/tutoring_provider_c.jsonl",
+)
+DEFAULT_OUT_DIR = "data/excerpts"
+
+# Ground-truth split stems, which are also the excerpt output stems.
+SPLIT_STEMS = ("iteration", "test")
+
+DEFAULT_CONTEXT_TURNS = 20
+
+# The "no window at all" width: the excerpt opens on the transcript's first row
+# and runs to the moment's end. Spelled ``None`` in code and ``"full"`` in the
+# record, because it is not a turn count and writing it as a very large one
+# would read as a window that happens not to bind.
+FULL = None
+FULL_KEY = "full"
+
+# Lead-up widths every excerpt is rendered at. One moment yields one excerpt per
+# width, and a consumer picks the one its prompt calls for. Both v2
+# classification prompts read the full transcript, so ``FULL`` is the width that
+# is actually sent; 20 and 5 are kept so a round can be re-run against a narrow
+# window without rebuilding this file.
+DEFAULT_CONTEXT_WIDTHS = (FULL, 20, 5)
+
+# The excerpt's one marker, and the literal string both v2 prompts name. It is
+# bare: its position in the text is the whole signal. Row indices are a
+# build-side artifact and turn numbers a lossy projection of them (see above),
+# so printing either would add noise a reader cannot act on.
+CUT_POINT = ">>> CUT POINT <<<"
+
+
+def width_key(width: int | None) -> str:
+    """The ``excerpts`` key one width is filed under.
+
+    JSON object keys are strings, so a turn count is stored as its digits and
+    ``FULL`` as ``"full"``. Consumers look a rendering up by this key.
+    """
+    return FULL_KEY if width is FULL else str(width)
+
+
+def sort_widths(keys) -> list[str]:
+    """Width keys widest-first: ``full``, then descending turn counts."""
+    return sorted(
+        set(keys), key=lambda key: (0, 0) if key == FULL_KEY else (1, -int(key))
+    )
+
+
+# ===========================================================================
+# Reading
+# ===========================================================================
+
+
+def load_ground_truth(ground_truth_dir: str) -> dict[str, list[dict]]:
+    """Return {split stem: [ground-truth record, ...]} in file order.
+
+    A missing split file is not an error -- a round may have produced only one.
+    """
+    out: dict[str, list[dict]] = {}
+    for stem in SPLIT_STEMS:
+        path = os.path.join(ground_truth_dir, f"{stem}.jsonl")
+        if not os.path.exists(path):
+            logger.warning("no ground-truth file at %s; skipping split", path)
+            continue
+        records = []
+        with open(path, encoding="utf-8") as fh:
+            for line in fh:
+                line = line.strip()
+                if line:
+                    records.append(json.loads(line))
+        out[stem] = records
+    if not out:
+        raise FileNotFoundError(
+            f"no ground-truth splits found in {ground_truth_dir}; run "
+            "`python -m tutormoments_build.v2.build_ground_truth` first"
+        )
+    return out
+
+
+# ===========================================================================
+# Rendering
+# ===========================================================================
+
+
+def context_start(
+    rows: list[dict],
+    anchor_row: int,
+    context_turns: int | None,
+    max_context_rows: int | None = None,
+) -> int:
+    """First row of the lead-up window before ``anchor_row``.
+
+    Reaches back to the first row of the ``context_turns``-th preceding dialogue
+    turn, which carries every enrichment interleaved with those turns along with
+    it. Enrichments sitting *before* that turn are left out, so the window opens
+    on something someone said rather than mid-way through a run of screen
+    activity. Runs out of transcript -> opens at row 0.
+
+    ``context_turns`` of ``FULL`` is no window at all: row 0, the transcript's
+    first row, whatever ``max_context_rows`` says -- an unbounded lead-up is the
+    point of that width, so a cap would quietly turn it back into a window.
+
+    ``max_context_rows`` clamps the result, for the dense-screen-activity case
+    where a few turns of lead-up span a great many rows.
+
+    ``render_excerpt`` anchors this on the *cut point*, not the moment start --
+    see there for why.
+    """
+    if context_turns is FULL:
+        return 0
+    if context_turns <= 0:
+        first = anchor_row
+    else:
+        seen = 0
+        first = 0
+        for index in range(anchor_row - 1, -1, -1):
+            if rows[index]["turn_number"] is None:
+                continue
+            seen += 1
+            first = index
+            if seen == context_turns:
+                break
+    if max_context_rows is not None:
+        first = max(first, anchor_row - max_context_rows)
+    return first
+
+
+def _strip_role_tag(text: str, role: str) -> str:
+    """Drop the leading ``[TUTOR]`` / ``[STUDENT]`` tag a dialogue row repeats.
+
+    The role is already printed in the line's own prefix, so keeping the tag
+    would render it twice. Only the row's own role is stripped: a tag that
+    disagrees with the role column is left in place to stay visible.
+    """
+    tag = f"[{role}]"
+    if role and text.startswith(tag):
+        return text[len(tag) :].lstrip()
+    return text
+
+
+def format_row(row: dict) -> str:
+    """One transcript row as a line of excerpt text.
+
+    Dialogue prints as ``Turn N. ROLE: text``, matching the convention the rest
+    of the project formats transcripts with. An enrichment prints its text bare:
+    it carries its own ``[SCREEN INTERACTION]``-style tag and has no turn number
+    of its own, and inventing one would disagree with every number around it.
+    """
+    if row["turn_number"] is None:
+        return row["text"]
+    role = row["role"]
+    return f"Turn {row['turn_number']}. {role}: {_strip_role_tag(row['text'], role)}"
+
+
+def render_excerpt(
+    rows: list[dict],
+    boundaries: dict,
+    *,
+    context_turns: int | None = DEFAULT_CONTEXT_TURNS,
+    max_context_rows: int | None = None,
+) -> tuple[str, int]:
+    """Render one moment's excerpt. Returns (text, first row rendered).
+
+    ``boundaries`` supplies ``start_index``/``cut_index``/``end_index``, the row
+    positions the excerpt is cut on. The ``*_turn`` values are not read here:
+    the markers are bare, so what they mark is carried by where they sit in the
+    text rather than by any number printed in them.
+
+    The cut point is the only thing marked, because it is the only landmark
+    either v2 prompt refers to. ``start_index`` and ``end_index`` still bound the
+    window and the range check, but neither boundary is announced: the prompts
+    ask only about what the tutor does *after* the cut, so where the annotated
+    moment opened is not a distinction they act on, and its close needs no marker
+    because nothing is rendered past it -- the excerpt simply ends there.
+
+    The window runs from the lead-up through ``end_index`` and stops there --
+    no trailing context, because for this benchmark the moment's last row is
+    where the transcript ends. At ``context_turns=FULL`` it opens on row 0 and
+    the rest of this paragraph does not apply. Otherwise its opening is measured
+    back from ``cut_index`` (see the module docstring) and from nothing else: ``context_turns`` turns
+    before the cut is the whole rule, whether that reaches back past
+    ``start_index`` or opens inside the moment. The teacher-drawn start is an
+    annotation boundary, not a unit of context -- holding the window open to it
+    would hand a long moment more lead-up than a short one at the same width,
+    which is exactly the confound the cut-anchored window exists to remove.
+    Elided lead-up is not announced either: the excerpt simply opens where the
+    window opens. The returned first-row index still records how much came
+    before, for the excerpt record.
+    """
+    start_row = boundaries["start_index"]
+    end_row = boundaries["end_index"]
+    cut_row = boundaries["cut_index"]
+    if not 0 <= start_row <= end_row < len(rows):
+        raise IndexError(
+            f"moment rows [{start_row}, {end_row}] fall outside the transcript's "
+            f"{len(rows)} row(s)"
+        )
+
+    # Anchored on the cut alone. May land after start_row, inside the moment.
+    first = context_start(rows, cut_row, context_turns, max_context_rows)
+
+    lines = []
+    for index in range(first, end_row + 1):
+        lines.append(format_row(rows[index]))
+        if index == cut_row:
+            lines.append(CUT_POINT)
+
+    return "\n".join(lines), first
+
+
+# ===========================================================================
+# Assembly
+# ===========================================================================
+
+
+def source_of_transcripts(path: str) -> str:
+    """``.../tutoring_provider_a.jsonl`` -> ``tutoring_provider_a``."""
+    return os.path.splitext(os.path.basename(path))[0]
+
+
+def resolve_boundaries(moment: dict, turn_rows: dict) -> dict:
+    """The moment's ``*_turn`` values as ``*_index`` row positions.
+
+    ``turn_rows`` is ``TranscriptIndex.turn_rows``. Raises ``IndexError`` when an
+    edge resolves to no row -- the transcript has no dialogue on that side of it.
+    """
+    located = locate_span(turn_rows, moment)
+    resolved = {
+        "start_index": located["start_row"],
+        "cut_index": located["cut_row"],
+        "end_index": located["end_row"],
+    }
+    missing = [field for field, row in resolved.items() if row is None]
+    if missing:
+        raise IndexError(
+            f"turns {moment['start_turn']}/{moment['cut_turn']}/{moment['end_turn']} "
+            f"resolve to no row for {', '.join(missing)}"
+        )
+    return resolved
+
+
+def build_record(
+    moment: dict,
+    rows: list[dict],
+    conversation_id: str,
+    *,
+    context_widths: "tuple[int | None, ...]" = DEFAULT_CONTEXT_WIDTHS,
+    max_context_rows: int | None = None,
+) -> dict:
+    """Assemble one excerpt record from a ground-truth record and its rows.
+
+    The labels ride along so an excerpt file is usable on its own; everything
+    else about the moment is recoverable by joining on ``moment_id``.
+
+    ``excerpts`` holds one rendering per width in ``context_widths``, keyed by
+    ``width_key`` (JSON object keys are strings, and round-tripping the file
+    must not turn the key into something else). Only the lead-up differs between
+    them, so everything width-independent -- boundaries, row counts, labels --
+    stays at the top level rather than being repeated per width.
+    """
+    excerpts = {}
+    for width in context_widths:
+        text, first = render_excerpt(
+            rows,
+            moment,
+            context_turns=width,
+            max_context_rows=max_context_rows,
+        )
+        excerpts[width_key(width)] = {
+            "excerpt": text,
+            # The width as asked for: a turn count, or null for FULL, whose
+            # own name is the key this rendering sits under.
+            "context_turns": width,
+            "context_start_index": first,
+            # Rows rendered before the cut -- the lead-up as the prompt sees it.
+            # Measured from the cut, not the moment start, because the window is
+            # the cut's: against start_index this count would go negative on a
+            # window that opens inside the moment.
+            "context_rows": moment["cut_index"] - first,
+            # Whether the width was narrower than the moment's own pre-cut run.
+            # Recorded per width so a later round can tell how much of the
+            # annotated moment a given prompt actually saw.
+            "opens_inside_moment": first > moment["start_index"],
+        }
+    span = rows[moment["start_index"] : moment["end_index"] + 1]
+    enrichments = sum(1 for row in span if row["turn_number"] is None)
+
+    # What lies after the cut is what a v2 prompt is actually asked to classify.
+    # Screen activity counts: "[SCREEN INTERACTION] Tutor writes 3x7 on the
+    # board" is a pedagogical move, so the two are counted separately rather
+    # than folded together.
+    post_cut = rows[moment["cut_index"] + 1 : moment["end_index"] + 1]
+    post_cut_dialogue = sum(1 for row in post_cut if row["turn_number"] is not None)
+
+    return {
+        "moment_id": moment["moment_id"],
+        "source": moment.get("source"),
+        "transcript_id": moment["transcript_id"],
+        "conversation_id": conversation_id,
+        "split": moment["split"],
+        "start_turn": moment["start_turn"],
+        "cut_turn": moment["cut_turn"],
+        "end_turn": moment["end_turn"],
+        "start_index": moment["start_index"],
+        "cut_index": moment["cut_index"],
+        "end_index": moment["end_index"],
+        "moment_rows": len(span),
+        "moment_dialogue_rows": len(span) - enrichments,
+        "moment_enrichment_rows": enrichments,
+        "post_cut_rows": len(post_cut),
+        "post_cut_dialogue_rows": post_cut_dialogue,
+        "labels": moment["labels"],
+        "excerpts": excerpts,
+    }
+
+
+def build(
+    ground_truth_dir: str,
+    transcripts_paths: "tuple[str, ...] | list[str]",
+    *,
+    context_widths: "tuple[int | None, ...]" = DEFAULT_CONTEXT_WIDTHS,
+    max_context_rows: int | None = None,
+) -> tuple[dict[str, list[dict]], Counter]:
+    """Return ({output stem: [excerpt record, ...]}, per-reason drop counts).
+
+    ``transcripts_paths`` holds one file per provider; a moment is looked up only
+    in the file named after its ``source``.
+    """
+    ground_truth = load_ground_truth(ground_truth_dir)
+    moments = [moment for records in ground_truth.values() for moment in records]
+
+    indexes: dict[str, TranscriptIndex] = {}
+    for path in transcripts_paths:
+        source = source_of_transcripts(path)
+        if source in indexes:
+            raise ValueError(f"two transcripts files for provider {source!r}")
+        wanted = {m["transcript_id"] for m in moments if m.get("source") == source}
+        index = indexes[source] = TranscriptIndex(path, wanted)
+        logger.info(
+            "%s: %d of %d transcript(s) found in %s (%d in the file)",
+            source,
+            len(index),
+            len(wanted),
+            path,
+            index.total,
+        )
+
+    out: dict[str, list[dict]] = {stem: [] for stem in ground_truth}
+    dropped: Counter = Counter()
+
+    for stem, records in ground_truth.items():
+        for moment in records:
+            source = moment.get("source")
+            transcript_id = moment["transcript_id"]
+            index = indexes.get(source)
+            if index is None:
+                dropped["no_transcripts_for_source"] += 1
+                logger.warning(
+                    "no transcripts file given for source %r; skipping moment %s",
+                    source,
+                    moment["moment_id"],
+                )
+                continue
+            if transcript_id not in index:
+                dropped["transcript_not_in_export"] += 1
+                logger.warning(
+                    "transcript %s is not in %s; skipping moment %s",
+                    transcript_id,
+                    index.path,
+                    moment["moment_id"],
+                )
+                continue
+
+            rows = index.rows(transcript_id)
+            try:
+                resolved = moment | resolve_boundaries(
+                    moment, index.turn_rows(transcript_id)
+                )
+                record = build_record(
+                    resolved,
+                    rows,
+                    index.conversation_id(transcript_id) or transcript_id,
+                    context_widths=context_widths,
+                    max_context_rows=max_context_rows,
+                )
+            except IndexError as error:
+                dropped["boundaries_out_of_range"] += 1
+                logger.warning("moment %s: %s", moment["moment_id"], error)
+                continue
+            out[stem].append(record)
+
+    return out, dropped
+
+
+def write_split(out_dir: str, stem: str, records: list[dict]) -> str:
+    """Write one split's excerpts JSONL atomically. Returns the path written."""
+    os.makedirs(out_dir, exist_ok=True)
+    path = os.path.join(out_dir, f"{stem}.jsonl")
+    tmp = f"{path}.tmp"
+    with open(tmp, "w", encoding="utf-8") as fh:
+        for record in records:
+            fh.write(json.dumps(record) + "\n")
+    os.replace(tmp, path)
+    return path
+
+
+# ===========================================================================
+# Reporting
+# ===========================================================================
+
+
+def _inside_moment_lines(out: dict[str, list[dict]], widths: list[str]) -> list[str]:
+    """How often each width opened inside the moment rather than before it.
+
+    Worth surfacing per run: it is the share of moments where the prompt saw
+    less than the annotator drew, and it moves with the width, so a width that
+    lands inside nearly every moment is a signal the window is too narrow to
+    judge the question being asked.
+    """
+    records = [r for records in out.values() for r in records]
+    if not records:
+        return []
+    lines = []
+    for key in widths:
+        inside = sum(1 for r in records if r["excerpts"][key]["opens_inside_moment"])
+        lines.append(
+            f"    @{key:<5}{inside:>5} of {len(records)} ({inside / len(records):.0%})"
+        )
+    return ["", "  windows opening inside the moment:", *lines] if lines else []
+
+
+def report(out: dict[str, list[dict]], dropped: Counter, dry_run: bool) -> str:
+    lines = [
+        "",
+        "DRY RUN -- nothing written" if dry_run else "Excerpts written",
+        "",
+    ]
+    widths = sort_widths(
+        w for records in out.values() for r in records for w in r["excerpts"]
+    )
+
+    lead_up = "".join(f"{f'lead-up @{w}':>15}" for w in widths)
+    header = (
+        f"  {'split':<12}{'source':<24}{'moments':>9}{lead_up}{'moment rows':>14}"
+        f"{'enrichment rows':>18}{'with enrichments':>19}"
+    )
+    lines += [header, f"  {'-' * (len(header) - 2)}"]
+
+    for stem, records in out.items():
+        if not records:
+            lines.append(f"  {stem:<12}{'':<24}{0:>9}")
+            continue
+        # Per provider, because enrichments are: a provider whose transcripts
+        # carry none reads as a zero here, not as a broken join.
+        by_source: dict[str, list[dict]] = {}
+        for r in records:
+            by_source.setdefault(r["source"] or "?", []).append(r)
+        for source, group in sorted(by_source.items()):
+            per_width = "".join(
+                f"{sum(r['excerpts'][w]['context_rows'] for r in group) / len(group):>15.1f}"
+                for w in widths
+            )
+            moment = sum(r["moment_rows"] for r in group) / len(group)
+            enrich = sum(r["moment_enrichment_rows"] for r in group) / len(group)
+            with_enrich = sum(1 for r in group if r["moment_enrichment_rows"])
+            share = f"{with_enrich / len(group):.0%}"
+            lines.append(
+                f"  {stem:<12}{source:<24}{len(group):>9}{per_width}{moment:>14.1f}"
+                f"{enrich:>18.1f}{f'{with_enrich} ({share})':>19}"
+            )
+
+    lines.append("")
+    lines.append(
+        "  (row counts are means per moment; lead-up @N is the N-turn window, "
+        "counted back from the cut; @full is the transcript from its first row)"
+    )
+
+    lines += _inside_moment_lines(out, widths)
+
+    if dropped:
+        lines += ["", "  moments not emitted:"]
+        for reason, count in sorted(dropped.items(), key=lambda kv: -kv[1]):
+            lines.append(f"    {reason:<28}{count:>5}")
+    lines.append("")
+    return "\n".join(lines)
+
+
+# ===========================================================================
+# CLI
+# ===========================================================================
+
+
+def context_width(value: str) -> int | None:
+    """Parse one ``--context-turns`` value: a turn count, or ``full``."""
+    if value.strip().lower() == FULL_KEY:
+        return FULL
+    try:
+        return int(value)
+    except ValueError:
+        raise argparse.ArgumentTypeError(
+            f"expected a turn count or {FULL_KEY!r}, got {value!r}"
+        ) from None
+
+
+def build_parser() -> argparse.ArgumentParser:
+    parser = argparse.ArgumentParser(
+        prog="python -m tutormoments_build.v2.excerpts",
+        description="Render transcript excerpts for the v2 ground-truth moments",
+        formatter_class=argparse.ArgumentDefaultsHelpFormatter,
+        parents=[logging_args_parent()],
+    )
+    parser.add_argument(
+        "--ground-truth", default=DEFAULT_GROUND_TRUTH_DIR, metavar="DIR"
+    )
+    parser.add_argument(
+        "--transcripts",
+        nargs="+",
+        default=list(DEFAULT_TRANSCRIPTS),
+        metavar="FILE",
+        help="Transcripts JSONL, one per provider, named <provider>.jsonl after "
+        "the source its moments carry",
+    )
+    parser.add_argument("--out-dir", default=DEFAULT_OUT_DIR, metavar="DIR")
+    parser.add_argument(
+        "--context-turns",
+        type=context_width,
+        nargs="+",
+        default=list(DEFAULT_CONTEXT_WIDTHS),
+        metavar="N",
+        help="Dialogue turns of lead-up before the CUT POINT (0 for none, "
+        f"{FULL_KEY!r} for the whole transcript before it). Enrichments "
+        "interleaved with those turns are included. A turn window is measured "
+        "from the cut alone: on a moment with a long pre-cut run it opens "
+        "inside the moment, so every excerpt at a width carries the same "
+        "lead-up. Pass several widths to render an excerpt at each; consumers "
+        "pick the one their prompt calls for.",
+    )
+    parser.add_argument(
+        "--max-context-rows",
+        type=int,
+        default=None,
+        metavar="N",
+        help="Cap the lead-up at N rows, for stretches of dense screen activity",
+    )
+    parser.add_argument(
+        "--print",
+        dest="print_moment",
+        metavar="MOMENT_ID",
+        help="Print one moment's excerpt to stdout and exit (id prefix accepted)",
+    )
+    parser.add_argument(
+        "--dry-run", action="store_true", help="Report without writing any file"
+    )
+    return parser
+
+
+def main(argv: list[str] | None = None) -> int:
+    args = build_parser().parse_args(argv)
+    setup_logging(level=args.log_level, log_file=args.log_file)
+
+    out, dropped = build(
+        args.ground_truth,
+        args.transcripts,
+        context_widths=tuple(args.context_turns),
+        max_context_rows=args.max_context_rows,
+    )
+
+    if args.print_moment:
+        for records in out.values():
+            for record in records:
+                if record["moment_id"].startswith(args.print_moment):
+                    for key in sort_widths(record["excerpts"]):
+                        rendered = record["excerpts"][key]
+                        label = (
+                            "whole transcript"
+                            if key == FULL_KEY
+                            else f"{key}-turn window"
+                        )
+                        print(f"===== {label} =====\n")
+                        print(rendered["excerpt"])
+                        print()
+                    return 0
+        print(f"no moment matching {args.print_moment!r}", file=sys.stderr)
+        return 1
+
+    if not args.dry_run:
+        for stem, records in out.items():
+            logger.info(
+                "wrote %d excerpt(s) to %s",
+                len(records),
+                write_split(args.out_dir, stem, records),
+            )
+
+    print(report(out, dropped, dry_run=args.dry_run))
+    return 0
+
+
+if __name__ == "__main__":
+    sys.exit(main())

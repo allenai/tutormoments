@@ -23,9 +23,12 @@ s3_bucket/
 
 # All data and results -- fully gitignored (private/local build inputs & artifacts,
 # never committed). Data schemas are documented at the HuggingFace release
-# (dataset card + *.schema.json), not in-repo.
+# (dataset card + *.schema.json), not in-repo. outputs/ holds artifacts that
+# evaluate the pipeline itself, kept separate from the benchmark runs results/
+# collects.
 data/
 results/
+outputs/
 benchmark/results/
 *.jsonl
 !tests/**/*.jsonl
