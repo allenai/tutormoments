@@ -35,6 +35,30 @@ student: { model: claude-opus-4-6, mode: oracle, thinking: { type: disabled } }
 scorer:  { model: claude-opus-4-6, thinking: { type: adaptive } }
 ```
 
+The maintainer-only `v2:` block (the annotation-round classifier,
+`python -m tutormoments_build.v2.classify_excerpts`) is a role block with a
+comparison table hung off it. Its own model states the round's default
+condition; `v2.models` is a lookup table keyed by model id, consulted when
+`--model` names a scoring model that is not on the tutor roster:
+
+```yaml
+v2:
+  model: claude-opus-5
+  thinking: { type: adaptive }
+  effort: xhigh
+  models:
+    gpt-5.6-sol: { reasoning: xhigh }
+```
+
+`--model` resolves against `v2.models` first, then `benchmark_models` (by arm
+name or model id), so a model already on the roster scores at exactly the
+parameters the benchmark replays it with and cannot drift from its arm. An
+override takes its entry whole and inherits nothing from the block above it:
+merging would carry one vendor's knob onto another's model. Unlike the
+runtime's own blocks the `v2:` block is not validated by the config loader —
+`classify_excerpts.phase_config` validates it through the same
+`resolve_thinking`, before a batch is built.
+
 ## The per-provider keys
 
 The allowed keys mirror exactly the knobs the client knows how to send; an

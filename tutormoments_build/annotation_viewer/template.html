@@ -1,0 +1,1532 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Annotation review</title>
+<style>
+  /* Visual language carried over from the annotation platform the raters used:
+     #1890ff primary, green/blue speaker labels, yellow moment highlight, white
+     rounded cards on a grey page. */
+  :root {
+    --primary: #1890ff;
+    --success: #52c41a;
+    --danger: #ff4d4f;
+    --warn-text: #d97706;
+    --warn-border: #ffc107;
+    --warn-bg: #fff3cd;
+    --ink: #333;
+    --text: #222;
+    --muted: #666;
+    --faint: #999;
+    --line: #d9d9d9;
+    --line-soft: #e0e0e0;
+    /* The two analytics series. Blue/orange rather than the semantic good/warn colours:
+       on these bars the colour says *which pass*, not whether the judgment was a good
+       one. Checked for colour-vision separation against the white card (ΔE 30 protan,
+       35 normal, both ≥ 3:1 contrast). */
+    --pass1: #1890ff;
+    --pass2: #d46b08;
+  }
+  * { box-sizing: border-box; }
+  body {
+    margin: 0; background: #f0f2f5; color: var(--ink); font-size: 14px; line-height: 1.6;
+    font-family: 'Inter', 'Segoe UI', system-ui, Arial, sans-serif;
+  }
+  button { font: inherit; }
+  code { font-family: ui-monospace, SFMono-Regular, Menlo, monospace; }
+  .hint { color: var(--faint); font-size: 13px; margin: 0; }
+
+  /* ── Header ─────────────────────────────────────────────────────────────── */
+  .app-header {
+    display: flex; align-items: baseline; flex-wrap: wrap; gap: 14px; padding: 12px 20px;
+    background: var(--primary); color: #fff; border-radius: 0 0 12px 12px;
+    box-shadow: 0 2px 8px rgba(24, 144, 255, .25);
+  }
+  .app-header .title { font-weight: 600; font-size: 17px; }
+  .app-header .sub { color: rgba(255, 255, 255, .88); font-size: 12.5px; }
+  .app-header .grow { margin-left: auto; }
+  .privacy {
+    background: var(--warn-bg); border-bottom: 1px solid var(--warn-border);
+    color: var(--warn-text); font-size: 12.5px; font-weight: 500; padding: 8px 20px;
+  }
+
+  /* ── Toolbar ────────────────────────────────────────────────────────────── */
+  .toolbar {
+    display: flex; flex-wrap: wrap; align-items: flex-end; gap: 16px; padding: 12px 16px 14px;
+  }
+  .ctl { display: flex; flex-direction: column; gap: 5px; }
+  .ctl[hidden] { display: none; }
+  .ctl label { letter-spacing: .05em; text-transform: uppercase; color: var(--muted); font-size: 10.5px; }
+  .ctl select, .ctl input {
+    font: inherit; border: 1px solid var(--line); color: var(--ink); background: #fff;
+    border-radius: 7px; min-width: 140px; padding: 6px 10px; font-size: 13px;
+  }
+  .grow { margin-left: auto; }
+  .checkline { color: var(--muted); display: flex; align-items: center; gap: 7px; font-size: 12.5px; }
+  .btn {
+    padding: 6px 12px; border-radius: 6px; border: 1px solid var(--line); background: #f5f5f5;
+    color: #595959; cursor: pointer; font-size: 13px; font-weight: 600;
+  }
+  .btn:hover { background: #e6e6e6; border-color: #b3b3b3; }
+  .btn.small { padding: 4px 10px; font-size: 12px; }
+
+  /* ── Analytics ──────────────────────────────────────────────────────────── */
+  details.analytics {
+    background: #fff; border-radius: 10px; margin: 0 16px 14px; padding: 4px 18px 6px;
+    box-shadow: 0 1px 4px rgba(0, 0, 0, .06);
+  }
+  details.analytics > summary {
+    cursor: pointer; color: var(--primary); user-select: none; padding: 10px 0;
+    font-size: 13px; font-weight: 600; list-style: none;
+  }
+  details.analytics > summary::-webkit-details-marker { display: none; }
+  details.analytics > summary::before { content: "▾ "; }
+  details.analytics:not([open]) > summary::before { content: "▸ "; }
+  .an-grid { display: grid; grid-template-columns: repeat(4, minmax(0, 1fr)); gap: 26px; padding: 6px 2px 16px; }
+  .an-col h4 {
+    letter-spacing: .06em; text-transform: uppercase; color: var(--muted); margin: 0 0 8px; font-size: 11px;
+  }
+  .an-col h4.spaced { margin-top: 14px; }
+  .kv {
+    border-bottom: 1px dashed rgba(0, 0, 0, .06); display: flex; justify-content: space-between;
+    padding: 2px 0; font-size: 12.5px;
+  }
+  .kv b { font-variant-numeric: tabular-nums; }
+  /* One category, two bars: the first pass over it above the second pass over it. */
+  .bar { display: flex; align-items: center; gap: 8px; margin: 5px 0; font-size: 12px; }
+  .bar .lbl { color: var(--ink); flex: 0 0 116px; }
+  .bar .series { display: flex; flex-direction: column; gap: 2px; flex: 1; min-width: 0; }
+  .bar .srow { display: flex; align-items: center; gap: 8px; }
+  .bar .track { background: #f2f3f5; border-radius: 4px; flex: 1; height: 7px; overflow: hidden; display: block; }
+  .bar .fill { height: 100%; display: block; border-radius: 4px; }
+  .bar .n {
+    text-align: right; color: var(--muted); font-variant-numeric: tabular-nums;
+    flex: 0 0 62px; white-space: nowrap;
+  }
+  .fill.pass1, .sw.pass1 { background: var(--pass1); }
+  .fill.pass2, .sw.pass2 { background: var(--pass2); }
+  .an-legend {
+    display: flex; flex-wrap: wrap; gap: 20px; color: var(--muted);
+    padding: 2px 2px 12px; font-size: 11.5px;
+  }
+  .an-legend .key { display: inline-flex; align-items: center; gap: 6px; }
+  .an-legend .sw { border-radius: 3px; width: 10px; height: 10px; display: inline-block; }
+  table.agree { border-collapse: collapse; width: 100%; font-size: 12px; }
+  table.agree th, table.agree td {
+    text-align: left; border-bottom: 1px solid rgba(0, 0, 0, .06); padding: 4px 6px;
+  }
+  table.agree th {
+    color: var(--muted); text-transform: uppercase; letter-spacing: .04em; font-size: 10.5px; font-weight: 600;
+  }
+  table.agree td.num { text-align: right; font-variant-numeric: tabular-nums; }
+  table.agree td.num.undef { color: var(--faint); cursor: help; }
+  .table-scroll { overflow-x: auto; }
+  .an-legend-note { color: var(--faint); margin: 8px 0 0; font-size: 11px; }
+  .kappa { font-weight: 600; }
+  .kappa.mid { color: var(--warn-text); }
+  .kappa.low { color: var(--danger); }
+  .kappa.ok { color: color-mix(in srgb, var(--success) 70%, #000); }
+  .kappa.undef { color: var(--faint); font-weight: 400; cursor: help; }
+
+  /* ── Panes ──────────────────────────────────────────────────────────────── */
+  .mode { padding: 0 16px 40px; }
+  .pane { background: #fff; border-radius: 10px; padding: 16px 18px; box-shadow: 0 1px 4px rgba(0, 0, 0, .06); }
+  .topbar { display: flex; align-items: flex-end; flex-wrap: wrap; gap: 16px; padding-bottom: 12px; }
+  .transcript-select {
+    font: inherit; border: 1px solid var(--line); color: var(--ink); background: #fff;
+    border-radius: 7px; min-width: 320px; max-width: 620px; padding: 6px 10px; font-size: 13px;
+  }
+  .detail-split {
+    display: grid; grid-template-columns: minmax(340px, 42%) minmax(0, 58%); align-items: start; gap: 16px;
+  }
+  .detail-split[hidden] { display: none; }
+  .detail-split .transcript-pane, .detail-split .moments-pane { max-height: 76vh; overflow-y: auto; }
+
+  /* ── Problem cards ──────────────────────────────────────────────────────── */
+  .problems {
+    display: flex; align-items: center; gap: 12px; margin-bottom: 14px; max-width: 760px;
+  }
+  .problems[hidden] { display: none; }
+  .problem-card {
+    flex: 1; min-width: 0; background: #fff; border: 1px solid var(--line); border-radius: 8px;
+    padding: 10px 14px; box-shadow: 0 1px 4px rgba(0, 0, 0, .06);
+  }
+  .problem-card .p-count {
+    letter-spacing: .06em; text-transform: uppercase; color: var(--muted); font-size: 10.5px; font-weight: 600;
+  }
+  .problem-card .p-title { color: var(--text); font-size: 14px; font-weight: 600; margin: 2px 0; }
+  .problem-card .p-meta { color: var(--muted); font-size: 12px; }
+  .problems .btn:disabled { opacity: .4; cursor: default; }
+
+  /* ── Transcript ─────────────────────────────────────────────────────────── */
+  .transcript .turn {
+    display: grid; grid-template-columns: 28px 60px 1fr; gap: 8px; padding: 3px 8px;
+    border-left: 3px solid transparent; border-radius: 4px; font-size: 13px;
+  }
+  .transcript .turn.tutor { border-left-color: #bae7ff; background: #f6fbff; }
+  .transcript .turn.student { border-left-color: #e6f7ff; background: #fff; }
+  .transcript .turn-num { color: var(--faint); font-size: 11px; text-align: right; }
+  .transcript .turn-role { font-size: 11px; font-weight: 600; white-space: nowrap; }
+  .transcript .turn.tutor .turn-role { color: var(--primary); }
+  .transcript .turn.student .turn-role { color: var(--success); }
+  .transcript .turn-text { white-space: pre-wrap; color: var(--text); font-size: 13px; }
+  .transcript .turn.in-moment { background: rgba(255, 235, 59, .22); border-left-color: var(--warn-border); }
+  .transcript .turn.screen-event .turn-text { color: var(--muted); }
+  .screen-tag {
+    display: inline-block; font-size: 10.5px; font-weight: 700; text-transform: uppercase;
+    letter-spacing: .03em; color: var(--muted); background: #eceff1; border-radius: 4px;
+    padding: 0 6px; margin: 0 3px 0 0; vertical-align: 1px; white-space: nowrap;
+  }
+  .cut-marker {
+    border-top: 2px dashed var(--danger); color: var(--danger); font-size: 12.5px; padding: 2px 8px 6px;
+  }
+  .boundary-hint { color: var(--primary); padding: 2px 8px 4px; font-size: 11px; font-weight: 600; }
+  .elision { color: var(--muted); padding: 3px 0 3px 40px; font-size: 11.5px; font-style: italic; }
+
+  /* ── Moment cards ───────────────────────────────────────────────────────── */
+  .moment { border-top: 1px solid var(--line-soft); padding: 16px 2px 4px; }
+  .moment:first-child { border-top: 0; padding-top: 2px; }
+  .moments-pane .moment.moment-card {
+    border: 1px solid var(--line); background: #fff; border-radius: 8px; margin-bottom: 16px; padding: 14px 16px;
+  }
+  .moments-pane .moment.moment-card:first-child { border-top: 1px solid var(--line); padding-top: 14px; }
+  .moments-pane .moment.moment-card.active { border-color: var(--primary); box-shadow: 0 0 0 1px rgba(24, 144, 255, .35); }
+  .moment.selectable { cursor: pointer; }
+  .m-head { display: flex; flex-wrap: wrap; align-items: center; gap: 9px; }
+  .m-loc { font-size: 13.5px; font-weight: 600; }
+  .m-loc code { color: var(--muted); font-size: 12px; font-weight: 500; }
+  .m-head-divider { border: 0; border-top: 1px solid rgba(0, 0, 0, .06); margin: 8px 0 10px; }
+  .len { color: var(--muted); font-size: 11.5px; }
+  .status {
+    text-transform: uppercase; letter-spacing: .04em; color: var(--muted); background: #f2f3f5;
+    border-radius: 20px; padding: 1px 7px; font-size: 10px; font-weight: 600;
+  }
+  .status.done { color: var(--primary); background: rgba(24, 144, 255, .1); }
+  .outcome { margin-left: auto; font-size: 12px; font-weight: 600; }
+  .outcome.agree { color: color-mix(in srgb, var(--success) 70%, #000); }
+  .outcome.differ { color: var(--danger); }
+  .outcome.single, .outcome.dropped { color: var(--muted); font-weight: 500; }
+  .m-note {
+    width: 100%; color: var(--warn-text); background: rgba(217, 119, 6, .1); border-radius: 6px;
+    margin-top: 3px; padding: 5px 10px; font-size: 11.5px;
+  }
+  .cmp { margin-top: 12px; }
+  .colhead {
+    display: grid; border-bottom: 1px solid rgba(0, 0, 0, .06); align-items: end; gap: 14px; padding: 0 0 7px;
+  }
+  /* min-width: 0 on the grid items: a card with two adjudicators is four columns wide,
+     and without it a long annotator name would widen its column instead of ellipsing. */
+  .ch { display: flex; flex-direction: column; gap: 2px; min-width: 0; font-size: 12px; }
+  .ch .pass { font-weight: 600; }
+  .ch .pass.final { color: var(--primary); }
+  .ch .meta { color: var(--muted); font-size: 11px; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+  .row { display: grid; border-bottom: 1px solid rgba(0, 0, 0, .06); align-items: start; gap: 14px; padding: 8px 0; }
+  .row .k { letter-spacing: .06em; color: var(--muted); padding-top: 3px; font-size: 10px; font-weight: 700; }
+  .cell { display: flex; flex-wrap: wrap; align-items: center; gap: 5px; min-width: 0; }
+  .cell .none { color: var(--faint); font-size: 11.5px; font-style: italic; }
+  .chip {
+    color: var(--muted); background: #f2f3f5; border-radius: 20px; align-items: center; gap: 4px;
+    padding: 2px 9px; font-size: 11.5px; font-weight: 500; display: inline-flex;
+  }
+  .moments-pane .chip { white-space: normal; }
+  .chip.good { color: color-mix(in srgb, var(--success) 70%, #000); background: rgba(82, 196, 26, .12); }
+  .chip.warn { color: var(--warn-text); background: rgba(217, 119, 6, .14); }
+  .chip.info { color: var(--primary); background: rgba(24, 144, 255, .1); }
+  .chip.muted { color: var(--muted); background: #f2f3f5; }
+  .chip.diff { box-shadow: 0 0 0 1.5px rgba(255, 77, 79, .55); font-weight: 700; }
+  .chip.hollow { border: 1px solid var(--line-soft); color: var(--muted); background: #fff; font-weight: 400; }
+  .chip.tag {
+    border: 1px solid var(--line-soft); color: #8a8a8a; background: #fff; padding: 1px 7px;
+    font-size: 10.5px; font-weight: 400;
+  }
+  .secondary-tags { display: flex; flex-wrap: wrap; gap: 4px; width: 100%; margin-top: 3px; }
+  details.why-more { margin-top: 8px; }
+  details.why-more > summary {
+    cursor: pointer; color: var(--muted); user-select: none; font-size: 11.5px; list-style: none;
+  }
+  details.why-more > summary::-webkit-details-marker { display: none; }
+  details.why-more > summary::before { content: "▸ " attr(data-label); }
+  details.why-more[open] > summary::before { content: "▾ " attr(data-label); }
+  details.why-more.disagree {
+    border-left: 3px solid var(--danger); background: rgba(255, 77, 79, .07);
+    border-radius: 0 6px 6px 0; margin-top: 8px; padding: 6px 10px;
+  }
+  details.why-more.disagree > summary::before { color: var(--danger); font-weight: 700; }
+  .adj {
+    width: 100%; color: var(--text); background: rgba(24, 144, 255, .07);
+    border-left: 3px solid var(--primary); border-radius: 0 6px 6px 0;
+    margin-top: 10px; padding: 7px 10px; font-size: 12px;
+  }
+  .adj .adj-k {
+    letter-spacing: .06em; color: var(--primary); font-size: 10px; font-weight: 700;
+    display: block; margin-bottom: 4px;
+  }
+  .adj .adj-why { white-space: pre-wrap; }
+  .adj .secondary-tags { margin-top: 6px; }
+  .why-cols { display: grid; gap: 14px; margin-top: 6px; }
+  .why-col { color: var(--text); white-space: pre-wrap; overflow-wrap: anywhere; min-width: 0; font-size: 12px; }
+  .why-none { color: var(--faint); }
+  .no-key { color: var(--muted); font-size: 12.5px; margin: 6px 0 10px; }
+  .no-key .who { color: var(--ink); font-weight: 600; }
+
+  @media (max-width: 1500px) {
+    .an-grid { grid-template-columns: repeat(2, minmax(0, 1fr)); }
+  }
+  @media (max-width: 980px) {
+    .an-grid, .detail-split { grid-template-columns: 1fr; }
+    .detail-split .transcript-pane, .detail-split .moments-pane { max-height: none; overflow-y: visible; }
+  }
+</style>
+</head>
+<body>
+<header class="app-header">
+  <span class="title">Annotation review</span>
+  <span class="sub" id="header-sub"></span>
+  <span class="sub grow" id="header-source"></span>
+</header>
+<div class="privacy">
+  Contains real annotator names and student transcript text. Keep it out of git and do not share it
+  outside the annotation team.
+</div>
+
+<div class="toolbar">
+  <div class="ctl">
+    <label for="f-provider">Provider</label>
+    <select id="f-provider"></select>
+  </div>
+  <div class="ctl">
+    <label for="f-annotator">Annotator</label>
+    <select id="f-annotator"></select>
+  </div>
+  <div class="ctl">
+    <label for="f-pairs">Agreement between</label>
+    <select id="f-pairs"></select>
+  </div>
+  <div class="ctl">
+    <label for="f-axis">Agreement on</label>
+    <select id="f-axis"></select>
+  </div>
+  <div class="ctl">
+    <label for="f-adjudication">Adjudication</label>
+    <select id="f-adjudication"></select>
+  </div>
+  <div class="ctl">
+    <label for="f-from">Annotated from</label>
+    <input type="date" id="f-from" aria-label="From date">
+  </div>
+  <div class="ctl">
+    <label for="f-to">To</label>
+    <input type="date" id="f-to" aria-label="To date">
+  </div>
+  <button class="btn small" id="clear-dates" hidden>Clear dates</button>
+  <div class="grow">
+    <label class="checkline"><input type="checkbox" id="f-testers" checked> Exclude testers</label>
+  </div>
+</div>
+
+<details class="analytics" id="analytics">
+  <summary id="analytics-summary">Analytics</summary>
+  <div class="an-legend" id="analytics-legend"></div>
+  <div class="an-grid" id="analytics-body"></div>
+</details>
+
+<div class="mode" id="mode-transcript">
+  <div class="topbar">
+    <div class="ctl">
+      <label for="transcript-select">Transcript</label>
+      <select id="transcript-select" class="transcript-select"></select>
+    </div>
+    <p class="hint" id="transcript-hint"></p>
+  </div>
+  <!-- The session's problems, where the provider records them. One card at a time:
+       a session can run to a dozen slides, and a row of them would push the
+       transcript below the fold. -->
+  <div class="problems" id="transcript-problems" hidden>
+    <button class="btn small" id="problem-prev" aria-label="Previous problem">‹ Prev</button>
+    <div class="problem-card" id="problem-card"></div>
+    <button class="btn small" id="problem-next" aria-label="Next problem">Next ›</button>
+  </div>
+  <div class="detail-split" id="transcript-detail" hidden>
+    <div class="pane transcript-pane" id="transcript-turns"></div>
+    <div class="pane moments-pane" id="transcript-moments"></div>
+  </div>
+</div>
+
+<script id="data" type="application/json">__VIEWER_DATA__</script>
+<script>
+"use strict";
+const DATA = JSON.parse(document.getElementById("data").textContent);
+const $ = (id) => document.getElementById(id);
+
+const AXES = DATA.axes;
+// The axes the agreement table reports. Every axis still counts towards a moment's
+// disagreements on its card; these are the ones a kappa is quoted for.
+const REPORTED_AXES = AXES.filter((a) => a.reported);
+const CONSTRUCTS = ["sit", "act", "res"];
+const CONSTRUCT_LABEL = { sit: "SIT", act: "ACT", res: "RES" };
+const PASS_LABEL = { selector: "Selector", reannotator: "Reannotator", adjudicator: "Adjudicator (final)" };
+
+/** The column heading for one pass.
+ *
+ *  Two adjudicators on a moment are numbered in the order they ruled: neither of them
+ *  is "the" final call, and telling the two apart is the point of showing both. */
+function passLabel(pass, v) {
+  if (pass.role !== "adjudicator" || v.adjudicators.length < 2) return PASS_LABEL[pass.role];
+  return `Adjudicator ${v.adjudicators.indexOf(pass) + 1}`;
+}
+const SINGLE_PASS = "single pass";
+
+// The two rater pairs the agreement filter and the agreement table can be pointed at.
+// Both are two raters answering the same questions independently, which is what a
+// kappa needs; they are simply different pairs of raters, so each carries the words the
+// headings and tooltips use for its two sides. `key` names the map `view` puts the
+// moment's pairs under.
+const PAIR_SOURCES = {
+  passes: {
+    key: "pairs",
+    label: "First vs. second pass",
+    short: "the two passes",
+    first: "the first pass",
+    second: "the second pass",
+    other: "the other pass",
+    none: "No moment was judged twice on this axis.",
+  },
+  // The two sides are the moment's two adjudicators ordered by rater, not the card's
+  // "Adjudicator 1 / 2" columns, which are numbered by who ruled first: pooling several
+  // rater pairs into one kappa needs the same rater on the same side every time. So the
+  // sides are named for the comparison rather than for the columns.
+  adjudicators: {
+    key: "adjudicatorPairs",
+    label: "Adjudicator A vs. adjudicator B",
+    short: "the two adjudicators",
+    first: "adjudicator A",
+    second: "adjudicator B",
+    other: "the other adjudicator",
+    none: "No moment was adjudicated twice on this axis.",
+  },
+};
+const pairSource = () => PAIR_SOURCES[state.pairSource];
+// A side's name opens a sentence as often as it sits inside one.
+const cap = (s) => s.charAt(0).toUpperCase() + s.slice(1);
+
+/** The pairs the agreement filter and the agreement table read on one moment. */
+const pairsOf = (v) => v[pairSource().key];
+
+const TRANSCRIPTS = new Map(DATA.transcripts.map((t) => [t.transcript_id, t]));
+const MOMENTS_BY_TRANSCRIPT = new Map();
+for (const m of DATA.moments) {
+  const list = MOMENTS_BY_TRANSCRIPT.get(m.transcript_id);
+  if (list) list.push(m); else MOMENTS_BY_TRANSCRIPT.set(m.transcript_id, [m]);
+}
+for (const list of MOMENTS_BY_TRANSCRIPT.values()) {
+  list.sort((a, b) => a.start_turn - b.start_turn || a.cut_turn - b.cut_turn);
+}
+
+const state = {
+  // A provider name from DATA.providers, or "" for all of them.
+  provider: "",
+  annotator: "",
+  // Which two raters the agreement filter and the agreement table compare:
+  // "passes" for the selector against the reannotator, "adjudicators" for the two
+  // adjudicators on a doubly adjudicated moment.
+  pairSource: "passes",
+  // "agree:<axis>" / "differ:<axis>", or "" for every moment.
+  axis: "",
+  // "any" / "labels" / "thrown" / "none", or "" for every moment.
+  adjudication: "",
+  from: "",
+  to: "",
+  excludeTesters: true,
+  transcriptId: "",
+  activeMomentId: null,
+  // Which of the open transcript's problem cards is showing.
+  problemIndex: 0,
+};
+
+// ── Filtering ───────────────────────────────────────────────────────────────
+// The filters decide which moments appear; a moment that passes keeps all of its
+// passes, so a moment whose reannotation landed inside the date range still shows
+// the original selection it was reviewing.
+
+const humanize = (s) => String(s).replace(/_/g, " ");
+
+/** One moment under the current tester setting: dropping a rater can leave a
+ *  moment that was reviewed twice with a single standing pass, so the outcome,
+ *  the axis disagreements and the agreement pairs all fall away with them. */
+function view(moment) {
+  const passes = state.excludeTesters ? moment.passes.filter((p) => !p.is_test) : moment.passes;
+  if (state.excludeTesters && moment.is_test) return null;
+  if (!passes.length) return null;
+  const byRole = {};
+  const adjudicators = [];
+  for (const p of passes) {
+    // A moment can go to two adjudicators, so they are a list; the other roles are
+    // one pass each and stay addressable by name.
+    if (p.role === "adjudicator") adjudicators.push(p);
+    else byRole[p.role] = p;
+  }
+  const bothPasses = !!byRole.selector && !!byRole.reannotator;
+  return {
+    moment,
+    passes,
+    byRole,
+    adjudicators,
+    bothPasses,
+    outcome: bothPasses ? moment.outcome : SINGLE_PASS,
+    diff: new Set(bothPasses ? moment.diff : []),
+    pairs: bothPasses ? moment.pairs : {},
+    // The adjudicator pairs were computed between two named raters, so dropping either
+    // of them as a tester leaves no comparison rather than a different one.
+    adjudicatorPairs: bothAdjudicators(moment, adjudicators) ? moment.adjudicator_pairs : {},
+  };
+}
+
+/** Whether both adjudicators the pairs were computed between are still in view. */
+function bothAdjudicators(moment, adjudicators) {
+  const live = new Set(adjudicators.map((p) => p.annotator_id));
+  const pair = moment.adjudicator_pair || [];
+  return pair.length === 2 && pair.every((id) => live.has(id));
+}
+
+function matchesProvider(item) {
+  return !state.provider || item.provider === state.provider;
+}
+
+function matchesAnnotator(v) {
+  return !state.annotator || v.passes.some((p) => p.annotator_id === state.annotator);
+}
+
+function matchesDates(v) {
+  if (!state.from && !state.to) return true;
+  return v.passes.some((p) => (!state.from || p.date >= state.from) && (!state.to || p.date <= state.to));
+}
+
+/** Whether the selected pair of raters landed the same way on one axis.
+ *
+ *  The earlier of the two anchors it: an axis is only in play when they judged it, and
+ *  agreement means the later one came back with the same value. A moment the second
+ *  rater threw out leaves no judgment to compare on any axis, so it is neither agreement
+ *  nor disagreement and drops out under either half of the filter.
+ *
+ *  Which pair that is comes from the "Agreement between" filter: the selector against
+ *  the reannotator, or the two adjudicators on a doubly adjudicated moment. A moment
+ *  with no pair of the selected kind is not in view under either half -- in adjudicator
+ *  mode that is most of the export, which is the point of the filter. */
+function matchesAxis(v) {
+  if (!state.axis) return true;
+  const [want, key] = state.axis.split(":");
+  const pair = pairsOf(v)[key];
+  if (!pair) return false;
+  return (pair[0] === pair[1]) === (want === "agree");
+}
+
+/** Where a moment got to in review: whether a third pass settled it, and whether that
+ *  pass left labels behind or removed the moment.
+ *
+ *  Read off the passes rather than the moment's status, so an adjudicator dropped as a
+ *  tester takes their adjudication out of view with them. */
+function matchesAdjudication(v) {
+  if (!state.adjudication) return true;
+  const adj = v.adjudicators;
+  if (state.adjudication === "none") return !adj.length;
+  if (!adj.length) return false;
+  // Where two adjudicators ruled they can split on whether the moment survives, so the
+  // two options are read as "anyone left labels" against "everyone removed it" -- which
+  // keeps them a partition of the adjudicated moments rather than double-counting one.
+  if (state.adjudication === "labels") return adj.some((p) => p.axes);
+  if (state.adjudication === "thrown") return adj.every((p) => !p.axes);
+  // How many adjudicators ruled, which is a different cut of the same moments than
+  // what they decided. Doubly adjudicated moments are the only place in the export
+  // where two raters answered the same questions in the same role, so they are the
+  // ones adjudicator agreement can be measured on -- worth being able to see the size
+  // of. "Two or more" rather than exactly two: the export carries no moment with
+  // three, but a later one that did would otherwise fall out of both options.
+  if (state.adjudication === "single") return adj.length === 1;
+  if (state.adjudication === "double") return adj.length >= 2;
+  return true;
+}
+
+/** Moments passing the filters that select which work is in view.
+ *
+ *  `ignoreAdjudication` gives the set the adjudication filter itself is choosing from,
+ *  which is what its option counts are shares of. */
+function selectedViews({ ignoreAdjudication = false } = {}) {
+  const out = [];
+  for (const moment of DATA.moments) {
+    const v = view(moment);
+    if (!v || !matchesProvider(moment) || !matchesAnnotator(v) || !matchesDates(v) || !matchesAxis(v)) continue;
+    if (!ignoreAdjudication && !matchesAdjudication(v)) continue;
+    out.push(v);
+  }
+  return out;
+}
+
+/** Whether a rater filed one of the two passes agreement is currently measured between.
+ *
+ *  In pass mode adjudication is not one of them: it settles a moment the two passes
+ *  split on rather than adding a third judgment to pool, so a rater who only adjudicated
+ *  a moment did not take part in the comparison it contributes. In adjudicator mode the
+ *  two adjudicators are the comparison and the selector and reannotator are the ones
+ *  standing outside it. */
+function judgedAsComparedPass(v, annotatorId) {
+  const compared = state.pairSource === "adjudicators"
+    ? v.adjudicators
+    : [v.byRole.selector, v.byRole.reannotator];
+  return compared.some((p) => p && p.annotator_id === annotatorId);
+}
+
+/** Moments the agreement table is computed over: everything in the export, narrowed by
+ *  the date range and, with an annotator selected, to the moments they were one of the
+ *  two compared passes on.
+ *
+ *  The two readings are different numbers and the heading says which one is on screen.
+ *  Unfiltered it is the reliability of the annotation effort as a whole. With a rater
+ *  selected it is that rater against whoever sat on the other side of their moments --
+ *  a per-rater read on a much smaller n, useful for spotting someone drifting from the
+ *  rest, not a second estimate of the same quantity.
+ *
+ *  The axis filter still leaves it alone either way: a κ over the moments already known
+ *  to agree or disagree on an axis is not an agreement estimate at all, and would swing
+ *  between 1 and 0 as someone browsed. Testers are dropped: their passes are not
+ *  annotation work. */
+function agreementViews() {
+  const out = [];
+  for (const moment of DATA.moments) {
+    const v = view(moment);
+    if (!v || !matchesProvider(moment) || !matchesDates(v)) continue;
+    if (state.annotator && !judgedAsComparedPass(v, state.annotator)) continue;
+    out.push(v);
+  }
+  return out;
+}
+
+function selectedVerdicts() {
+  return DATA.no_key_moments.filter((r) =>
+    (!state.excludeTesters || !r.is_test)
+    && matchesProvider(r)
+    && (!state.annotator || r.annotator_id === state.annotator)
+    && (!state.from || r.date >= state.from)
+    && (!state.to || r.date <= state.to));
+}
+
+// ── Small DOM helpers ───────────────────────────────────────────────────────
+function el(tag, cls, text) {
+  const node = document.createElement(tag);
+  if (cls) node.className = cls;
+  if (text !== undefined && text !== null) node.textContent = String(text);
+  return node;
+}
+function clear(node) { node.textContent = ""; return node; }
+function fmtDate(iso) {
+  if (!iso) return "";
+  const d = new Date(iso);
+  return isNaN(d) ? iso : d.toLocaleDateString("en-US", { month: "short", day: "numeric" });
+}
+
+/** An annotator id as their name. Filters carry the id; only names get printed. */
+function annotatorName(id) {
+  const a = DATA.annotators.find((x) => x.id === id);
+  return a ? a.name : id;
+}
+
+// ── Transcript ──────────────────────────────────────────────────────────────
+// The stored text repeats the speaker as a leading [STUDENT]/[TUTOR] tag -- already
+// shown by the role column -- and marks screen events with bracketed tags like
+// [BOARD UPDATE]. Drop the redundant speaker tag and render the remaining tags as
+// small chips, so spoken dialogue in an enrichment turn is never demoted to a label.
+function turnText(text) {
+  const cleaned = text.replace(/\[(?:STUDENT|TUTOR)\]:?/g, " ").replace(/\s{2,}/g, " ").trim();
+  const out = document.createDocumentFragment();
+  for (const part of cleaned.split(/(\[[^\]]+\])/g)) {
+    if (!part) continue;
+    const tag = /^\[([^\]]+)\]$/.exec(part);
+    out.append(tag ? el("span", "screen-tag", tag[1]) : el("span", null, part));
+  }
+  return out;
+}
+
+/**
+ * Draw a transcript with a moment's span highlighted.
+ *  bounds  the span to highlight (already carrying any reannotator redraw)
+ *  prev    the span before that redraw, for the "was N" hint
+ *  window  clamp to [start-2, end+2] and elide the rest, for the compact excerpts
+ *
+ * Rows are addressed by `turn_index` -- their position in the rendered row list, which
+ * is what bounds.*_row means: the build resolved the moment's dialogue turn numbers to
+ * those positions. The numbers drawn in the margin are `turn_number`, the dialogue turn
+ * the annotator saw; enrichment rows have none and get a blank margin. A moment whose
+ * transcript is missing has no row positions, so nothing is highlighted.
+ */
+function renderTranscript(turns, bounds, prev, windowed) {
+  const box = el("div", "transcript");
+  const placed = bounds && bounds.start_row != null && bounds.end_row != null;
+  const lo = windowed && placed ? bounds.start_row - 2 : -Infinity;
+  const hi = windowed && placed ? bounds.end_row + 2 : Infinity;
+  const endMoved = prev && bounds && prev.end_row !== bounds.end_row;
+  let elideFrom = null, elideTo = null;
+  const flush = () => {
+    if (elideFrom !== null) {
+      const span = elideFrom === elideTo ? `${elideFrom}` : `${elideFrom}–${elideTo}`;
+      box.append(el("div", "elision", `…turns ${span}`));
+      elideFrom = elideTo = null;
+    }
+  };
+  for (const t of turns) {
+    const i = t.turn_index;
+    if (i < lo || i > hi) {
+      // Elisions are labelled in turn numbers like everything else, so an enrichment
+      // row extends the run without putting a number on it.
+      if (t.turn_number != null) {
+        if (elideFrom === null) elideFrom = t.turn_number;
+        elideTo = t.turn_number;
+      }
+      continue;
+    }
+    flush();
+    const inMoment = placed && i >= bounds.start_row && i <= bounds.end_row;
+    const row = el("div", [
+      "turn",
+      // Some providers leave a turn's speaker unattributed; it takes neither colour.
+      t.role === "STUDENT" ? "student" : t.role === "TUTOR" ? "tutor" : "",
+      t.type.startsWith("[") ? "screen-event" : "",
+      inMoment ? "in-moment" : "",
+    ].filter(Boolean).join(" "));
+    row.dataset.turn = i;
+    row.append(el("span", "turn-num", t.turn_number == null ? "" : t.turn_number));
+    row.append(el("span", "turn-role", t.role));
+    const text = el("span", "turn-text");
+    text.append(turnText(t.text));
+    row.append(text);
+    box.append(row);
+    if (bounds && i === bounds.cut_row) {
+      box.append(el("div", "cut-marker", "✂ cut point — the tutor's decision happens after this turn"));
+    }
+    if (bounds && i === bounds.end_row && endMoved) {
+      box.append(el("div", "boundary-hint", `▼ END (was turn ${prev.end_turn})`));
+    }
+  }
+  flush();
+  if (!turns.length) box.append(el("p", "hint", "This transcript is not in the transcripts file."));
+  return box;
+}
+
+// ── Moment cards ────────────────────────────────────────────────────────────
+function chip(label, tone, isDiff) {
+  return el("span", ["chip", tone, isDiff ? "diff" : ""].filter(Boolean).join(" "), label);
+}
+
+function situationChips(cell, axes, diff) {
+  for (const [key, name] of [["scaffolding_appropriate", "scaffolding"], ["rigor_appropriate", "rigor"]]) {
+    const differs = diff.has(key);
+    if (axes[key]) cell.append(chip(`${name} appropriate`, "good", differs));
+    else if (differs) cell.append(chip(`${name} not appropriate`, "warn", true));
+    else cell.append(chip(`${name} not appropriate`, "hollow", false));
+  }
+}
+
+const SCAFFOLD_AMOUNT = {
+  over_scaffolding: ["scaffolding: over-scaffolding", "warn"],
+  appropriate: ["scaffolding: appropriate", "good"],
+  under_scaffolding: ["scaffolding: under-scaffolding", "warn"],
+  unclear: ["scaffolding: unclear", "muted"],
+};
+const RIGOR_AMOUNT = {
+  strong: ["rigor: strong", "good"],
+  weak: ["rigor: weak", "warn"],
+  unclear: ["rigor: unclear", "muted"],
+};
+
+function actionChips(cell, sar, diff) {
+  const act = sar.action || {};
+  const scaff = act.scaffolding_present
+    ? SCAFFOLD_AMOUNT[act.scaffolding_amount] || ["scaffolding present", "muted"]
+    : ["no scaffolding", "muted"];
+  const rigor = act.rigor_present
+    ? RIGOR_AMOUNT[act.rigor_amount] || ["rigor present", "muted"]
+    : ["no rigor", "muted"];
+  cell.append(chip(scaff[0], scaff[1], diff.has("over_scaffolding") || diff.has("scaffolding_present")));
+  cell.append(chip(rigor[0], rigor[1], diff.has("rigor_present")));
+
+  const tags = [
+    ...(act.scaffolding_strategies || []),
+    ...(act.scaffolding_amount === "over_scaffolding" ? act.over_scaffolding_reasons || [] : []),
+    ...(act.rigor_strategies || []),
+  ].map(humanize);
+  for (const other of [act.scaffolding_strategy_other, act.rigor_strategy_other]) {
+    if (other) tags.push(`other: ${other}`);
+  }
+  if (tags.length) {
+    const strip = el("div", "secondary-tags");
+    for (const t of tags) strip.append(el("span", "chip tag", t));
+    cell.append(strip);
+  }
+}
+
+const ENGAGEMENT = {
+  high_or_good: ["engagement: high", "good"],
+  low: ["engagement: low", "warn"],
+  not_enough_evidence: ["engagement: no evidence", "muted"],
+};
+const SUCCESS = {
+  meaningful_success: ["success: meaningful", "good"],
+  not_meaningful: ["success: not meaningful", "warn"],
+  no_success: ["success: no success", "warn"],
+  not_enough_evidence: ["success: no evidence", "muted"],
+};
+
+function resultChips(cell, sar, diff) {
+  const res = sar.result || {};
+  const eng = ENGAGEMENT[res.cognitive_engagement] || ["engagement: —", "muted"];
+  const suc = SUCCESS[res.problem_success] || ["success: —", "muted"];
+  cell.append(chip(eng[0], eng[1], diff.has("high_engagement")));
+  cell.append(chip(suc[0], suc[1], diff.has("meaningful_success")));
+}
+
+function whyText(construct, sar) {
+  if (construct === "sit") return (sar.situation || {}).why || "";
+  if (construct === "act") return (sar.action || {}).explanation || "";
+  return (sar.result || {}).explanation || "";
+}
+
+const CONSTRUCT_AXES = {
+  sit: ["scaffolding_appropriate", "rigor_appropriate"],
+  act: ["scaffolding_present", "over_scaffolding", "rigor_present"],
+  res: ["meaningful_success", "high_engagement"],
+};
+
+/** Reannotator/adjudicator flags: throw-out, redrawn cut point, moved boundaries. */
+function metaNote(pass) {
+  const meta = (pass.payload || {}).meta;
+  if (!meta) return null;
+  const notes = [];
+  if (meta.throw_out) {
+    notes.push("Marked for throw-out" + (meta.throw_out_reason ? `: ${meta.throw_out_reason}` : ""));
+  }
+  if (meta.redrew_cut_point && meta.new_cut_turn != null) {
+    notes.push(`Redrew cut point → turn ${meta.new_cut_turn}`);
+  }
+  if (meta.changed_boundaries) {
+    const moved = [
+      meta.new_start_turn == null ? "" : `start → ${meta.new_start_turn}`,
+      meta.new_end_turn == null ? "" : `end → ${meta.new_end_turn}`,
+    ].filter(Boolean).join(", ");
+    notes.push(`Changed boundaries: ${moved}`);
+  }
+  return notes.length ? el("div", "m-note", "✎ " + notes.join(" · ")) : null;
+}
+
+const DECISION_LABEL = {
+  agreed: "both agreed", combined: "combined", selector: "took selector",
+  reannotator: "took reannotator", adjudicator: "own call",
+};
+
+/** How the adjudicator resolved the two passes, and why. Only they record either. */
+function adjudicationNote(pass) {
+  if (!pass) return null;
+  const tags = Object.entries(pass.decisions || {})
+    .map(([k, v]) => `${humanize(k)}: ${DECISION_LABEL[v] || humanize(v)}`);
+  if (!pass.rationale && !tags.length) return null;
+  const box = el("div", "adj");
+  box.append(el("span", "adj-k", `ADJUDICATION · ${pass.annotator_name}`));
+  if (pass.rationale) box.append(el("div", "adj-why", pass.rationale));
+  if (tags.length) {
+    const strip = el("div", "secondary-tags");
+    for (const t of tags) strip.append(el("span", "chip tag", t));
+    box.append(strip);
+  }
+  return box;
+}
+
+/** One moment as its passes side by side, one row per construct, disagreements marked. */
+function momentCard(v) {
+  const m = v.moment;
+  const b = m.boundaries;
+  const card = el("div", "moment moment-card");
+  card.dataset.momentId = m.id;
+
+  const head = el("div", "m-head");
+  const loc = el("span", "m-loc");
+  loc.append(el("code", null, `turns ${b.start_turn}–${b.end_turn} · cut@${b.cut_turn}`));
+  head.append(loc);
+  head.append(el("span", "len", `${b.end_turn - b.start_turn + 1} turns`));
+  const done = m.status === "reannotated" || m.status === "adjudicated";
+  head.append(el("span", "status" + (done ? " done" : ""), m.status || "—"));
+  head.append(el("span", "len", `cut by ${m.created_by}`));
+  const tone = { agreement: "agree", disagreement: "differ" }[v.outcome] || "single";
+  head.append(el("span", "outcome " + tone, v.outcome === "agreement" ? "✓ agreement"
+    : v.outcome === "disagreement" ? "⚠ disagreement"
+    : v.outcome));
+  card.append(head);
+  card.append(el("hr", "m-head-divider"));
+  for (const p of [v.byRole.reannotator, ...v.adjudicators]) {
+    const note = p && metaNote(p);
+    if (note) card.append(note);
+  }
+
+  const cmp = el("div", "cmp");
+  const grid = `46px ${v.passes.map(() => "1fr").join(" ")}`;
+  const colhead = el("div", "colhead");
+  colhead.style.gridTemplateColumns = grid;
+  colhead.append(el("div", "k"));
+  for (const p of v.passes) {
+    const col = el("div", "ch");
+    col.append(el("div", "pass" + (p.role === "adjudicator" ? " final" : ""), passLabel(p, v)));
+    col.append(el("div", "meta", `${p.annotator_name} · rev${p.revision} · ${fmtDate(p.created_at)}`));
+    colhead.append(col);
+  }
+  cmp.append(colhead);
+
+  for (const c of CONSTRUCTS) {
+    const rowDiff = CONSTRUCT_AXES[c].some((k) => v.diff.has(k));
+    const row = el("div", "row");
+    row.style.gridTemplateColumns = grid;
+    row.append(el("div", "k", CONSTRUCT_LABEL[c]));
+    for (const p of v.passes) {
+      const cell = el("div", "cell");
+      if (!p.axes) cell.append(el("span", "none", "no judgment — threw the moment out"));
+      else if (c === "sit") situationChips(cell, p.axes, v.diff);
+      else if (c === "act") actionChips(cell, p.sar, v.diff);
+      else resultChips(cell, p.sar, v.diff);
+      row.append(cell);
+    }
+    const block = el("div");
+    block.append(row);
+    const whys = v.passes.map((p) => (p.axes ? whyText(c, p.sar) : ""));
+    if (whys.some(Boolean)) {
+      const more = el("details", "why-more" + (rowDiff ? " disagree" : ""));
+      more.open = rowDiff;
+      const summary = el("summary");
+      summary.dataset.label = "reasoning";
+      more.append(summary);
+      const cols = el("div", "why-cols");
+      cols.style.gridTemplateColumns = grid;
+      cols.append(el("div"));
+      for (const w of whys) {
+        cols.append(w ? el("div", "why-col", w) : el("div", "why-col why-none", "—"));
+      }
+      more.append(cols);
+      block.append(more);
+    }
+    cmp.append(block);
+  }
+
+  const observations = v.passes.map((p) => p.observations || "");
+  if (observations.some(Boolean)) {
+    const row = el("div", "row");
+    row.style.gridTemplateColumns = grid;
+    row.append(el("div", "k", "OBS"));
+    for (const text of observations) {
+      row.append(text ? el("div", "why-col", text) : el("div", "why-col why-none", "—"));
+    }
+    cmp.append(row);
+  }
+  card.append(cmp);
+  for (const p of v.adjudicators) {
+    const note = adjudicationNote(p);
+    if (note) card.append(note);
+  }
+  return card;
+}
+
+// ── Analytics ───────────────────────────────────────────────────────────────
+const SERIES = [
+  ["pass1", "First pass", "selector"],
+  ["pass2", "Second pass", "reannotator"],
+];
+
+/** One category as two bars: what the first pass made of it above what the second pass
+ *  made of it. Each bar is a share of its own pass's denominator -- far fewer moments
+ *  were ever judged twice, so a raw second-pass count read against the first pass's
+ *  total would understate every category. */
+function bar(label, shares) {
+  const row = el("div", "bar");
+  row.append(el("span", "lbl", label));
+  const series = el("span", "series");
+  shares.forEach(({ count, total }, i) => {
+    const [tone, name] = SERIES[i];
+    const srow = el("span", "srow");
+    const track = el("span", "track");
+    const fill = el("span", "fill " + tone);
+    const share = total > 0 ? (count / total) * 100 : 0;
+    fill.style.width = share.toFixed(1) + "%";
+    track.append(fill);
+    srow.append(track);
+    srow.append(el("span", "n", total ? `${count} · ${Math.round(share)}%` : "—"));
+    srow.title = `${name}: ${count} of ${total} — ${label}`;
+    series.append(srow);
+  });
+  row.append(series);
+  return row;
+}
+
+// Cohen's kappa over the pairs the filters selected. Written out rather than pulled
+// from a library because the page is one offline file with no build step and nothing
+// running behind it -- the numbers below were checked against scikit-learn's
+// cohen_kappa_score on the full export.
+//
+// kappa is null, not zero, when both raters used a single category: chance agreement
+// is already total and the formula divides by zero, so "0.00" would read as "no better
+// than chance" for raters who in fact never disagreed.
+//
+// Precision, recall and F1 read the first pass as the ground truth and the second as
+// the prediction, counting "the axis is true" as the positive class. They are null, not
+// zero, where the denominator is empty -- a second pass that never said yes has no
+// precision to report, and "0.00" would read as a rater who was always wrong rather
+// than one who was never asked. F1 is 0 rather than null when both raters called
+// positives and never called the same one: that is a real score of zero.
+function axisScores(pairs) {
+  const n = pairs.length;
+  if (!n) return { n: 0, raw: 0, kappa: null, precision: null, recall: null, f1: null };
+  const pO = pairs.filter(([a, b]) => a === b).length / n;
+  const aTrue = pairs.filter(([a]) => a).length / n;
+  const bTrue = pairs.filter(([, b]) => b).length / n;
+  const pE = aTrue * bTrue + (1 - aTrue) * (1 - bTrue);
+  const tp = pairs.filter(([a, b]) => a && b).length;
+  const fp = pairs.filter(([a, b]) => !a && b).length;
+  const fn = pairs.filter(([a, b]) => a && !b).length;
+  const precision = tp + fp ? tp / (tp + fp) : null;
+  const recall = tp + fn ? tp / (tp + fn) : null;
+  const scored = precision !== null && recall !== null;
+  return {
+    n,
+    raw: pO,
+    kappa: pE >= 1 ? null : (pO - pE) / (1 - pE),
+    precision,
+    recall,
+    f1: !scored ? null
+      : precision + recall ? (2 * precision * recall) / (precision + recall) : 0,
+  };
+}
+
+function emptyDist() {
+  return {
+    n: 0,
+    sit: { scaffolding_appropriate: 0, rigor_appropriate: 0, both: 0 },
+    act: {
+      scaffolding_present: 0, rigor_present: 0,
+      amount: { over_scaffolding: 0, appropriate: 0, under_scaffolding: 0, unclear: 0 },
+      rigor_amount: { strong: 0, weak: 0, unclear: 0 },
+    },
+    res: {
+      problem_success: { meaningful_success: 0, not_meaningful: 0, no_success: 0, not_enough_evidence: 0 },
+      cognitive_engagement: { high_or_good: 0, low: 0, not_enough_evidence: 0 },
+    },
+  };
+}
+
+/** Fold one pass's judgment into that pass's distribution. `n` counts the judgments
+ *  folded in, which is the denominator every bar of that series is a share of. */
+function tally(dist, sar) {
+  const sit = sar.situation || {};
+  const act = sar.action || {};
+  const res = sar.result || {};
+  dist.n++;
+  if (sit.scaffolding_appropriate) dist.sit.scaffolding_appropriate++;
+  if (sit.rigor_appropriate) dist.sit.rigor_appropriate++;
+  if (sit.scaffolding_appropriate && sit.rigor_appropriate) dist.sit.both++;
+  if (act.scaffolding_present) {
+    dist.act.scaffolding_present++;
+    if (act.scaffolding_amount in dist.act.amount) dist.act.amount[act.scaffolding_amount]++;
+  }
+  if (act.rigor_present) {
+    dist.act.rigor_present++;
+    if (act.rigor_amount in dist.act.rigor_amount) dist.act.rigor_amount[act.rigor_amount]++;
+  }
+  if (res.problem_success in dist.res.problem_success) dist.res.problem_success[res.problem_success]++;
+  if (res.cognitive_engagement in dist.res.cognitive_engagement) {
+    dist.res.cognitive_engagement[res.cognitive_engagement]++;
+  }
+}
+
+function analytics(views) {
+  // One distribution per pass. A reannotator who threw the moment out recorded no
+  // judgment, so they contribute nothing to the second-pass series -- not a zero.
+  const first = emptyDist();
+  const second = emptyDist();
+  // With an annotator selected the two series are their own work, split by which pass
+  // they were doing: the moments they cut and judged first, and the moments someone
+  // else cut that they came back to. Their moments are in view either way, but tallying
+  // whoever happened to sit on the other side of them would put other people's
+  // judgments under a heading naming this one.
+  const theirs = (p) => !state.annotator || p.annotator_id === state.annotator;
+  const lengths = [];
+  const transcripts = new Set();
+  let twoPasses = 0, thrownOut = 0;
+
+  for (const v of views) {
+    const m = v.moment;
+    transcripts.add(m.transcript_id);
+    lengths.push(m.boundaries.end_turn - m.boundaries.start_turn + 1);
+    if (m.thrown_out) thrownOut++;
+    const sel = v.byRole.selector;
+    const re = v.byRole.reannotator;
+    if (sel && sel.axes && theirs(sel)) tally(first, sel.sar);
+    if (re && re.axes && theirs(re)) tally(second, re.sar);
+    // A thrown-out review left no judgment, so the moment has nothing to agree about.
+    if (Object.keys(v.pairs).length) twoPasses++;
+  }
+
+  const sorted = [...lengths].sort((a, b) => a - b);
+  const median = sorted.length ? sorted[Math.floor(sorted.length / 2)] : 0;
+  const mean = sorted.length ? sorted.reduce((a, b) => a + b, 0) / sorted.length : 0;
+  return {
+    n: views.length,
+    twoPasses,
+    thrownOut,
+    lenAvg: Math.round(mean * 10) / 10,
+    lenMedian: median,
+    lenRange: sorted.length ? [sorted[0], sorted[sorted.length - 1]] : [0, 0],
+    transcriptsWith: transcripts.size,
+    transcriptsNone: Math.max(0, DATA.transcripts_total - transcripts.size),
+    perTranscript: transcripts.size ? Math.round((views.length / transcripts.size) * 100) / 100 : 0,
+    first,
+    second,
+  };
+}
+
+/** Agreement scores per reported axis, pooled over every moment the selected pair of
+ *  raters both judged in the set agreementViews selects -- the whole export, or one
+ *  rater's moments.
+ *
+ *  In adjudicator mode this pools only the doubly adjudicated moments, which is a far
+ *  smaller n than the pass-mode table: read it as agreement among the adjudicators on
+ *  the hard moments they were called in for, not as a second estimate of the effort-wide
+ *  reliability the pass-mode table reports. */
+function agreement() {
+  const pairs = Object.fromEntries(REPORTED_AXES.map((a) => [a.key, []]));
+  let n = 0;
+  for (const v of agreementViews()) {
+    if (!Object.keys(pairsOf(v)).length) continue;
+    n++;
+    for (const [axis, pair] of Object.entries(pairsOf(v))) {
+      if (pairs[axis]) pairs[axis].push(pair);
+    }
+  }
+  return {
+    n,
+    scores: Object.fromEntries(Object.entries(pairs).map(([k, p]) => [k, axisScores(p)])),
+  };
+}
+
+function kv(parent, label, value) {
+  const row = el("div", "kv");
+  row.append(el("span", null, label));
+  row.append(el("b", null, value));
+  parent.append(row);
+}
+
+function renderAnalytics(views) {
+  const a = analytics(views);
+  const iaa = agreement();
+  const n = a.n;
+  $("analytics-summary").textContent =
+    `Analytics — ${n} moment${n === 1 ? "" : "s"} (${a.twoPasses} judged twice) · current filter`;
+
+  const legend = clear($("analytics-legend"));
+  for (const [tone, name, role] of SERIES) {
+    const key = el("span", "key");
+    key.append(el("i", "sw " + tone));
+    const who = state.annotator ? `${annotatorName(state.annotator)} as ${role}` : role;
+    key.append(el("span", null,
+      `${name} · ${who} (n=${tone === "pass1" ? a.first.n : a.second.n} judgments)`));
+    legend.append(key);
+  }
+
+  const body = clear($("analytics-body"));
+  /** A bar comparing one category across the two passes. `count` reads it out of a
+   *  pass's distribution; `total` is the denominator to read it against, which for the
+   *  indented sub-bars is that pass's own "present" count, not its moment count. */
+  const both = (label, count, total = (d) => d.n) =>
+    bar(label, [a.first, a.second].map((d) => ({ count: count(d), total: total(d) })));
+
+  const left = el("div", "an-col");
+  left.append(el("h4", null, "Overview"));
+  kv(left, "Moments · 1+ pass", n);
+  kv(left, "Moments · 2 judgments", a.twoPasses);
+  kv(left, "Thrown out (2nd pass)", a.thrownOut);
+  kv(left, "Avg length (turns)", a.lenAvg);
+  kv(left, "Median · range", `${a.lenMedian} · ${a.lenRange[0]}–${a.lenRange[1]}`);
+  kv(left, "Moments / transcript", a.perTranscript);
+  kv(left, "Transcripts (w/ · none)", `${a.transcriptsWith} · ${a.transcriptsNone}`);
+  kv(left, "“No key moments” verdicts", selectedVerdicts().length);
+  left.append(el("h4", "spaced", "Situation"));
+  left.append(both("scaffolding appropriate", (d) => d.sit.scaffolding_appropriate));
+  left.append(both("rigor appropriate", (d) => d.sit.rigor_appropriate));
+  left.append(both("both", (d) => d.sit.both));
+  body.append(left);
+
+  const scaffN = (d) => d.act.scaffolding_present;
+  const rigorN = (d) => d.act.rigor_present;
+  const act = el("div", "an-col");
+  act.append(el("h4", null, "Action"));
+  act.append(both("scaffolding present", scaffN));
+  act.append(both("· appropriate", (d) => d.act.amount.appropriate, scaffN));
+  act.append(both("· over-scaffold", (d) => d.act.amount.over_scaffolding, scaffN));
+  act.append(both("· under-scaffold", (d) => d.act.amount.under_scaffolding, scaffN));
+  act.append(both("· unclear", (d) => d.act.amount.unclear, scaffN));
+  act.append(both("rigor present", rigorN));
+  act.append(both("· strong", (d) => d.act.rigor_amount.strong, rigorN));
+  act.append(both("· weak", (d) => d.act.rigor_amount.weak, rigorN));
+  act.append(both("· unclear", (d) => d.act.rigor_amount.unclear, rigorN));
+  body.append(act);
+
+  const res = el("div", "an-col");
+  res.append(el("h4", null, "Result"));
+  res.append(both("engage: low", (d) => d.res.cognitive_engagement.low));
+  res.append(both("engage: high", (d) => d.res.cognitive_engagement.high_or_good));
+  res.append(both("engage: no evidence", (d) => d.res.cognitive_engagement.not_enough_evidence));
+  res.append(both("success: meaningful", (d) => d.res.problem_success.meaningful_success));
+  res.append(both("success: not meaningful", (d) => d.res.problem_success.not_meaningful));
+  res.append(both("success: none", (d) => d.res.problem_success.no_success));
+  res.append(both("success: no evidence", (d) => d.res.problem_success.not_enough_evidence));
+  body.append(res);
+
+  const right = el("div", "an-col");
+  // With a rater selected the table is theirs against whoever sat on the other side of
+  // their moments, so the heading names them rather than leaving a much smaller n
+  // reading as the effort-wide number it is not.
+  const rater = state.annotator ? annotatorName(state.annotator) : "";
+  const src = pairSource();
+  const judged = state.pairSource === "adjudicators" ? "adjudicated twice" : "judged twice";
+  right.append(el("h4", null, rater
+    ? `Agreement · ${rater} vs. ${src.other} · ${judged} (n=${iaa.n})`
+    : `Inter-annotator agreement · ${src.label} · ${judged} (n=${iaa.n}, date filter only)`));
+  const table = el("table", "agree");
+  const thead = el("thead");
+  const hrow = el("tr");
+  hrow.append(el("th", null, "Axis"));
+  hrow.append(el("th", "num", "n"));
+  hrow.append(el("th", "num", "Raw"));
+  hrow.append(el("th", "num", "κ"));
+  for (const [label, title] of [
+    ["P", `Precision: of the moments ${src.second} judged true on this axis, the share `
+      + `${src.first} judged true too.`],
+    ["R", `Recall: of the moments ${src.first} judged true on this axis, the share `
+      + `${src.second} judged true too.`],
+    ["F1", "Harmonic mean of precision and recall."],
+  ]) {
+    const cell = el("th", "num", label);
+    cell.title = `${title} ${cap(src.first)} is the ground truth.`;
+    hrow.append(cell);
+  }
+  thead.append(hrow);
+  table.append(thead);
+
+  /** A score, or an em dash carrying why there was none to compute. */
+  const scoreCell = (value, why) => {
+    if (value !== null) return el("td", "num", value.toFixed(2));
+    const cell = el("td", "num undef", "—");
+    cell.title = why;
+    return cell;
+  };
+
+  const tbody = el("tbody");
+  for (const axis of REPORTED_AXES) {
+    const s = iaa.scores[axis.key];
+    const tr = el("tr");
+    tr.append(el("td", null, axis.label));
+    tr.append(el("td", "num", s.n));
+    tr.append(el("td", "num", (s.raw * 100).toFixed(1) + "%"));
+    if (s.kappa === null) {
+      const cell = el("td", "num kappa undef", "—");
+      cell.title = s.n
+        ? "Undefined: both raters used a single category, so chance agreement is already total."
+        : src.none;
+      tr.append(cell);
+    } else {
+      tr.append(el("td", "num kappa " + (s.kappa >= 0.4 ? "ok" : s.kappa >= 0.2 ? "mid" : "low"),
+        s.kappa.toFixed(2)));
+    }
+    const none = s.n ? "" : src.none;
+    tr.append(scoreCell(s.precision,
+      none || `${cap(src.second)} never judged this axis true, so there is nothing to be precise about.`));
+    tr.append(scoreCell(s.recall,
+      none || `${cap(src.first)} never judged this axis true, so there is nothing to recall.`));
+    tr.append(scoreCell(s.f1, none || "Precision or recall is undefined on this axis."));
+    tbody.append(tr);
+  }
+  table.append(tbody);
+  const scroller = el("div", "table-scroll");
+  scroller.append(table);
+  right.append(scroller);
+  const note = `P · R · F1 score ${src.second} against ${src.first} as ground `
+    + "truth, with “axis true” as the positive class.";
+  // A rater cuts some of their moments and reviews others -- and adjudicators are
+  // likewise first on some and second on others -- so which side of the comparison they
+  // are on varies within their own table. κ does not care -- it is symmetric -- but P
+  // and R do, and reading them as "how often this rater was right" would be wrong.
+  const mixed = state.pairSource === "adjudicators"
+    ? `Pooled over the moments ${rater} adjudicated alongside another adjudicator, where `
+      + "they may be on either side depending on who they sat with"
+    : `Pooled over the moments ${rater} selected or reannotated, so they are the first `
+      + "pass on some and the second on others";
+  // A and B are a fixed assignment per rater, so every moment a pair of adjudicators
+  // shares puts the same one on the same side -- what a pooled κ needs, and not what the
+  // cards do, where the columns are numbered by who ruled first.
+  const sides = state.pairSource === "adjudicators"
+    ? " A and B are fixed per rater so that κ pools each rater on one side; they are not "
+      + "the card's Adjudicator 1 and 2, which are numbered by who ruled first."
+    : "";
+  right.append(el("p", "an-legend-note", rater
+    ? `${note} ${mixed}: κ is symmetric, P · R · F1 are not. `
+      + `The axis filter does not narrow this table.${sides}`
+    : `${note} The axis filter does not narrow this table.${sides}`));
+  if (rater && !iaa.n) {
+    right.append(el("p", "hint", state.pairSource === "adjudicators"
+      ? `No moment in range was adjudicated twice with ${rater} as one of the two adjudicators.`
+      : `No moment in range was judged twice with ${rater} as one of the two passes.`));
+  }
+  body.append(right);
+}
+
+// ── By transcript ───────────────────────────────────────────────────────────
+function transcriptOptions(views, verdicts) {
+  const counts = new Map();
+  for (const v of views) {
+    const row = counts.get(v.moment.transcript_id) || { moments: 0, verdicts: 0 };
+    row.moments++;
+    counts.set(v.moment.transcript_id, row);
+  }
+  for (const r of verdicts) {
+    const row = counts.get(r.transcript_id) || { moments: 0, verdicts: 0 };
+    row.verdicts++;
+    counts.set(r.transcript_id, row);
+  }
+  return [...counts.entries()]
+    .map(([tid, c]) => ({ tid, ...c, cid: (TRANSCRIPTS.get(tid) || {}).conversation_id || tid }))
+    .sort((a, b) => a.cid.localeCompare(b.cid));
+}
+
+function renderTranscriptMode(views, verdicts) {
+  // The dropdown counts what the pane will actually show, so picking a transcript
+  // listed under "disagreed on rigor present" never opens an empty pane. A "no key
+  // moments" verdict has no axes to agree about, so those entries drop out of the list
+  // as soon as the axis filter asks for one.
+  const options = transcriptOptions(views, state.axis || state.adjudication ? [] : verdicts);
+  const select = clear($("transcript-select"));
+  select.append(new Option("— select a transcript —", ""));
+  for (const o of options) {
+    const moments = `${o.moments} moment${o.moments === 1 ? "" : "s"}`;
+    const note = o.verdicts ? " · no key moments" : "";
+    const provider = !state.provider && DATA.providers.length > 1
+      ? ` · ${humanize((TRANSCRIPTS.get(o.tid) || {}).provider || "")}` : "";
+    select.append(new Option(`${o.cid} — ${moments}${note}${provider}`, o.tid));
+  }
+  if (!options.some((o) => o.tid === state.transcriptId)) state.transcriptId = "";
+  select.value = state.transcriptId;
+  $("transcript-hint").textContent = options.length
+    ? (state.transcriptId ? "" : "Select a transcript to read its moments.")
+    : "No transcripts match these filters.";
+  $("transcript-detail").hidden = !state.transcriptId;
+  renderProblems((TRANSCRIPTS.get(state.transcriptId) || {}).problems || []);
+  if (!state.transcriptId) return;
+
+  const shown = views
+    .filter((v) => v.moment.transcript_id === state.transcriptId)
+    .sort((a, b) => a.moment.start_turn - b.moment.start_turn);
+  if (!shown.some((v) => v.moment.id === state.activeMomentId)) {
+    state.activeMomentId = shown.length ? shown[0].moment.id : null;
+  }
+  const active = shown.find((v) => v.moment.id === state.activeMomentId) || null;
+
+  const turns = (TRANSCRIPTS.get(state.transcriptId) || { turns: [] }).turns;
+  const pane = clear($("transcript-turns"));
+  pane.append(renderTranscript(
+    turns,
+    active ? active.moment.boundaries : null,
+    active ? active.moment.original_boundaries : null,
+    false));
+
+  const list = clear($("transcript-moments"));
+  for (const r of verdicts.filter((r) => r.transcript_id === state.transcriptId)) {
+    const note = el("p", "no-key");
+    note.append(el("span", "who", r.annotator_name));
+    note.append(el("span", null, ` marked this transcript “no key moments” on ${fmtDate(r.created_at)}`
+      + (r.note ? ` — ${r.note}` : "")));
+    list.append(note);
+  }
+  if (!shown.length) list.append(el("p", "hint", "No moments here match the current filters."));
+  for (const v of shown) {
+    const card = momentCard(v);
+    card.classList.add("selectable");
+    if (v.moment.id === state.activeMomentId) card.classList.add("active");
+    // Selecting a card redraws the list, which would rebuild every <details> closed --
+    // so a click that was opening one of them must not also count as selecting the card,
+    // and re-selecting the card already showing is left alone rather than redrawn.
+    card.addEventListener("click", (event) => {
+      if (event.target.closest("summary")) return;
+      if (v.moment.id === state.activeMomentId) return;
+      state.activeMomentId = v.moment.id;
+      render();
+    });
+    list.append(card);
+  }
+  if (active) scrollToSpan(pane, active.moment.boundaries.start_row);
+}
+
+/** The open transcript's problems as cards to flip through, one at a time.
+ *
+ *  What a provider records is the slides the session covered and each one's learning
+ *  objective -- no problem text, and nothing tying a slide to the turns it was up for --
+ *  so the card says what was covered and the transcript pane is left alone. */
+function renderProblems(problems) {
+  $("transcript-problems").hidden = !problems.length;
+  if (!problems.length) return;
+  const i = state.problemIndex = Math.min(Math.max(state.problemIndex, 0), problems.length - 1);
+  const p = problems[i];
+  const card = clear($("problem-card"));
+  card.append(el("div", "p-count", `Problem ${i + 1} of ${problems.length}`));
+  card.append(el("div", "p-title", p.objective || "No learning objective recorded"));
+  card.append(el("div", "p-meta", [
+    p.year != null ? `Year ${p.year}` : "",
+    p.slide_position != null ? `slide position ${p.slide_position}` : "",
+    p.slide_id != null ? `slide id ${p.slide_id}` : "",
+  ].filter(Boolean).join(" · ")));
+  $("problem-prev").disabled = i === 0;
+  $("problem-next").disabled = i === problems.length - 1;
+}
+
+/** Bring a moment's first turn into view inside the transcript pane only -- scrolling
+ *  the pane directly rather than scrollIntoView, which would drag the page with it. */
+function scrollToSpan(pane, turnIndex) {
+  const row = pane.querySelector(`.turn[data-turn="${turnIndex}"]`);
+  if (!row) return;
+  pane.scrollTop += row.getBoundingClientRect().top - pane.getBoundingClientRect().top - 60;
+}
+
+// ── Wiring ──────────────────────────────────────────────────────────────────
+function render() {
+  const views = selectedViews();
+  labelAdjudicationOptions();
+  labelPairOptions();
+  renderAnalytics(views);
+  $("clear-dates").hidden = !state.from && !state.to;
+  renderTranscriptMode(views, selectedVerdicts());
+}
+
+const providerSelect = $("f-provider");
+providerSelect.append(new Option("All providers", ""));
+for (const provider of DATA.providers) {
+  const n = DATA.moments.filter((m) => m.provider === provider).length;
+  providerSelect.append(new Option(`${humanize(provider)} (${n})`, provider));
+}
+// One provider has nothing to choose between.
+providerSelect.closest(".ctl").hidden = DATA.providers.length < 2;
+
+const annotatorSelect = $("f-annotator");
+annotatorSelect.append(new Option("All annotators", ""));
+for (const a of DATA.annotators) {
+  annotatorSelect.append(new Option(`${a.name} (${a.total})`, a.id));
+}
+
+// Which pair of raters "Agreement on" and the agreement table compare. Counts sit in
+// the labels because only a fraction of the export is adjudicated twice: a maintainer
+// should see how much of it the adjudicator comparison rests on before selecting it.
+const pairSelect = $("f-pairs");
+for (const [value, source] of Object.entries(PAIR_SOURCES)) {
+  pairSelect.append(new Option(source.label, value));
+}
+
+/** The option labels, counted over the moments each pair is available on. */
+function labelPairOptions() {
+  const chosen = state.pairSource;
+  Object.keys(PAIR_SOURCES).forEach((value, i) => {
+    state.pairSource = value;
+    const n = DATA.moments
+      .filter((m) => matchesProvider(m))
+      .map((m) => view(m))
+      .filter((v) => v && Object.keys(pairsOf(v)).length).length;
+    pairSelect.options[i].text = `${PAIR_SOURCES[value].label} (${n})`;
+  });
+  state.pairSource = chosen;
+}
+
+// The axis filter offers exactly the axes the agreement table reports on: the result
+// axes are compared but not scored, so slicing the moments by them would invite reading
+// a number the team has decided not to quote.
+const axisSelect = $("f-axis");
+axisSelect.append(new Option("Everything", ""));
+for (const [want, label] of [["differ", "Disagreed on"], ["agree", "Agreed on"]]) {
+  const group = el("optgroup");
+  group.label = label;
+  for (const axis of REPORTED_AXES) {
+    group.append(new Option(axis.label, `${want}:${axis.key}`));
+  }
+  axisSelect.append(group);
+}
+
+// Counts sit in the labels because adjudication is rare -- a maintainer should be able
+// to see there are six of them without selecting the option and finding out.
+const ADJUDICATION_OPTIONS = [
+  ["", "Any"],
+  ["any", "Adjudicated"],
+  ["labels", "Adjudicated · final labels"],
+  ["thrown", "Adjudicated · thrown out"],
+  ["single", "Adjudicated · one adjudicator"],
+  ["double", "Adjudicated · two or more adjudicators"],
+  ["none", "Not adjudicated"],
+];
+const adjudicationSelect = $("f-adjudication");
+for (const [value, label] of ADJUDICATION_OPTIONS) {
+  adjudicationSelect.append(new Option(label, value));
+}
+
+/** The option labels, counted over the moments the other filters leave in view. */
+function labelAdjudicationOptions() {
+  const base = selectedViews({ ignoreAdjudication: true });
+  const chosen = state.adjudication;
+  ADJUDICATION_OPTIONS.forEach(([value, label], i) => {
+    state.adjudication = value;
+    adjudicationSelect.options[i].text = `${label} (${base.filter((v) => matchesAdjudication(v)).length})`;
+  });
+  state.adjudication = chosen;
+}
+
+const BINDINGS = [
+  ["f-provider", "provider"],
+  ["f-annotator", "annotator"],
+  ["f-pairs", "pairSource"],
+  ["f-axis", "axis"],
+  ["f-adjudication", "adjudication"],
+  ["f-from", "from"],
+  ["f-to", "to"],
+];
+for (const [id, key] of BINDINGS) {
+  $(id).addEventListener("change", () => {
+    state[key] = $(id).value;
+    render();
+  });
+}
+$("f-testers").addEventListener("change", () => {
+  state.excludeTesters = $("f-testers").checked;
+  render();
+});
+$("clear-dates").addEventListener("click", () => {
+  state.from = state.to = "";
+  $("f-from").value = $("f-to").value = "";
+  render();
+});
+$("transcript-select").addEventListener("change", () => {
+  state.transcriptId = $("transcript-select").value;
+  state.activeMomentId = null;
+  state.problemIndex = 0;
+  render();
+});
+// Flipping cards redraws only the card: a full render would rebuild the moment list
+// and close any <details> the reader has open.
+for (const [id, step] of [["problem-prev", -1], ["problem-next", 1]]) {
+  $(id).addEventListener("click", () => {
+    state.problemIndex += step;
+    renderProblems((TRANSCRIPTS.get(state.transcriptId) || {}).problems || []);
+  });
+}
+$("header-sub").textContent =
+  `${DATA.moments.length} moments · ${DATA.transcripts.length} annotated transcripts of `
+  + `${DATA.transcripts_total} · ${DATA.annotators.length} annotators`;
+$("header-source").textContent =
+  `${DATA.sources.map((s) => s.annotations).join(", ")} · built ${DATA.generated_at}`;
+render();
+</script>
+</body>
+</html>
