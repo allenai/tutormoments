@@ -109,6 +109,24 @@ PROMPT_FILES = {
 # file must have been built at this width (it is, by default).
 EXCERPT_WIDTH = excerpts.FULL_KEY
 
+# Gold-filled template slots. From prompt v5 the over-scaffolding prompt is told
+# the teachers' situation judgement ({is_isnt}) and what the tutor did after the
+# cut ({action}), both read from the gold labels -- an oracle condition, so its
+# scores are an upper bound rather than comparable with versions that lack them.
+GOLD_SLOTS = ("is_isnt", "action")
+
+# Situation types in which teachers tend to judge the moment calls for rigor.
+# Every other type, fifty_fifty included, fills {is_isnt} with "isn't".
+RIGOR_SITUATIONS = ("rigor_only", "rigor_maj")
+
+# (scaffolding_present, rigor_present) -> {action}. Neither has no wording: the
+# gold gate only asks about moments where scaffolding is present.
+ACTION_WORDING = {
+    (True, True): "scaffolding and pushing for rigor",
+    (True, False): "scaffolding",
+    (False, True): "pushing for rigor",
+}
+
 # Batch-entry key prefixes. Neither contains "__", and a moment_id is a UUID, so
 # a key splits back apart on the first "__".
 ACTION_PREFIX = "action"
@@ -388,14 +406,60 @@ def load_excerpts(excerpt_dir: str, stems=DEFAULT_SPLITS) -> dict[str, list[dict
 # ===========================================================================
 
 
-def fill(template: str, excerpt: str) -> str:
-    """Substitute ``{excerpt}`` into a v2 prompt template.
+def fill(template: str, excerpt: str, slots: dict[str, str] | None = None) -> str:
+    """Substitute ``{excerpt}`` and any gold ``slots`` into a v2 prompt template.
 
     ``str.replace``, not ``str.format``: both templates print a literal JSON
     object in their output-format section, and ``format`` would read those
     braces as fields and raise.
+
+    A gold slot left unfilled raises rather than reaching the model as a literal
+    ``{is_isnt}``. Slots are filled before the excerpt, so transcript text is
+    never itself searched for slot names.
     """
-    return template.replace("{excerpt}", excerpt)
+    filled = template
+    for name, value in (slots or {}).items():
+        filled = filled.replace("{" + name + "}", value)
+    unfilled = [name for name in GOLD_SLOTS if "{" + name + "}" in filled]
+    if unfilled:
+        raise ValueError(f"template slot(s) left unfilled: {', '.join(unfilled)}")
+    return filled.replace("{excerpt}", excerpt)
+
+
+def uses_gold_slots(template: str) -> bool:
+    """Whether a template asks for any gold-filled slot."""
+    return any("{" + name + "}" in template for name in GOLD_SLOTS)
+
+
+def gold_slots(record: dict) -> dict[str, str]:
+    """The gold-filled slot values for one moment.
+
+    Raises rather than guessing when the moment lacks what a slot needs: a
+    prompt telling the model the wrong situation would misreport the condition
+    its label was made under.
+    """
+    situation = record.get("situation_type")
+    if situation is None:
+        raise KeyError(
+            f"moment {record.get('moment_id')} has no situation_type; rebuild "
+            "the excerpts with `python -m tutormoments_build.v2.excerpts`"
+        )
+    labels = record.get("labels") or {}
+    key = (bool(labels.get("scaffolding_present")), bool(labels.get("rigor_present")))
+    if key not in ACTION_WORDING:
+        raise ValueError(
+            f"moment {record.get('moment_id')}: gold marks neither scaffolding "
+            "nor rigor, so there is no {action} to state"
+        )
+    return {
+        "is_isnt": "is" if situation in RIGOR_SITUATIONS else "isn't",
+        "action": ACTION_WORDING[key],
+    }
+
+
+def over_scaffolding_slots(template: str, record: dict) -> dict[str, str] | None:
+    """Gold slots for the over-scaffolding prompt, or None if it takes none."""
+    return gold_slots(record) if uses_gold_slots(template) else None
 
 
 def excerpt_at(record: dict, width: str = EXCERPT_WIDTH) -> str:
@@ -484,7 +548,11 @@ def build_entries(
             entries.append(
                 build_batch_entry(
                     f"{OVER_SCAFFOLDING_PREFIX}__{moment_id}",
-                    fill(over_template, excerpt_at(record)),
+                    fill(
+                        over_template,
+                        excerpt_at(record),
+                        over_scaffolding_slots(over_template, record),
+                    ),
                     json_mode=True,
                 )
             )
@@ -716,10 +784,14 @@ def build_record(
     )
 
     over = None
+    over_slots = None
     if classified and wants_over_scaffolding(excerpt_record):
         over = _pass_result(
             raw_entries.get(f"{OVER_SCAFFOLDING_PREFIX}__{moment_id}"),
             parse_over_scaffolding,
+        )
+        over_slots = over_scaffolding_slots(
+            prompts.templates["over_scaffolding"], excerpt_record
         )
 
     return {
@@ -748,6 +820,10 @@ def build_record(
             "action_direction": EXCERPT_WIDTH,
             "over_scaffolding": EXCERPT_WIDTH,
         },
+        # What the gold-filled slots told the model, per pass; None for a pass
+        # whose template has none (or that was not asked).
+        "prompt_slots": {"over_scaffolding": over_slots},
+        "situation_type": excerpt_record.get("situation_type"),
         "post_cut_rows": excerpt_record.get("post_cut_rows"),
         "post_cut_dialogue_rows": excerpt_record.get("post_cut_dialogue_rows"),
         "classified": classified,
@@ -1090,7 +1166,13 @@ def _print_prompts(
     print(fill(action_template, excerpt_at(record)))
     if wants_over_scaffolding(record):
         print(f"\n\n===== {over_path} (@{EXCERPT_WIDTH} excerpt) =====\n")
-        print(fill(over_template, excerpt_at(record)))
+        print(
+            fill(
+                over_template,
+                excerpt_at(record),
+                over_scaffolding_slots(over_template, record),
+            )
+        )
     else:
         print(f"\n\n===== {over_path} =====\n\nnot asked: {NOT_ASKED_LABEL}")
     return 0

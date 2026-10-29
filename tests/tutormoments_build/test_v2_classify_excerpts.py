@@ -11,7 +11,13 @@ from tutormoments_build.v2 import classify_excerpts as C
 
 
 def _excerpt(
-    moment_id, *, scaffolding_present, over_scaffolding_present=False, split="iteration"
+    moment_id,
+    *,
+    scaffolding_present,
+    over_scaffolding_present=False,
+    rigor_present=False,
+    situation_type="scaffold_only",
+    split="iteration",
 ):
     return {
         "moment_id": moment_id,
@@ -44,9 +50,10 @@ def _excerpt(
         },
         "labels": {
             "scaffolding_present": scaffolding_present,
-            "rigor_present": False,
+            "rigor_present": rigor_present,
             "over_scaffolding_present": over_scaffolding_present,
         },
+        "situation_type": situation_type,
     }
 
 
@@ -73,10 +80,110 @@ def test_fill_substitutes_excerpt_and_keeps_literal_json_braces():
 
 
 def test_over_scaffolding_prompt_carries_the_excerpt():
-    filled = C.fill(PROMPTS.templates["over_scaffolding"], "Turn 9. TUTOR: so")
+    template = PROMPTS.templates["over_scaffolding"]
+    filled = C.fill(
+        template, "Turn 9. TUTOR: so", C.over_scaffolding_slots(template, SCAFFOLDED)
+    )
 
     assert "Turn 9. TUTOR: so" in filled
     assert "{excerpt}" not in filled
+
+
+# ===========================================================================
+# Gold-filled slots
+# ===========================================================================
+
+
+@pytest.mark.parametrize(
+    "situation,expected",
+    [
+        ("rigor_only", "is"),
+        ("rigor_maj", "is"),
+        ("scaffold_only", "isn't"),
+        ("scaffold_maj", "isn't"),
+        ("fifty_fifty", "isn't"),
+    ],
+)
+def test_is_isnt_follows_the_teachers_situation_judgement(situation, expected):
+    record = _excerpt("m", scaffolding_present=True, situation_type=situation)
+    assert C.gold_slots(record)["is_isnt"] == expected
+
+
+@pytest.mark.parametrize(
+    "scaffolding,rigor,expected",
+    [
+        (True, True, "scaffolding and pushing for rigor"),
+        (True, False, "scaffolding"),
+        (False, True, "pushing for rigor"),
+    ],
+)
+def test_action_follows_the_gold_action_labels(scaffolding, rigor, expected):
+    record = _excerpt("m", scaffolding_present=scaffolding, rigor_present=rigor)
+    assert C.gold_slots(record)["action"] == expected
+
+
+def test_a_moment_with_neither_action_has_no_wording():
+    with pytest.raises(ValueError, match="neither"):
+        C.gold_slots(_excerpt("m", scaffolding_present=False))
+
+
+def test_a_moment_without_a_situation_type_is_refused():
+    record = _excerpt("m", scaffolding_present=True, situation_type=None)
+    with pytest.raises(KeyError, match="rebuild"):
+        C.gold_slots(record)
+
+
+def test_an_unfilled_gold_slot_never_reaches_the_model():
+    with pytest.raises(ValueError, match="is_isnt"):
+        C.fill("situation {is_isnt} ok\n{excerpt}", "Turn 1.")
+
+
+def test_slots_are_filled_before_the_excerpt():
+    """Transcript text that happens to spell a slot name is left alone."""
+    filled = C.fill(
+        "{action}: {excerpt}",
+        "Turn 1. TUTOR: write {action} here",
+        {"action": "scaffolding"},
+    )
+    assert filled == "scaffolding: Turn 1. TUTOR: write {action} here"
+
+
+@pytest.mark.parametrize("version", ["1", "2", "3", "4"])
+def test_earlier_prompt_versions_take_no_gold_slots(version):
+    templates = C.load_prompt_set(version).templates
+    assert not any(C.uses_gold_slots(t) for t in templates.values())
+
+
+def test_v5_over_scaffolding_prompt_is_told_the_gold_situation_and_action():
+    prompts = C.load_prompt_set("5")
+    record = _excerpt(
+        "m", scaffolding_present=True, rigor_present=True, situation_type="rigor_maj"
+    )
+    entries, _ = C.build_entries([record], prompts)
+    over = next(e for e in entries if e["key"] == "overscaffold__m")
+    text = json.dumps(over)
+
+    assert "this situation is appropriate for a push for rigor" in text
+    assert "the tutor is scaffolding and pushing for rigor." in text
+    assert "{is_isnt}" not in text and "{action}" not in text
+
+
+def test_a_v5_record_states_what_the_slots_told_the_model():
+    record = C.build_record(
+        _excerpt("aaa", scaffolding_present=True, situation_type="fifty_fifty"),
+        RAW,
+        CFG,
+        C.load_prompt_set("5"),
+    )
+    assert record["situation_type"] == "fifty_fifty"
+    assert record["prompt_slots"] == {
+        "over_scaffolding": {"is_isnt": "isn't", "action": "scaffolding"}
+    }
+
+
+def test_a_pre_v5_record_has_no_slots():
+    record = C.build_record(SCAFFOLDED, RAW, CFG, C.load_prompt_set("4"))
+    assert record["prompt_slots"] == {"over_scaffolding": None}
 
 
 # ===========================================================================

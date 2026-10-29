@@ -290,6 +290,16 @@ class TestBuildRecord:
         assert record["post_cut_rows"] == 1
         assert record["post_cut_dialogue_rows"] == 1
         assert record["labels"] == {"scaffolding_present": True}
+        assert record["situation_type"] is None
+
+    def test_carries_the_situation_type(self):
+        record = E.build_record(
+            self._moment(situation_type="rigor_maj"),
+            SAMPLE,
+            "conv-1",
+            context_widths=(2,),
+        )
+        assert record["situation_type"] == "rigor_maj"
 
         rendered = record["excerpts"]["2"]
         assert rendered["context_start_index"] == 2
