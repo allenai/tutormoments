@@ -11,6 +11,7 @@ import pytest
 from tutormoments.models import (
     ThinkingConfigError,
     _validate_registry,
+    batch_max_output_cap,
     explicit_prompt_cache,
     get_pricing,
     infer_provider,
@@ -350,11 +351,21 @@ def test_validate_registry_rejects_missing_provider():
         _validate_registry(bad)
 
 
-def test_validate_registry_rejects_bad_output_cap():
+@pytest.mark.parametrize("cap_key", ["max_output_cap", "batch_max_output_cap"])
+def test_validate_registry_rejects_bad_output_cap(cap_key):
     bad = _minimal_registry()
-    bad["models"]["claude-x"]["max_output_cap"] = -1
-    with pytest.raises(ValueError, match="max_output_cap"):
+    bad["models"]["claude-x"][cap_key] = -1
+    with pytest.raises(ValueError, match=cap_key):
         _validate_registry(bad)
+
+
+def test_batch_max_output_cap():
+    # Gemini 4 Argon's batch API rejects max_output_tokens above 32,768; its
+    # sync calls are not capped.
+    assert batch_max_output_cap("gemini-4-argon") == 32768
+    assert max_output_cap("gemini-4-argon") is None
+    assert batch_max_output_cap("gemini-3.5-flash") is None
+    assert batch_max_output_cap("not-registered") is None
 
 
 @pytest.mark.parametrize(

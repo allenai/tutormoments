@@ -141,12 +141,13 @@ def _validate_registry(raw: dict) -> dict:
             raise ValueError(
                 f"models.yaml model '{model_key}': unknown provider {provider!r}"
             )
-        cap = entry.get("max_output_cap")
-        if cap is not None and (not isinstance(cap, int) or cap <= 0):
-            raise ValueError(
-                f"models.yaml model '{model_key}': max_output_cap must be a "
-                f"positive integer, got {cap!r}"
-            )
+        for cap_key in ("max_output_cap", "batch_max_output_cap"):
+            cap = entry.get(cap_key)
+            if cap is not None and (not isinstance(cap, int) or cap <= 0):
+                raise ValueError(
+                    f"models.yaml model '{model_key}': {cap_key} must be a "
+                    f"positive integer, got {cap!r}"
+                )
         explicit_cache = entry.get("explicit_prompt_cache")
         if explicit_cache is not None and (
             not isinstance(explicit_cache, bool) or provider != "openai"
@@ -266,6 +267,14 @@ def max_output_cap(model: str) -> int | None:
     if found is None:
         return None
     return found[1].get("max_output_cap")
+
+
+def batch_max_output_cap(model: str) -> int | None:
+    """Per-model output cap for batch requests only, or None when none applies."""
+    found = _find_model_entry(model)
+    if found is None:
+        return None
+    return found[1].get("batch_max_output_cap")
 
 
 def explicit_prompt_cache(model: str) -> bool:

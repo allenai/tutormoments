@@ -1732,6 +1732,41 @@ def test_run_batch_gemini_injects_thinking_config_without_mutating_entries(
     assert set(out) == {"kA", "kB"}
 
 
+@pytest.mark.parametrize(
+    "model,requested,sent",
+    [
+        ("gemini-4-argon", 65536, 32768),  # clamped to the batch-only cap
+        ("gemini-4-argon", 1000, 1000),  # a smaller request passes through
+        ("gemini-2.5-pro", 65536, 65536),  # no batch cap registered
+    ],
+)
+def test_run_batch_gemini_applies_batch_output_cap(monkeypatch, model, requested, sent):
+    """A registry batch_max_output_cap clamps each uploaded line's
+    max_output_tokens, without mutating the caller's entries."""
+    monkeypatch.setenv("GEMINI_API_KEY", "key-test")
+    result_text = json.dumps(
+        {
+            "key": "kA",
+            "response": {
+                "candidates": [{"content": {"parts": [{"text": "A"}]}}],
+                "usageMetadata": {},
+            },
+        }
+    )
+    entries = [build_batch_entry("kA", "pA", max_tokens=requested)]
+    entries_before = copy.deepcopy(entries)
+    with (
+        patch("google.genai.Client") as MockGenai,
+        patch("tutormoments.client.time.sleep"),
+    ):
+        client_obj, captured = _mock_gemini_batch_client(result_text)
+        MockGenai.return_value = client_obj
+        run_batch(ModelClient(model), entries, poll_interval=0)
+    (line,) = [json.loads(ln) for ln in captured["jsonl"].strip().splitlines()]
+    assert line["request"]["generation_config"]["max_output_tokens"] == sent
+    assert entries == entries_before
+
+
 def test_run_batch_gemini_skips_thought_parts_and_joins_text(monkeypatch):
     """Result parsing drops parts flagged thought: true (reasoning summaries,
     not the answer) and joins the remaining text parts, keeping batch text

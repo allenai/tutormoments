@@ -9,6 +9,9 @@
 #     fall back to the prefix table in models.py).
 #   max_output_cap: per-model output token ceiling (requests above it are
 #     rejected by the API); omit when the provider default rules.
+#   batch_max_output_cap: output token ceiling for batch requests only, where
+#     the provider's batch API accepts less than its sync API; sync calls
+#     still run uncapped. Omit when batch and sync limits agree.
 #   explicit_prompt_cache: true for OpenAI GPT-5.6-and-later models, whose
 #     implicit cache breakpoint sits at the end of the latest message. The
 #     benchmark sends one user message that grows every turn, so implicit
@@ -234,11 +237,11 @@ models:
   # then, with a pricing_version bump. Implicit caching only (prompts of
   # 4,096+ tokens); no storage charge applies to implicit hits. No >200k
   # tier is listed. Batch requests reject max_output_tokens above 32,768
-  # ("decoding continuation is not supported for batch"), so this model
-  # cannot serve a batch role (scorer/groundtruth) without a batch-only cap;
-  # sync calls are unaffected (smoke, 2026-10-14).
+  # ("decoding continuation is not supported for batch"), hence the
+  # batch-only cap; sync calls are unaffected (smoke, 2026-10-14).
   gemini-4-argon:
     provider: gemini
+    batch_max_output_cap: 32768
     pricing:
       input: 2.00
       output: 10.00

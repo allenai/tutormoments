@@ -18,6 +18,7 @@ from google.genai import types
 # import it from here.
 from tutormoments.models import (
     WireThinking,
+    batch_max_output_cap,
     explicit_prompt_cache,
     infer_provider,
     max_output_cap,
@@ -1736,6 +1737,7 @@ def _submit_batch_gemini(client, entries, display_name, wire: WireThinking) -> s
 
     gemini_client = client._client
     thinking_config = wire.gemini_thinking_config
+    batch_cap = batch_max_output_cap(client.model)
 
     with tempfile.NamedTemporaryFile(
         mode="w", suffix=".jsonl", delete=False, encoding="utf-8"
@@ -1762,6 +1764,11 @@ def _submit_batch_gemini(client, entries, display_name, wire: WireThinking) -> s
             gen_config = dict(entry["request"].get("generation_config", {}))
             if thinking_config is not None:
                 gen_config["thinking_config"] = dict(thinking_config)
+            # Some models' batch API rejects outputs their sync API allows.
+            if batch_cap is not None and gen_config.get("max_output_tokens"):
+                gen_config["max_output_tokens"] = min(
+                    gen_config["max_output_tokens"], batch_cap
+                )
             gem_entry = {
                 "key": key,
                 "request": {
