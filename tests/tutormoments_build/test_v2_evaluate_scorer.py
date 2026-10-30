@@ -144,7 +144,7 @@ def test_report_gives_each_not_scored_reason_its_own_column():
         record("b", gold=GOLD_NO, scaffolding=False, rigor=False),
     ]
 
-    text = E.report("m", "1", "iteration", E.evaluate(records))
+    text = E.report("m", "1", "full", "iteration", E.evaluate(records))
 
     header = next(line for line in text.splitlines() if "not asked" in line)
     over = next(line for line in text.splitlines() if "over-scaffolding" in line)
@@ -322,12 +322,12 @@ def test_the_short_threshold_is_configurable():
 
 
 def _write_predictions(
-    tmp_path, model="claude-opus-5", split="iteration", prompt_version="1"
+    tmp_path, model="claude-opus-5", split="iteration", prompt_version="1", width="full"
 ):
     # Predictions live under their own directory: every subdirectory of
     # --pred-dir is read as a model name, so the ground truth cannot sit beside
     # them.
-    version_dir = tmp_path / "preds" / model / prompt_version
+    version_dir = tmp_path / "preds" / model / prompt_version / width
     version_dir.mkdir(parents=True)
     records = [
         record(
@@ -377,6 +377,7 @@ def test_cli_reports_and_writes_json(tmp_path, capsys):
     scores = json.loads(out.read_text(encoding="utf-8"))
     assert scores[0]["model"] == "claude-opus-5"
     assert scores[0]["prompt_version"] == "1"
+    assert scores[0]["context_turns"] == "full"
     assert scores[0]["split"] == "iteration"
     scaffolding = scores[0]["tasks"][0]
     assert (scaffolding["all"]["tp"], scaffolding["all"]["fp"]) == (1, 1)
@@ -526,6 +527,31 @@ def test_prompt_versions_sort_numerically(tmp_path):
         (tmp_path / version).mkdir()
 
     assert E.find_prompt_versions(str(tmp_path), None) == ["1", "2", "10"]
+
+
+def test_cli_scores_every_excerpt_width_by_default(tmp_path, capsys):
+    pred_dir = _write_predictions(tmp_path, width="full")
+    _write_predictions(tmp_path, width="20")
+    out_json = tmp_path / "scores.json"
+
+    assert E.main(["--pred-dir", pred_dir, "--json", str(out_json)]) == 0
+    out = capsys.readouterr().out
+    assert "@full excerpt" in out
+    assert "@20 excerpt" in out
+    scores = json.loads(out_json.read_text(encoding="utf-8"))
+    assert [r["context_turns"] for r in scores] == ["full", "20"]
+
+    assert E.main(["--pred-dir", pred_dir, "--context-turns", "20"]) == 0
+    out = capsys.readouterr().out
+    assert "@20 excerpt" in out
+    assert "@full excerpt" not in out
+
+
+def test_widths_sort_widest_first_and_skip_stray_directories(tmp_path):
+    for name in ("5", "full", "20", "scratch"):
+        (tmp_path / name).mkdir()
+
+    assert E.find_widths(str(tmp_path), None) == ["full", "20", "5"]
 
 
 def test_cli_scores_only_the_model_asked_for(tmp_path, capsys):

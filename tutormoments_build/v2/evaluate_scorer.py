@@ -1,8 +1,9 @@
 """Score v2 predictions against the gold labels: precision, recall, F1.
 
 ``classify_excerpts.py`` writes predictions to
-``<pred-dir>/<model>/<prompt version>/<split>.jsonl``, each record carrying the
-gold ``labels`` it was made against, so those files are all that scoring needs.
+``<pred-dir>/<model>/<prompt version>/<excerpt width>/<split>.jsonl``, each
+record carrying the gold ``labels`` it was made against, so those files are all
+that scoring needs.
 
 Every task is reported in up to three blocks:
 
@@ -54,12 +55,14 @@ Usage::
     python -m tutormoments_build.v2.evaluate_scorer
     python -m tutormoments_build.v2.evaluate_scorer --model claude-opus-5
     python -m tutormoments_build.v2.evaluate_scorer --prompt-version 1
+    python -m tutormoments_build.v2.evaluate_scorer --context-turns 20
     python -m tutormoments_build.v2.evaluate_scorer --splits iteration test
     python -m tutormoments_build.v2.evaluate_scorer --short-turns 3
     python -m tutormoments_build.v2.evaluate_scorer --ground-truth-dir data/ground_truth
 
 With no ``--prompt-version`` every version found under a model is scored, so a
-bare run reports each revision of the prompts against the same gold.
+bare run reports each revision of the prompts against the same gold. Likewise
+with no ``--context-turns``: every excerpt width found under a version.
 """
 
 import argparse
@@ -70,6 +73,7 @@ import sys
 from collections import Counter
 
 from tutormoments.logging_setup import logging_args_parent, setup_logging
+from tutormoments_build.v2 import excerpts
 from tutormoments_build.v2.build_ground_truth import (
     DEFAULT_OUT_DIR as DEFAULT_GROUND_TRUTH_DIR,
 )
@@ -328,6 +332,24 @@ def find_prompt_versions(model_dir: str, prompt_version: str | None) -> list[str
     )
 
 
+def find_widths(version_dir: str, width: str | None) -> list[str]:
+    """Excerpt-width subdirectories to score under one prompt version.
+
+    Default is every width present, widest first, so a bare run puts a narrow
+    window beside the full transcript it is measured against. A directory that
+    is not a width key is not a result set and is left out.
+    """
+    if width:
+        return [width]
+    if not os.path.isdir(version_dir):
+        return []
+    return excerpts.sort_widths(
+        name
+        for name in _subdirectories(version_dir)
+        if name == excerpts.FULL_KEY or name.isdigit()
+    )
+
+
 def evaluate(
     records: list[dict],
     agreement: dict[str, dict] | None = None,
@@ -399,7 +421,9 @@ def _no_gold_lines(rows: list[dict], block: str) -> list[str]:
     ]
 
 
-def report(model: str, prompt_version: str, split: str, rows: list[dict]) -> str:
+def report(
+    model: str, prompt_version: str, width: str, split: str, rows: list[dict]
+) -> str:
     """One block per subset: all moments, the ones flagged as agreed, and
     the ones with a short post-cut span."""
     header = (
@@ -410,7 +434,7 @@ def report(model: str, prompt_version: str, split: str, rows: list[dict]) -> str
     )
     lines = [
         "",
-        f"  {model}  --  prompts v{prompt_version}  --  {split}",
+        f"  {model}  --  prompts v{prompt_version}  --  @{width} excerpt  --  {split}",
         "",
         header,
         f"  {'-' * (len(header) - 2)}",
@@ -502,6 +526,13 @@ def build_parser() -> argparse.ArgumentParser:
         "version found under each model.",
     )
     parser.add_argument(
+        "--context-turns",
+        default=None,
+        metavar="WIDTH",
+        help="Excerpt width whose predictions to score (`full` or a turn "
+        "count). Default: every width found under each prompt version.",
+    )
+    parser.add_argument(
         "--splits",
         nargs="+",
         default=list(DEFAULT_SPLITS),
@@ -554,33 +585,40 @@ def main(argv: list[str] | None = None) -> int:
             logger.warning("no prompt-version directories under %s", model_dir)
             continue
         for version in versions:
-            for split in args.splits:
-                path = os.path.join(model_dir, version, f"{split}.jsonl")
-                if not os.path.exists(path):
-                    logger.warning("no predictions at %s; skipping", path)
-                    continue
-                predictions = read_predictions(path)
-                if split in ground_truths:
-                    stale = stale_moments(predictions, ground_truths[split])
-                    if stale:
-                        logger.warning(
-                            "%d moment(s) in %s carry gold labels that differ from "
-                            "the current ground truth (e.g. %s); re-run "
-                            "classify_excerpts to score against today's gold",
-                            len(stale),
-                            path,
-                            ", ".join(stale[:3]),
-                        )
-                rows = evaluate(predictions, agreement[split], args.short_turns)
-                results.append(
-                    {
-                        "model": model,
-                        "prompt_version": version,
-                        "split": split,
-                        "tasks": rows,
-                    }
-                )
-                print(report(model, version, split, rows))
+            version_dir = os.path.join(model_dir, version)
+            widths = find_widths(version_dir, args.context_turns)
+            if not widths:
+                logger.warning("no excerpt-width directories under %s", version_dir)
+                continue
+            for width in widths:
+                for split in args.splits:
+                    path = os.path.join(version_dir, width, f"{split}.jsonl")
+                    if not os.path.exists(path):
+                        logger.warning("no predictions at %s; skipping", path)
+                        continue
+                    predictions = read_predictions(path)
+                    if split in ground_truths:
+                        stale = stale_moments(predictions, ground_truths[split])
+                        if stale:
+                            logger.warning(
+                                "%d moment(s) in %s carry gold labels that differ "
+                                "from the current ground truth (e.g. %s); re-run "
+                                "classify_excerpts to score against today's gold",
+                                len(stale),
+                                path,
+                                ", ".join(stale[:3]),
+                            )
+                    rows = evaluate(predictions, agreement[split], args.short_turns)
+                    results.append(
+                        {
+                            "model": model,
+                            "prompt_version": version,
+                            "context_turns": width,
+                            "split": split,
+                            "tasks": rows,
+                        }
+                    )
+                    print(report(model, version, width, split, rows))
 
     if not results:
         logger.error("no prediction files found under %s", args.pred_dir)

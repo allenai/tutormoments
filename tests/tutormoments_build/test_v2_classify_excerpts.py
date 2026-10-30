@@ -871,7 +871,7 @@ def test_load_excerpts_raises_when_nothing_is_there(tmp_path):
 def test_prediction_dir_flattens_a_vendor_prefixed_id():
     """A vendor-prefixed id must not nest two directories."""
     assert C.prediction_dir("out", "deepseek-ai/DeepSeek-V4-Pro", "1") == os.path.join(
-        "out", "deepseek-ai_DeepSeek-V4-Pro", "1"
+        "out", "deepseek-ai_DeepSeek-V4-Pro", "1", "full"
     )
 
 
@@ -979,7 +979,9 @@ def test_the_test_split_is_held_out_unless_asked_for_by_name(tmp_path, monkeypat
     out_dir = tmp_path / "out"
 
     assert C.main(["--excerpt-dir", excerpt_dir, "--out-dir", str(out_dir)]) == 0
-    assert [p.name for p in sorted(out_dir.glob("*/*/*.jsonl"))] == ["iteration.jsonl"]
+    assert [p.name for p in sorted(out_dir.glob("*/*/*/*.jsonl"))] == [
+        "iteration.jsonl"
+    ]
 
     assert (
         C.main(
@@ -994,7 +996,7 @@ def test_the_test_split_is_held_out_unless_asked_for_by_name(tmp_path, monkeypat
         )
         == 0
     )
-    assert [p.name for p in sorted(out_dir.glob("*/*/*.jsonl"))] == [
+    assert [p.name for p in sorted(out_dir.glob("*/*/*/*.jsonl"))] == [
         "iteration.jsonl",
         "test.jsonl",
     ]
@@ -1071,7 +1073,7 @@ def test_predictions_are_filed_under_the_model_that_made_them(tmp_path, monkeypa
     )
 
     assert code == 0
-    path = out_dir / "claude-sonnet-5" / "1" / "iteration.jsonl"
+    path = out_dir / "claude-sonnet-5" / "1" / "full" / "iteration.jsonl"
     assert path.exists()
     record = json.loads(path.read_text(encoding="utf-8").splitlines()[0])
     assert record["model"] == "claude-sonnet-5"
@@ -1094,7 +1096,7 @@ def test_the_default_model_gets_its_own_directory_too(tmp_path, monkeypatch):
         ]
     )
 
-    assert (out_dir / "claude-opus-5" / "1" / "iteration.jsonl").exists()
+    assert (out_dir / "claude-opus-5" / "1" / "full" / "iteration.jsonl").exists()
 
 
 def test_the_chosen_model_reaches_the_batch(tmp_path, monkeypatch):
@@ -1367,6 +1369,43 @@ def test_print_labels_each_prompt_with_the_rendering_it_read(tmp_path, capsys):
     assert out.count(f"(@{C.EXCERPT_WIDTH} excerpt)") == 2
 
 
+def test_context_turns_fills_both_prompts_from_that_window():
+    entries, _ = C.build_entries([SCAFFOLDED], PROMPTS, width="20")
+    texts = [e["request"]["contents"][0]["parts"][0]["text"] for e in entries]
+
+    assert len(texts) == 2
+    assert all("wide lead-up" in t and "whole transcript" not in t for t in texts)
+
+
+def test_context_turns_is_recorded_and_files_the_round_apart(tmp_path, monkeypatch):
+    """A windowed round must not land on, or read as, the full-transcript one."""
+    monkeypatch.setattr(C, "run_entries", lambda entries, cfg, batch_id=None: RAW)
+    out_dir = tmp_path / "out"
+    args = ["--excerpt-dir", _write_excerpts(tmp_path), "--out-dir", str(out_dir)]
+
+    assert C.main(args) == 0
+    assert C.main(args + ["--context-turns", "20"]) == 0
+
+    (windowed,) = out_dir.glob("*/*/20/iteration.jsonl")
+    assert (windowed.parent.parent / "full" / "iteration.jsonl").exists()
+    record = json.loads(windowed.read_text(encoding="utf-8").splitlines()[0])
+    assert record["context_turns"] == {
+        "action_direction": "20",
+        "over_scaffolding": "20",
+    }
+
+
+@pytest.mark.parametrize("value", ["0", "-5", "wide"])
+def test_context_turns_rejects_what_is_not_a_width(value):
+    with pytest.raises(SystemExit):
+        C.build_parser().parse_args(["--context-turns", value])
+
+
+def test_context_turns_is_normalised_to_the_excerpt_key():
+    assert C.build_parser().parse_args(["--context-turns", "020"]).context_turns == "20"
+    assert C.build_parser().parse_args([]).context_turns == "full"
+
+
 # ===========================================================================
 # Overwrite protection
 # ===========================================================================
@@ -1388,14 +1427,14 @@ def test_a_second_round_refuses_to_replace_the_first(tmp_path, monkeypatch):
     ]
 
     assert C.main(argv) == 0
-    written = (out_dir / "claude-opus-5" / "1" / "iteration.jsonl").read_text(
+    written = (out_dir / "claude-opus-5" / "1" / "full" / "iteration.jsonl").read_text(
         encoding="utf-8"
     )
 
     with pytest.raises(FileExistsError, match="--overwrite"):
         C.main(argv)
 
-    assert (out_dir / "claude-opus-5" / "1" / "iteration.jsonl").read_text(
+    assert (out_dir / "claude-opus-5" / "1" / "full" / "iteration.jsonl").read_text(
         encoding="utf-8"
     ) == written
 
@@ -1431,7 +1470,7 @@ def test_overwrite_replaces_the_earlier_round(tmp_path, monkeypatch):
 
     assert C.main(argv) == 0
     assert C.main(argv + ["--overwrite"]) == 0
-    assert (out_dir / "claude-opus-5" / "1" / "iteration.jsonl").exists()
+    assert (out_dir / "claude-opus-5" / "1" / "full" / "iteration.jsonl").exists()
 
 
 def test_a_new_prompt_version_is_not_an_overwrite(tmp_path, monkeypatch):
@@ -1451,8 +1490,8 @@ def test_a_new_prompt_version_is_not_an_overwrite(tmp_path, monkeypatch):
     assert C.main(argv + ["--prompt-version", "1"]) == 0
     assert C.main(argv + ["--prompt-version", "2"]) == 0
 
-    assert (out_dir / "claude-opus-5" / "1" / "iteration.jsonl").exists()
-    assert (out_dir / "claude-opus-5" / "2" / "iteration.jsonl").exists()
+    assert (out_dir / "claude-opus-5" / "1" / "full" / "iteration.jsonl").exists()
+    assert (out_dir / "claude-opus-5" / "2" / "full" / "iteration.jsonl").exists()
 
 
 # ===========================================================================
@@ -1516,7 +1555,7 @@ def test_an_over_scaffolding_only_round_runs_and_writes(tmp_path, monkeypatch, c
     assert code == 0
     assert sent == ["overscaffold__aaa"]
     assert "passes:  over_scaffolding only" in capsys.readouterr().out
-    (path,) = out_dir.glob("*/*/iteration.jsonl")
+    (path,) = out_dir.glob("*/*/*/iteration.jsonl")
     records = [json.loads(line) for line in path.read_text().splitlines()]
     assert [r["action_direction"] for r in records] == [None, None]
     assert records[0]["prompt_slots"]["over_scaffolding"]["descriptions"] == (
