@@ -1454,3 +1454,89 @@ def test_a_new_prompt_version_is_not_an_overwrite(tmp_path, monkeypatch):
     assert (out_dir / "claude-opus-5" / "1" / "iteration.jsonl").exists()
     assert (out_dir / "claude-opus-5" / "2" / "iteration.jsonl").exists()
 
+
+# ===========================================================================
+# Running a subset of the passes
+# ===========================================================================
+
+OVER_ONLY = ("over_scaffolding",)
+
+
+def test_an_over_scaffolding_only_round_sends_no_action_requests():
+    entries, counts = C.build_entries([SCAFFOLDED, UNSCAFFOLDED], PROMPTS, OVER_ONLY)
+
+    assert {entry["key"] for entry in entries} == {"overscaffold__aaa"}
+    assert counts["action_direction"] == 0
+    assert counts["over_scaffolding_not_asked"] == 1
+
+
+def test_an_action_only_round_sends_no_over_scaffolding_requests():
+    entries, counts = C.build_entries(
+        [SCAFFOLDED, UNSCAFFOLDED], PROMPTS, ("action_direction",)
+    )
+
+    assert {entry["key"] for entry in entries} == {"action__aaa", "action__bbb"}
+    assert counts["over_scaffolding_not_asked"] == 0
+
+
+def test_a_pass_that_was_not_run_is_recorded_as_such():
+    record = C.build_record(SCAFFOLDED, RAW, CFG, PROMPTS, OVER_ONLY)
+
+    assert record["passes"] == ["over_scaffolding"]
+    assert record["action_direction"] is None
+    assert record["over_scaffolding"]["over_scaffolding"] is True
+    assert record["usage"]["total_tokens"] == 6
+
+
+def test_a_full_round_records_both_passes():
+    assert C.build_record(SCAFFOLDED, RAW, CFG, PROMPTS)["passes"] == list(C.PASSES)
+
+
+def test_an_over_scaffolding_only_round_runs_and_writes(tmp_path, monkeypatch, capsys):
+    sent = []
+
+    def _run(entries, cfg, batch_id=None):
+        sent.extend(entry["key"] for entry in entries)
+        return RAW
+
+    monkeypatch.setattr(C, "run_entries", _run)
+    out_dir = tmp_path / "out"
+
+    code = C.main(
+        [
+            "--excerpt-dir",
+            _write_excerpts(tmp_path),
+            "--out-dir",
+            str(out_dir),
+            "--passes",
+            "over_scaffolding",
+        ]
+    )
+
+    assert code == 0
+    assert sent == ["overscaffold__aaa"]
+    assert "passes:  over_scaffolding only" in capsys.readouterr().out
+    (path,) = out_dir.glob("*/*/iteration.jsonl")
+    records = [json.loads(line) for line in path.read_text().splitlines()]
+    assert [r["action_direction"] for r in records] == [None, None]
+    assert records[0]["prompt_slots"]["over_scaffolding"]["descriptions"] == (
+        FACET_BULLETS
+    )
+
+
+def test_the_student_state_is_not_read_when_no_prompt_needs_it(tmp_path, monkeypatch):
+    def _boom(*args, **kwargs):
+        raise AssertionError("no {descriptions} slot is filled on this round")
+
+    monkeypatch.setattr(C, "load_student_state", _boom)
+
+    code = C.main(
+        [
+            "--excerpt-dir",
+            _write_excerpts(tmp_path),
+            "--passes",
+            "action_direction",
+            "--dry-run",
+        ]
+    )
+    assert code == 0

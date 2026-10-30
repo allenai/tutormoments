@@ -537,3 +537,19 @@ def test_cli_scores_only_the_model_asked_for(tmp_path, capsys):
 
     assert E.main(["--pred-dir", pred_dir, "--model", "claude-opus-5"]) == 0
     assert "gemini-3.5-flash" not in capsys.readouterr().out
+
+def test_a_pass_left_out_of_the_round_is_not_run_rather_than_failed():
+    over_only = {
+        **record("a", gold=GOLD_YES, over=True, asked=True),
+        "passes": ["over_scaffolding"],
+    }
+
+    _, action = E.collect(
+        [over_only], "action_direction", "scaffolding", "scaffolding_present"
+    )
+    pairs, over = E.collect(
+        [over_only], "over_scaffolding", "over_scaffolding", "over_scaffolding_present"
+    )
+
+    assert action == {"not_run": 1}
+    assert pairs == [(True, True)] and over == {}

@@ -73,7 +73,11 @@ from tutormoments.logging_setup import logging_args_parent, setup_logging
 from tutormoments_build.v2.build_ground_truth import (
     DEFAULT_OUT_DIR as DEFAULT_GROUND_TRUTH_DIR,
 )
-from tutormoments_build.v2.classify_excerpts import DEFAULT_OUT_DIR, DEFAULT_SPLITS
+from tutormoments_build.v2.classify_excerpts import (
+    DEFAULT_OUT_DIR,
+    DEFAULT_SPLITS,
+    PASSES,
+)
 
 logger = logging.getLogger("tutormoments_build.v2.evaluate_scorer")
 
@@ -99,6 +103,7 @@ TASKS = (
 # checked, with the report's column header for each. A missing gold label has no
 # column: it should not happen, so it gets a line of its own when it does.
 NOT_SCORED_COLUMNS = {
+    "not_run": "not run",
     "no_post_cut_content": "empty post-cut",
     "not_asked": "not asked",
     "response_failed": "response failed",
@@ -143,8 +148,12 @@ def not_scored_reason(record: dict, pass_name: str, field: str, gold_field: str)
 
     A ``NOT_SCORED_COLUMNS`` key, or ``"no_gold"``. "not_asked" is the
     over-scaffolding gold gate; "response_failed" covers both a request that
-    errored and one whose result never made it into the file.
+    errored and one whose result never made it into the file. "not_run" is a
+    pass the round left out with --passes; records from before that flag ran
+    every pass.
     """
+    if pass_name not in record.get("passes", PASSES):
+        return "not_run"
     result = record.get(pass_name)
     if result is None:
         if record.get("skipped"):

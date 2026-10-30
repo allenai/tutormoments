@@ -24,7 +24,8 @@ as a bullet list -- an oracle input like the gold-filled slots.
 
 Both prompts are run in one batch, and both read the same excerpt: the whole
 transcript from its first row through the moment's last
-(the ``full`` rendering created by ``excerpts.py``).
+(the ``full`` rendering created by ``excerpts.py``). ``--passes`` runs only the
+one(s) named, e.g. the over-scaffolding pass alone when only its prompt changed.
 
 ``--model`` sets the model; looking up settings in default_config.yaml.
 Examples of models this script could run with:
@@ -47,6 +48,7 @@ Usage::
     python -m tutormoments_build.v2.classify_excerpts --splits test
     python -m tutormoments_build.v2.classify_excerpts --model claude-opus-5
     python -m tutormoments_build.v2.classify_excerpts --prompt-version 2
+    python -m tutormoments_build.v2.classify_excerpts --passes over_scaffolding
     python -m tutormoments_build.v2.classify_excerpts --overwrite
     python -m tutormoments_build.v2.classify_excerpts --print
     python -m tutormoments_build.v2.classify_excerpts --print 02e89625
@@ -104,6 +106,11 @@ PROMPT_FILES = {
     "action_direction": "action_direction.md",
     "over_scaffolding": "over-scaffolding.md",
 }
+
+# Every pass, in the order a round runs them. ``--passes`` narrows a round to a
+# subset, e.g. re-running only the over-scaffolding pass when only its prompt
+# changed; a pass left out is recorded as not run rather than as failed.
+PASSES = tuple(PROMPT_FILES)
 
 # What both prompts read: the excerpt rendered with no lead-up window at all --
 # the transcript from its first row through the moment's last. Neither question
@@ -627,9 +634,12 @@ def has_post_cut_content(record: dict) -> bool:
 
 
 def build_entries(
-    records: list[dict], prompts: PromptSet
+    records: list[dict], prompts: PromptSet, passes=PASSES
 ) -> tuple[list[dict], Counter]:
-    """Build the batch entries for one round. Returns (entries, per-pass counts)."""
+    """Build the batch entries for one round. Returns (entries, per-pass counts).
+
+    Only the ``passes`` named get entries.
+    """
     from tutormoments.client import build_batch_entry
 
     action_template = prompts.templates["action_direction"]
@@ -647,15 +657,18 @@ def build_entries(
             counts["no_post_cut_content"] += 1
             continue
 
-        entries.append(
-            build_batch_entry(
-                f"{ACTION_PREFIX}__{moment_id}",
-                fill(action_template, excerpt_at(record)),
-                json_mode=True,
+        if "action_direction" in passes:
+            entries.append(
+                build_batch_entry(
+                    f"{ACTION_PREFIX}__{moment_id}",
+                    fill(action_template, excerpt_at(record)),
+                    json_mode=True,
+                )
             )
-        )
-        counts["action_direction"] += 1
+            counts["action_direction"] += 1
 
+        if "over_scaffolding" not in passes:
+            continue
         if wants_over_scaffolding(record):
             entries.append(
                 build_batch_entry(
@@ -877,12 +890,18 @@ def _pass_result(raw: dict | None, parse) -> dict:
 
 
 def build_record(
-    excerpt_record: dict, raw_entries: dict, cfg: V2Spec, prompts: PromptSet
+    excerpt_record: dict,
+    raw_entries: dict,
+    cfg: V2Spec,
+    prompts: PromptSet,
+    passes=PASSES,
 ) -> dict:
     """Assemble one prediction record from an excerpt record and the batch results.
 
     ``over_scaffolding`` is None when the pass was not asked about this moment
     (the gold gate), which is distinct from a pass that ran and answered "no".
+    A pass left out of ``passes`` is None too; ``passes`` on the record says
+    which ran.
 
     A moment with nothing after its cut point is not classified at all: both
     passes are None and ``skipped`` says why. The record is still written, so a
@@ -896,14 +915,18 @@ def build_record(
         _pass_result(
             raw_entries.get(f"{ACTION_PREFIX}__{moment_id}"), parse_action_direction
         )
-        if classified
+        if classified and "action_direction" in passes
         else None
     )
 
     over = None
     over_slots = None
     description_from = None
-    if classified and wants_over_scaffolding(excerpt_record):
+    if (
+        classified
+        and "over_scaffolding" in passes
+        and wants_over_scaffolding(excerpt_record)
+    ):
         over = _pass_result(
             raw_entries.get(f"{OVER_SCAFFOLDING_PREFIX}__{moment_id}"),
             parse_over_scaffolding,
@@ -939,6 +962,7 @@ def build_record(
         # templates if the directories are ever reorganised.
         "prompt_version": prompts.version,
         "prompts": dict(prompts.paths),
+        "passes": list(passes),
         # Which rendering of the excerpt the prompts read. Both passes get the
         # same one; it is recorded per pass so a later round that splits them
         # apart again stays readable against this one.
@@ -972,6 +996,7 @@ def classify(
     prompts: PromptSet,
     *,
     batch_id: str | None = None,
+    passes=PASSES,
 ) -> tuple[dict[str, list[dict]], Counter]:
     """Classify every split in one pooled batch.
 
@@ -980,17 +1005,20 @@ def classify(
     apart again on the way out.
     """
     flat = [record for records in excerpts.values() for record in records]
-    entries, counts = build_entries(flat, prompts)
+    entries, counts = build_entries(flat, prompts, passes)
 
     raw_entries = run_entries(entries, cfg, batch_id=batch_id) if entries else {}
 
     out: dict[str, list[dict]] = {}
     for stem, records in excerpts.items():
-        built = [build_record(record, raw_entries, cfg, prompts) for record in records]
+        built = [
+            build_record(record, raw_entries, cfg, prompts, passes)
+            for record in records
+        ]
         for record in built:
             if not record["classified"]:
                 continue
-            if record["action_direction"]["parse_error"]:
+            if record["action_direction"] and record["action_direction"]["parse_error"]:
                 counts["action_direction_unparsed"] += 1
             if record["over_scaffolding"] and record["over_scaffolding"]["parse_error"]:
                 counts["over_scaffolding_unparsed"] += 1
@@ -1085,16 +1113,20 @@ def _model_line(cfg: "V2Spec | None") -> list[str]:
     return [f"  model: {cfg.model} ({knobs or 'no reasoning params sent'})", ""]
 
 
-def _prompt_line(prompts: "PromptSet | None", out_dir: str | None) -> list[str]:
+def _prompt_line(
+    prompts: "PromptSet | None", out_dir: str | None, passes=PASSES
+) -> list[str]:
     """The prompt version the round ran, and where its predictions land.
 
     Printed on dry runs too: the version decides both which templates are filled
     and which file is written, so it is the one setting worth confirming before
-    paying for a round.
+    paying for a round. A round narrowed by --passes says so.
     """
     if prompts is None:
         return []
     lines = [f"  prompts: v{prompts.version} ({PROMPT_ROOT}/{prompts.version}/)"]
+    if tuple(passes) != PASSES:
+        lines.append(f"  passes:  {', '.join(passes)} only")
     if out_dir:
         lines.append(f"  output:  {out_dir}/")
     return lines + [""]
@@ -1107,6 +1139,7 @@ def report(
     cfg: "V2Spec | None" = None,
     prompts: "PromptSet | None" = None,
     out_dir: str | None = None,
+    passes=PASSES,
 ) -> str:
     lines = [
         "",
@@ -1116,7 +1149,7 @@ def report(
         "",
     ]
     lines += _model_line(cfg)
-    lines += _prompt_line(prompts, out_dir)
+    lines += _prompt_line(prompts, out_dir, passes)
 
     if dry_run:
         if counts["no_post_cut_content"]:
@@ -1238,6 +1271,15 @@ def build_parser() -> argparse.ArgumentParser:
         help="Classify only the first N moments of each split, for a smoke test",
     )
     parser.add_argument(
+        "--passes",
+        nargs="+",
+        choices=PASSES,
+        default=list(PASSES),
+        help="Which passes to run. Name one to re-run it alone, e.g. "
+        "`over_scaffolding` when only that prompt changed; the other pass is "
+        "recorded as not run.",
+    )
+    parser.add_argument(
         "--batch-id",
         default=None,
         metavar="ID",
@@ -1274,7 +1316,7 @@ def pick_moment(excerpts: dict[str, list[dict]], prefix: str) -> dict | None:
 
 
 def _print_prompts(
-    excerpts: dict[str, list[dict]], prefix: str, prompts: PromptSet
+    excerpts: dict[str, list[dict]], prefix: str, prompts: PromptSet, passes=PASSES
 ) -> int:
     record = pick_moment(excerpts, prefix)
     if record is None:
@@ -1292,8 +1334,11 @@ def _print_prompts(
     # Naming the moment makes a random pick reproducible: the id printed here is
     # what `--print <id>` takes to render this exact moment again.
     print(f"===== moment {record['moment_id']} ({record['split']}) =====\n")
-    print(f"===== {action_path} (@{EXCERPT_WIDTH} excerpt) =====\n")
-    print(fill(action_template, excerpt_at(record)))
+    if "action_direction" in passes:
+        print(f"===== {action_path} (@{EXCERPT_WIDTH} excerpt) =====\n")
+        print(fill(action_template, excerpt_at(record)))
+    if "over_scaffolding" not in passes:
+        return 0
     if wants_over_scaffolding(record):
         print(f"\n\n===== {over_path} (@{EXCERPT_WIDTH} excerpt) =====\n")
         print(
@@ -1319,14 +1364,17 @@ def main(argv: list[str] | None = None) -> int:
     # Loaded before anything else uses it so an unknown --prompt-version fails
     # on every path, --print and --dry-run included.
     prompts = load_prompt_set(args.prompt_version)
+    # Ordered as PASSES whatever order they were named in, and deduplicated.
+    passes = tuple(name for name in PASSES if name in args.passes)
+
     # Before --print and --dry-run, which fill the prompts too. Only a round
     # filling {descriptions} reads the student-state file.
     over_template = prompts.templates["over_scaffolding"]
-    if "{" + DESCRIPTIONS_SLOT + "}" in over_template:
+    if "over_scaffolding" in passes and "{" + DESCRIPTIONS_SLOT + "}" in over_template:
         attach_descriptions(excerpts, load_student_state())
 
     if args.print_moment:
-        return _print_prompts(excerpts, args.print_moment, prompts)
+        return _print_prompts(excerpts, args.print_moment, prompts, passes)
 
     # Resolved before the dry run too, so an unknown --model fails there rather
     # than only once a real round is submitted.
@@ -1337,9 +1385,18 @@ def main(argv: list[str] | None = None) -> int:
         _, counts = build_entries(
             [record for records in excerpts.values() for record in records],
             prompts,
+            passes,
         )
         print(
-            report({}, counts, dry_run=True, cfg=cfg, prompts=prompts, out_dir=out_dir)
+            report(
+                {},
+                counts,
+                dry_run=True,
+                cfg=cfg,
+                prompts=prompts,
+                out_dir=out_dir,
+                passes=passes,
+            )
         )
         return 0
 
@@ -1354,7 +1411,9 @@ def main(argv: list[str] | None = None) -> int:
         prompts.version,
     )
 
-    out, counts = classify(excerpts, cfg, prompts, batch_id=args.batch_id)
+    out, counts = classify(
+        excerpts, cfg, prompts, batch_id=args.batch_id, passes=passes
+    )
 
     for stem, records in out.items():
         logger.info(
@@ -1363,7 +1422,17 @@ def main(argv: list[str] | None = None) -> int:
             write_split(out_dir, stem, records),
         )
 
-    print(report(out, counts, dry_run=False, cfg=cfg, prompts=prompts, out_dir=out_dir))
+    print(
+        report(
+            out,
+            counts,
+            dry_run=False,
+            cfg=cfg,
+            prompts=prompts,
+            out_dir=out_dir,
+            passes=passes,
+        )
+    )
     return 0
 
 
