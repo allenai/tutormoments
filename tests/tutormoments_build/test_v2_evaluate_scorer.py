@@ -258,16 +258,16 @@ def test_stale_predictions_are_detected():
 # ===========================================================================
 
 
-def test_short_records_keeps_only_the_moments_below_the_threshold():
+def test_short_records_keeps_the_moments_at_or_below_the_threshold():
     records = [
-        record("short", gold=GOLD_YES, turns=9),
-        record("boundary", gold=GOLD_YES, turns=10),
-        record("long", gold=GOLD_YES, turns=40),
+        record("short", gold=GOLD_YES, turns=4),
+        record("boundary", gold=GOLD_YES, turns=5),
+        record("long", gold=GOLD_YES, turns=6),
     ]
 
-    kept, unknown = E.short_records(records, 10)
+    kept, unknown = E.short_records(records, 5)
 
-    assert [r["moment_id"] for r in kept] == ["short"]
+    assert [r["moment_id"] for r in kept] == ["short", "boundary"]
     assert unknown == 0
 
 
@@ -293,7 +293,7 @@ def test_evaluate_scores_the_short_subset_separately():
     assert scaffolding["short"]["tp"] == 1
     assert scaffolding["short"]["moments"] == 1
     assert scaffolding["short"]["of_moments"] == 2
-    assert scaffolding["short"]["turns"] == 10
+    assert scaffolding["short"]["turns"] == 5
 
 
 def test_the_short_subset_drops_gold_negatives_too():
@@ -312,8 +312,8 @@ def test_the_short_subset_drops_gold_negatives_too():
 def test_the_short_threshold_is_configurable():
     records = [record("a", gold=GOLD_YES, scaffolding=True, rigor=True, turns=7)]
 
-    assert E.evaluate(records, None, 5)[0]["short"]["n"] == 0
-    assert E.evaluate(records, None, 8)[0]["short"]["n"] == 1
+    assert E.evaluate(records, None, 6)[0]["short"]["n"] == 0
+    assert E.evaluate(records, None, 7)[0]["short"]["n"] == 1
 
 
 # ===========================================================================
@@ -402,7 +402,7 @@ def test_cli_reports_the_short_moments(tmp_path, capsys):
     assert E.main(["--pred-dir", pred_dir, "--ground-truth-dir", str(tmp_path)]) == 0
 
     out = capsys.readouterr().out
-    assert "fewer than 10 turns after the cut" in out
+    assert "5 or fewer turns after the cut" in out
     assert "1 of 2 moment(s)" in out
 
 
@@ -424,7 +424,7 @@ def test_cli_short_turns_sets_the_threshold(tmp_path, capsys):
     )
 
     out = capsys.readouterr().out
-    assert "fewer than 40 turns after the cut" in out
+    assert "40 or fewer turns after the cut" in out
     assert "2 of 2 moment(s)" in out
 
 
@@ -537,6 +537,7 @@ def test_cli_scores_only_the_model_asked_for(tmp_path, capsys):
 
     assert E.main(["--pred-dir", pred_dir, "--model", "claude-opus-5"]) == 0
     assert "gemini-3.5-flash" not in capsys.readouterr().out
+
 
 def test_a_pass_left_out_of_the_round_is_not_run_rather_than_failed():
     over_only = {

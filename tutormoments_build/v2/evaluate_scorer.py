@@ -9,8 +9,8 @@ Every task is reported in up to three blocks:
   all moments        every moment with a usable prediction
   agreed             only the moments the ground truth flags as agreed for that
                      construct (the per-record ``agreement`` flags)
-  short moments      only the moments with fewer than ``--short-turns`` (10 by
-                     default) dialogue turns after the cut point
+  short moments      only the moments with ``--short-turns`` (5 by default) or
+                     fewer dialogue turns after the cut point
 
 The agreed block needs ``agreement`` flags on the ground-truth records. The
 current build (``build_ground_truth.py``) resolves each label by majority vote
@@ -55,7 +55,7 @@ Usage::
     python -m tutormoments_build.v2.evaluate_scorer --model claude-opus-5
     python -m tutormoments_build.v2.evaluate_scorer --prompt-version 1
     python -m tutormoments_build.v2.evaluate_scorer --splits iteration test
-    python -m tutormoments_build.v2.evaluate_scorer --short-turns 5
+    python -m tutormoments_build.v2.evaluate_scorer --short-turns 3
     python -m tutormoments_build.v2.evaluate_scorer --ground-truth-dir data/ground_truth
 
 With no ``--prompt-version`` every version found under a model is scored, so a
@@ -81,10 +81,10 @@ from tutormoments_build.v2.classify_excerpts import (
 
 logger = logging.getLogger("tutormoments_build.v2.evaluate_scorer")
 
-# Moments with fewer than this many dialogue turns after the cut are reported
+# Moments with this many dialogue turns after the cut or fewer are reported
 # again as their own block: a short post-cut span is less evidence to classify
 # from, and the question is whether the model's errors concentrate there.
-SHORT_POST_CUT_TURNS = 10
+SHORT_POST_CUT_TURNS = 5
 
 # (task name, prediction pass, field in that pass, gold field in labels)
 TASKS = (
@@ -217,7 +217,7 @@ def agreed_records(
 
 
 def short_records(records: list[dict], max_turns: int) -> tuple[list[dict], int]:
-    """Records with fewer than ``max_turns`` dialogue turns after the cut.
+    """Records with ``max_turns`` or fewer dialogue turns after the cut.
 
     Returns (kept, n_unknown); unknown is a record written before
     ``post_cut_dialogue_rows`` existed, which cannot be placed on either side of
@@ -229,7 +229,7 @@ def short_records(records: list[dict], max_turns: int) -> tuple[list[dict], int]
         if turns is None:
             unknown += 1
             continue
-        if turns < max_turns:
+        if turns <= max_turns:
             kept.append(record)
     return kept, unknown
 
@@ -338,8 +338,8 @@ def evaluate(
     Each row carries three subsets: ``all``, every moment with a usable
     prediction; ``agreed``, only the moments the ground truth flags as agreed on
     that construct, and None when there are no agreement flags to join against;
-    and ``short``, only the moments with fewer than
-    ``short_turns`` dialogue turns after the cut point.
+    and ``short``, only the moments with ``short_turns`` or fewer dialogue
+    turns after the cut point.
     """
     short, short_unknown = short_records(records, short_turns)
 
@@ -441,7 +441,7 @@ def report(model: str, prompt_version: str, split: str, rows: list[dict]) -> str
         ]
 
     short = rows[0]["short"]
-    lines += ["", f"  fewer than {short['turns']} turns after the cut"]
+    lines += ["", f"  {short['turns']} or fewer turns after the cut"]
     lines += [_score_line(row["task"], row["short"]) for row in rows]
     lines += _no_gold_lines(rows, "short")
     lines.append(
@@ -512,7 +512,7 @@ def build_parser() -> argparse.ArgumentParser:
         type=int,
         default=SHORT_POST_CUT_TURNS,
         metavar="N",
-        help="Report a separate block over the moments with fewer than N "
+        help="Report a separate block over the moments with N or fewer "
         "dialogue turns after the cut point",
     )
     parser.add_argument(
