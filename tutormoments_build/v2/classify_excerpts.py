@@ -115,9 +115,16 @@ EXCERPT_WIDTH = excerpts.FULL_KEY
 # scores are an upper bound rather than comparable with versions that lack them.
 GOLD_SLOTS = ("is_isnt", "action")
 
+# decompose_situation.py's output: one record per ground-truth moment.
+DEFAULT_STUDENT_STATE = "data/ground_truth/student_state.jsonl"
+
 # Situation types in which teachers tend to judge the moment calls for rigor.
 # Every other type, fifty_fifty included, fills {is_isnt} with "isn't".
 RIGOR_SITUATIONS = ("rigor_only", "rigor_maj")
+
+# Any {name} placeholder in a template. The JSON output-format blocks never
+# match: their braces open onto a newline or a quote, not a bare name.
+PLACEHOLDER = re.compile(r"\{([a-z_]+)\}")
 
 # (scaffolding_present, rigor_present) -> {action}. Neither has no wording: the
 # gold gate only asks about moments where scaffolding is present.
@@ -685,7 +692,12 @@ def with_max_tokens(entry: dict, max_tokens: int) -> dict:
     return {**entry, "request": {**request, "generation_config": config}}
 
 
-def run_entries(entries: list[dict], cfg: V2Spec, batch_id: str | None = None) -> dict:
+def run_entries(
+    entries: list[dict],
+    cfg: V2Spec,
+    batch_id: str | None = None,
+    display_name: str = "v2_classify_excerpts",
+) -> dict:
     """Submit one batch and return {key: {"text", "usage"} | {"error", ...}}.
 
     ``batch_id`` resumes polling an in-flight batch instead of submitting a new
@@ -716,7 +728,7 @@ def run_entries(entries: list[dict], cfg: V2Spec, batch_id: str | None = None) -
         client,
         entries,
         json_mode=True,
-        display_name="v2_classify_excerpts",
+        display_name=display_name,
         poll_interval=cfg.poll_interval,
         thinking=cfg.thinking,
         existing_batch_id=batch_id,
