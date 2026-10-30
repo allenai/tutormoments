@@ -17,6 +17,11 @@ in a manner that allows for comparison w/ gold labels.
 It is sent only where the gold marks ``scaffolding_present``, and its answer is
 scored against ``over_scaffolding_present``.
 
+From prompt v8 the over-scaffolding prompt is also told what the adjudicators
+wrote about the student before the cut (``{descriptions}``): the atomic facets
+``decompose_situation.py`` extracted into ``data/ground_truth/student_state.jsonl``,
+as a bullet list -- an oracle input like the gold-filled slots.
+
 Both prompts are run in one batch, and both read the same excerpt: the whole
 transcript from its first row through the moment's last
 (the ``full`` rendering created by ``excerpts.py``).
@@ -113,14 +118,37 @@ EXCERPT_WIDTH = excerpts.FULL_KEY
 # the teachers' situation judgement ({is_isnt}) and what the tutor did after the
 # cut ({action}), both read from the gold labels -- an oracle condition, so its
 # scores are an upper bound rather than comparable with versions that lack them.
-GOLD_SLOTS = ("is_isnt", "action")
+# From v7 the situation judgement is {is_appropriate_for}, which names what the
+# moment calls for rather than only whether it calls for rigor. From v8
+# {descriptions} carries the student-state facets decompose_situation.py
+# extracted from the adjudicators' accounts of the situation before the cut.
+DESCRIPTIONS_SLOT = "descriptions"
+GOLD_SLOTS = ("is_isnt", "is_appropriate_for", "action", DESCRIPTIONS_SLOT)
+
+# Where an excerpt record carries its student-state facets once attached (see
+# attach_descriptions). Set in memory only; excerpt files never hold it.
+DESCRIPTION_KEY = "student_state"
 
 # decompose_situation.py's output: one record per ground-truth moment.
 DEFAULT_STUDENT_STATE = "data/ground_truth/student_state.jsonl"
 
+# {descriptions} for a moment whose adjudicators wrote only about the tutor, so
+# decomposition found no facet about the student.
+NO_FACETS_LINE = "- (no description of the student)"
+
 # Situation types in which teachers tend to judge the moment calls for rigor.
 # Every other type, fifty_fifty included, fills {is_isnt} with "isn't".
 RIGOR_SITUATIONS = ("rigor_only", "rigor_maj")
+
+# situation_type -> {is_appropriate_for}. Unlike {is_isnt}, an even split gets
+# its own wording instead of falling in with the scaffolding side.
+APPROPRIATE_FOR_WORDING = {
+    "rigor_only": "is appropriate for a push for rigor",
+    "rigor_maj": "is appropriate for a push for rigor",
+    "fifty_fifty": "is appropriate for both a push for rigor and scaffolding",
+    "scaffold_maj": "is appropriate for scaffolding",
+    "scaffold_only": "is appropriate for scaffolding",
+}
 
 # Any {name} placeholder in a template. The JSON output-format blocks never
 # match: their braces open onto a newline or a quote, not a bare name.
@@ -408,6 +436,43 @@ def load_excerpts(excerpt_dir: str, stems=DEFAULT_SPLITS) -> dict[str, list[dict
     return out
 
 
+def load_student_state(path: str = DEFAULT_STUDENT_STATE) -> dict[str, dict]:
+    """Return {moment_id: student-state record} from decompose_situation.py.
+
+    Records whose facets are None (no description, or an unparsed response)
+    are left out, so filling a prompt for that moment raises (see
+    ``description_slot``) rather than telling the model nothing.
+    """
+    if not os.path.exists(path):
+        raise FileNotFoundError(
+            f"no student-state file at {path}; run "
+            "`python -m tutormoments_build.v2.decompose_situation` first"
+        )
+    out: dict[str, dict] = {}
+    with open(path, encoding="utf-8") as fh:
+        for line in fh:
+            if line.strip():
+                record = json.loads(line)
+                if record.get("facets") is not None:
+                    out[record["moment_id"]] = record
+    return out
+
+
+def attach_descriptions(
+    excerpts: dict[str, list[dict]], states: dict[str, dict]
+) -> None:
+    """Set each excerpt record's student-state facets, in place.
+
+    A moment with no facets is left without them; filling a prompt that asks
+    for them then raises (see ``description_slot``).
+    """
+    for records in excerpts.values():
+        for record in records:
+            state = states.get(record["moment_id"])
+            if state:
+                record[DESCRIPTION_KEY] = state
+
+
 # ===========================================================================
 # Prompt building
 # ===========================================================================
@@ -420,17 +485,22 @@ def fill(template: str, excerpt: str, slots: dict[str, str] | None = None) -> st
     object in their output-format section, and ``format`` would read those
     braces as fields and raise.
 
-    A gold slot left unfilled raises rather than reaching the model as a literal
-    ``{is_isnt}``. Slots are filled before the excerpt, so transcript text is
-    never itself searched for slot names.
+    Any placeholder left unfilled raises rather than reaching the model as a
+    literal ``{is_isnt}`` -- including one this module has never heard of, so
+    renaming a slot in a new prompt version fails loudly instead of silently.
+    Every placeholder is substituted in one pass over the template, so neither
+    transcript text nor a teacher's written account is itself searched for slot
+    names.
     """
-    filled = template
-    for name, value in (slots or {}).items():
-        filled = filled.replace("{" + name + "}", value)
-    unfilled = [name for name in GOLD_SLOTS if "{" + name + "}" in filled]
+    values = {**(slots or {}), "excerpt": excerpt}
+    unfilled = [
+        name
+        for name in dict.fromkeys(PLACEHOLDER.findall(template))
+        if name not in values
+    ]
     if unfilled:
         raise ValueError(f"template slot(s) left unfilled: {', '.join(unfilled)}")
-    return filled.replace("{excerpt}", excerpt)
+    return PLACEHOLDER.sub(lambda match: values[match.group(1)], template)
 
 
 def uses_gold_slots(template: str) -> bool:
@@ -458,15 +528,50 @@ def gold_slots(record: dict) -> dict[str, str]:
             f"moment {record.get('moment_id')}: gold marks neither scaffolding "
             "nor rigor, so there is no {action} to state"
         )
+    if situation not in APPROPRIATE_FOR_WORDING:
+        raise ValueError(
+            f"moment {record.get('moment_id')}: unknown situation_type {situation!r}"
+        )
     return {
         "is_isnt": "is" if situation in RIGOR_SITUATIONS else "isn't",
+        "is_appropriate_for": APPROPRIATE_FOR_WORDING[situation],
         "action": ACTION_WORDING[key],
     }
 
 
+def description_slot(record: dict) -> str:
+    """The ``{descriptions}`` value: the student-state facets as a bullet list.
+
+    Starts on a new line, since the templates put the slot after a colon. An
+    empty facet list is NO_FACETS_LINE. A moment with no facets at all raises
+    rather than leaving the slot blank: a prompt saying "teachers describe the
+    situation as:" followed by nothing would misreport the condition its label
+    was made under.
+    """
+    state = record.get(DESCRIPTION_KEY)
+    if not state:
+        raise KeyError(
+            f"moment {record.get('moment_id')} has no student-state facets in "
+            f"{DEFAULT_STUDENT_STATE}"
+        )
+    bullets = [f"- {facet}" for facet in state["facets"]] or [NO_FACETS_LINE]
+    return "\n" + "\n".join(bullets)
+
+
 def over_scaffolding_slots(template: str, record: dict) -> dict[str, str] | None:
-    """Gold slots for the over-scaffolding prompt, or None if it takes none."""
-    return gold_slots(record) if uses_gold_slots(template) else None
+    """Gold slots for the over-scaffolding prompt, or None if it takes none.
+
+    Only the slots the template asks for, so the record states exactly what the
+    model was told.
+    """
+    if not uses_gold_slots(template):
+        return None
+    values = gold_slots(record)
+    if "{" + DESCRIPTIONS_SLOT + "}" in template:
+        values[DESCRIPTIONS_SLOT] = description_slot(record)
+    return {
+        name: value for name, value in values.items() if "{" + name + "}" in template
+    }
 
 
 def excerpt_at(record: dict, width: str = EXCERPT_WIDTH) -> str:
@@ -797,6 +902,7 @@ def build_record(
 
     over = None
     over_slots = None
+    description_from = None
     if classified and wants_over_scaffolding(excerpt_record):
         over = _pass_result(
             raw_entries.get(f"{OVER_SCAFFOLDING_PREFIX}__{moment_id}"),
@@ -805,6 +911,14 @@ def build_record(
         over_slots = over_scaffolding_slots(
             prompts.templates["over_scaffolding"], excerpt_record
         )
+        if over_slots and DESCRIPTIONS_SLOT in over_slots:
+            state = excerpt_record[DESCRIPTION_KEY]
+            description_from = {
+                "adjudicators": state["adjudicators"],
+                "situation_method": state["situation_method"],
+                "model": state["model"],
+                "prompt": state["prompt"],
+            }
 
     return {
         "moment_id": moment_id,
@@ -835,6 +949,10 @@ def build_record(
         # What the gold-filled slots told the model, per pass; None for a pass
         # whose template has none (or that was not asked).
         "prompt_slots": {"over_scaffolding": over_slots},
+        # Whose accounts the {descriptions} facets came from, how they were
+        # merged, and the model and prompt that extracted them; None when the
+        # prompt has no such slot.
+        "description_from": description_from,
         "situation_type": excerpt_record.get("situation_type"),
         "post_cut_rows": excerpt_record.get("post_cut_rows"),
         "post_cut_dialogue_rows": excerpt_record.get("post_cut_dialogue_rows"),
@@ -1201,6 +1319,11 @@ def main(argv: list[str] | None = None) -> int:
     # Loaded before anything else uses it so an unknown --prompt-version fails
     # on every path, --print and --dry-run included.
     prompts = load_prompt_set(args.prompt_version)
+    # Before --print and --dry-run, which fill the prompts too. Only a round
+    # filling {descriptions} reads the student-state file.
+    over_template = prompts.templates["over_scaffolding"]
+    if "{" + DESCRIPTIONS_SLOT + "}" in over_template:
+        attach_descriptions(excerpts, load_student_state())
 
     if args.print_moment:
         return _print_prompts(excerpts, args.print_moment, prompts)

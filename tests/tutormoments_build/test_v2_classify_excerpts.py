@@ -18,8 +18,9 @@ def _excerpt(
     rigor_present=False,
     situation_type="scaffold_only",
     split="iteration",
+    described=True,
 ):
-    return {
+    record = {
         "moment_id": moment_id,
         "transcript_id": f"t-{moment_id}",
         "conversation_id": f"c-{moment_id}",
@@ -55,6 +56,42 @@ def _excerpt(
         },
         "situation_type": situation_type,
     }
+    # As attach_descriptions leaves it, so v8+ prompts can be filled directly.
+    if described:
+        record[C.DESCRIPTION_KEY] = _state(moment_id)
+    return record
+
+
+def _state(moment_id, facets=None):
+    """A student-state record as decompose_situation.py writes it."""
+    return {
+        "moment_id": moment_id,
+        "split": "iteration",
+        "adjudicators": ["J01"],
+        "situation_method": "single",
+        "model": "claude-opus-5-5",
+        "prompt": "prompts/v2_helper/student_state.md",
+        "facets": [f"student facet ({moment_id})", "second facet"]
+        if facets is None
+        else facets,
+    }
+
+
+FACET_BULLETS = "\n- student facet (aaa)\n- second facet"
+
+# The real loader, kept before the fixture below stubs it out of every test.
+LOAD_STUDENT_STATE = C.load_student_state
+
+
+@pytest.fixture(autouse=True)
+def _student_states(monkeypatch):
+    """CLI runs read the student-state file, which the tests do not have; serve
+    one record per fixture moment instead."""
+    monkeypatch.setattr(
+        C,
+        "load_student_state",
+        lambda *args, **kwargs: {m: _state(m) for m in ("aaa", "bbb", "ccc")},
+    )
 
 
 SCAFFOLDED = _excerpt("aaa", scaffolding_present=True)
@@ -110,6 +147,29 @@ def test_is_isnt_follows_the_teachers_situation_judgement(situation, expected):
 
 
 @pytest.mark.parametrize(
+    "situation,expected",
+    [
+        ("rigor_only", "is appropriate for a push for rigor"),
+        ("rigor_maj", "is appropriate for a push for rigor"),
+        ("fifty_fifty", "is appropriate for both a push for rigor and scaffolding"),
+        ("scaffold_maj", "is appropriate for scaffolding"),
+        ("scaffold_only", "is appropriate for scaffolding"),
+    ],
+)
+def test_is_appropriate_for_names_what_teachers_judge_the_moment_calls_for(
+    situation, expected
+):
+    record = _excerpt("m", scaffolding_present=True, situation_type=situation)
+    assert C.gold_slots(record)["is_appropriate_for"] == expected
+
+
+def test_an_unknown_situation_type_is_refused():
+    record = _excerpt("m", scaffolding_present=True, situation_type="mystery")
+    with pytest.raises(ValueError, match="mystery"):
+        C.gold_slots(record)
+
+
+@pytest.mark.parametrize(
     "scaffolding,rigor,expected",
     [
         (True, True, "scaffolding and pushing for rigor"),
@@ -136,6 +196,12 @@ def test_a_moment_without_a_situation_type_is_refused():
 def test_an_unfilled_gold_slot_never_reaches_the_model():
     with pytest.raises(ValueError, match="is_isnt"):
         C.fill("situation {is_isnt} ok\n{excerpt}", "Turn 1.")
+
+
+def test_a_placeholder_the_module_does_not_know_never_reaches_the_model():
+    """A slot renamed in a new prompt version must not pass through as literal text."""
+    with pytest.raises(ValueError, match="renamed_slot"):
+        C.fill("situation {renamed_slot}\n{excerpt}", "Turn 1.", {"action": "x"})
 
 
 def test_slots_are_filled_before_the_excerpt():
@@ -179,6 +245,97 @@ def test_a_v5_record_states_what_the_slots_told_the_model():
     assert record["prompt_slots"] == {
         "over_scaffolding": {"is_isnt": "isn't", "action": "scaffolding"}
     }
+
+
+def test_v7_over_scaffolding_prompt_is_told_what_the_moment_is_appropriate_for():
+    prompts = C.load_prompt_set("7")
+    record = _excerpt("m", scaffolding_present=True, situation_type="fifty_fifty")
+    entries, _ = C.build_entries([record], prompts)
+    over = next(e for e in entries if e["key"] == "overscaffold__m")
+    text = json.dumps(over)
+
+    assert (
+        "this situation is appropriate for both a push for rigor and scaffolding."
+        in text
+    )
+    assert "the tutor is scaffolding after the cut point." in text
+    assert "{is_appropriate_for}" not in text and "{action}" not in text
+
+
+def test_a_record_states_only_the_slots_its_prompt_used():
+    record = C.build_record(SCAFFOLDED, RAW, CFG, C.load_prompt_set("7"))
+    assert record["prompt_slots"] == {
+        "over_scaffolding": {
+            "is_appropriate_for": "is appropriate for scaffolding",
+            "action": "scaffolding",
+        }
+    }
+
+
+def test_v8_over_scaffolding_prompt_is_told_the_student_state_facets():
+    entries, _ = C.build_entries([SCAFFOLDED], C.load_prompt_set("8"))
+    over = next(e for e in entries if e["key"] == "overscaffold__aaa")
+    text = over["request"]["contents"][0]["parts"][0]["text"]
+
+    assert "as the following: " + FACET_BULLETS + "\n" in text
+    assert "{descriptions}" not in text
+
+
+def test_a_v8_record_names_where_its_facets_came_from():
+    record = C.build_record(SCAFFOLDED, RAW, CFG, C.load_prompt_set("8"))
+
+    assert record["prompt_slots"]["over_scaffolding"]["descriptions"] == FACET_BULLETS
+    assert record["description_from"] == {
+        "adjudicators": ["J01"],
+        "situation_method": "single",
+        "model": "claude-opus-5-5",
+        "prompt": "prompts/v2_helper/student_state.md",
+    }
+
+
+def test_a_moment_with_no_student_facets_gets_the_placeholder_line():
+    record = {**SCAFFOLDED, C.DESCRIPTION_KEY: _state("aaa", facets=[])}
+    assert C.description_slot(record) == "\n" + C.NO_FACETS_LINE
+
+
+def test_a_moment_without_a_student_state_record_is_refused():
+    record = _excerpt("m", scaffolding_present=True, described=False)
+    with pytest.raises(KeyError, match="moment m"):
+        C.build_entries([record], C.load_prompt_set("8"))
+
+
+def test_a_facets_braces_are_not_read_as_a_placeholder():
+    """A facet is free text; "{x}" in it must reach the model as written."""
+    filled = C.fill(
+        "said: {descriptions}\n{excerpt}",
+        "Turn 1.",
+        {"descriptions": "solve {x} {excerpt}"},
+    )
+    assert filled == "said: solve {x} {excerpt}\nTurn 1."
+
+
+def test_load_student_state_drops_records_without_facets(tmp_path):
+    path = tmp_path / "student_state.jsonl"
+    path.write_text(
+        "\n".join(
+            json.dumps(r)
+            for r in (
+                _state("a"),
+                _state("b", facets=[]),
+                {**_state("c"), "facets": None},
+            )
+        )
+        + "\n",
+        encoding="utf-8",
+    )
+    found = LOAD_STUDENT_STATE(str(path))
+    # An empty list is an answer ("nothing about the student"); None is not.
+    assert sorted(found) == ["a", "b"]
+
+
+def test_load_student_state_names_the_command_when_missing(tmp_path):
+    with pytest.raises(FileNotFoundError, match="decompose_situation"):
+        LOAD_STUDENT_STATE(str(tmp_path / "missing.jsonl"))
 
 
 def test_a_pre_v5_record_has_no_slots():
@@ -795,9 +952,17 @@ def test_write_split_round_trips(tmp_path):
 # ===========================================================================
 
 
+def _on_disk(record):
+    """An excerpt record as excerpts.py writes it: no attached facets."""
+    return {k: v for k, v in record.items() if k != C.DESCRIPTION_KEY}
+
+
 def _write_excerpts(tmp_path):
     (tmp_path / "iteration.jsonl").write_text(
-        json.dumps(SCAFFOLDED) + "\n" + json.dumps(UNSCAFFOLDED) + "\n",
+        json.dumps(_on_disk(SCAFFOLDED))
+        + "\n"
+        + json.dumps(_on_disk(UNSCAFFOLDED))
+        + "\n",
         encoding="utf-8",
     )
     return str(tmp_path)
@@ -1288,3 +1453,4 @@ def test_a_new_prompt_version_is_not_an_overwrite(tmp_path, monkeypatch):
 
     assert (out_dir / "claude-opus-5" / "1" / "iteration.jsonl").exists()
     assert (out_dir / "claude-opus-5" / "2" / "iteration.jsonl").exists()
+
