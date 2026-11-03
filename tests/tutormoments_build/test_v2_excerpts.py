@@ -290,6 +290,7 @@ class TestBuildRecord:
         assert record["post_cut_rows"] == 1
         assert record["post_cut_dialogue_rows"] == 1
         assert record["labels"] == {"scaffolding_present": True}
+        assert record["situation_type"] is None
 
         rendered = record["excerpts"]["2"]
         assert rendered["context_start_index"] == 2
@@ -297,6 +298,15 @@ class TestBuildRecord:
         assert rendered["opens_inside_moment"] is False
         assert rendered["excerpt"].startswith("Turn 3. TUTOR:")
         assert "omitted" not in rendered["excerpt"]
+
+    def test_carries_the_situation_type(self):
+        record = E.build_record(
+            self._moment(situation_type="rigor_maj"),
+            SAMPLE,
+            "conv-1",
+            context_widths=(2,),
+        )
+        assert record["situation_type"] == "rigor_maj"
 
     def test_one_rendering_per_width_keyed_by_width(self):
         record = E.build_record(self._moment(), SAMPLE, "conv-1", context_widths=(2, 1))

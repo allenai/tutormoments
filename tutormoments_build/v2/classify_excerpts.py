@@ -17,9 +17,16 @@ in a manner that allows for comparison w/ gold labels.
 It is sent only where the gold marks ``scaffolding_present``, and its answer is
 scored against ``over_scaffolding_present``.
 
-Both prompts are run in one batch, and both read the same excerpt: the whole
-transcript from its first row through the moment's last
-(the ``full`` rendering created by ``excerpts.py``).
+From prompt v8 the over-scaffolding prompt also receives ``{descriptions}``: a
+bullet list of the student-state facets ``decompose_situation.py`` extracted from
+the adjudicators' accounts (``data/ground_truth/student_state.jsonl``). Like the
+gold-filled slots, this is an oracle input.
+
+Both prompts run in one batch and read the same excerpt: by default, 20 dialogue
+turns before the cut through the moment's last row; with ``--context-turns
+full``, the whole transcript (``excerpts.py`` builds both). ``--passes`` runs
+only the named prompt(s), e.g. just over-scaffolding when only its prompt
+changed.
 
 ``--model`` sets the model; looking up settings in default_config.yaml.
 Examples of models this script could run with:
@@ -27,9 +34,8 @@ Examples of models this script could run with:
 - gemini-3.5-flash
 - gpt-5.6-sol
 
-Predictions are written per model and prompt version:
-``<out-dir>/<model>/<prompt version>/<split>.jsonl``. An existing file is never
-replaced unless ``--overwrite`` says to.
+Predictions go to ``<out-dir>/<model>/<prompt version>/<width>/<split>.jsonl``.
+Existing files are only replaced with ``--overwrite``.
 
 Only the ``iteration`` split runs by default. The ``test`` split is held out
 unless specified w/ ``--splits test``.
@@ -42,6 +48,8 @@ Usage::
     python -m tutormoments_build.v2.classify_excerpts --splits test
     python -m tutormoments_build.v2.classify_excerpts --model claude-opus-5
     python -m tutormoments_build.v2.classify_excerpts --prompt-version 2
+    python -m tutormoments_build.v2.classify_excerpts --context-turns full
+    python -m tutormoments_build.v2.classify_excerpts --passes over_scaffolding
     python -m tutormoments_build.v2.classify_excerpts --overwrite
     python -m tutormoments_build.v2.classify_excerpts --print
     python -m tutormoments_build.v2.classify_excerpts --print 02e89625
@@ -100,14 +108,65 @@ PROMPT_FILES = {
     "over_scaffolding": "over-scaffolding.md",
 }
 
-# What both prompts read: the excerpt rendered with no lead-up window at all --
-# the transcript from its first row through the moment's last. Neither question
-# is settled by the immediate exchange alone (over-scaffolding asks whether the
-# student had already shown they could do the work, and even action direction
-# reads differently against what the tutor has already tried), so rather than
-# guess a width that holds for both, they get the whole session. The excerpt
-# file must have been built at this width (it is, by default).
-EXCERPT_WIDTH = excerpts.FULL_KEY
+# Every pass, in run order. ``--passes`` selects a subset; passes left out are
+# recorded as not run, not as failed.
+PASSES = tuple(PROMPT_FILES)
+
+# Default excerpt for both prompts: 20 dialogue turns before the cut through the
+# moment's last row. Neither question can be judged from the immediate exchange
+# alone: over-scaffolding asks whether the student had already shown they could
+# do the work, and action direction depends on what the tutor already tried.
+# ``--context-turns`` selects another width the excerpts were built at, e.g.
+# ``full``.
+EXCERPT_WIDTH = excerpts.width_key(20)
+
+# Gold-filled slots in the over-scaffolding prompt. These are oracle inputs, so
+# scores using them are an upper bound, not comparable with earlier versions.
+#   v5+  {is_isnt}: the teachers' situation judgement.
+#        {action}: what the tutor did after the cut.
+#   v7+  {is_appropriate_for} replaces {is_isnt}, naming what the moment calls
+#        for rather than only whether it calls for rigor.
+#   v8+  {descriptions}: student-state facets decompose_situation.py extracted
+#        from the adjudicators' accounts.
+DESCRIPTIONS_SLOT = "descriptions"
+GOLD_SLOTS = ("is_isnt", "is_appropriate_for", "action", DESCRIPTIONS_SLOT)
+
+# Excerpt-record key for attached student-state facets (see
+# attach_descriptions). In memory only; never written to excerpt files.
+DESCRIPTION_KEY = "student_state"
+
+# decompose_situation.py's output: one record per ground-truth moment.
+DEFAULT_STUDENT_STATE = "data/ground_truth/student_state.jsonl"
+
+# {descriptions} when decomposition found no facets about the student, e.g.
+# the adjudicators wrote only about the tutor.
+NO_FACETS_LINE = "- (no description of the student)"
+
+# Situation types that fill {is_isnt} with "is" (the moment calls for rigor).
+# All others, including fifty_fifty, get "isn't".
+RIGOR_SITUATIONS = ("rigor_only", "rigor_maj")
+
+# situation_type -> {is_appropriate_for}. Unlike {is_isnt}, an even split gets
+# its own wording rather than counting as scaffolding.
+APPROPRIATE_FOR_WORDING = {
+    "rigor_only": "is appropriate for a push for rigor",
+    "rigor_maj": "is appropriate for a push for rigor",
+    "fifty_fifty": "is appropriate for both a push for rigor and scaffolding",
+    "scaffold_maj": "is appropriate for scaffolding",
+    "scaffold_only": "is appropriate for scaffolding",
+}
+
+# A {name} placeholder. The templates' JSON output examples never match, since
+# their braces are followed by a newline or a quote.
+PLACEHOLDER = re.compile(r"\{([a-z_]+)\}")
+
+# (scaffolding_present, rigor_present) -> {action}. (False, False) has no
+# wording; the gold gate never asks about such moments.
+ACTION_WORDING = {
+    (True, True): "scaffolding and pushing for rigor",
+    (True, False): "scaffolding",
+    (False, True): "pushing for rigor",
+}
 
 # Batch-entry key prefixes. Neither contains "__", and a moment_id is a UUID, so
 # a key splits back apart on the first "__".
@@ -383,19 +442,137 @@ def load_excerpts(excerpt_dir: str, stems=DEFAULT_SPLITS) -> dict[str, list[dict
     return out
 
 
+def load_student_state(path: str = DEFAULT_STUDENT_STATE) -> dict[str, dict]:
+    """Return {moment_id: student-state record} from decompose_situation.py.
+
+    Records with ``facets`` None (no description, or an unparsed response) are
+    skipped, so filling that moment's prompt raises (see ``description_slot``)
+    instead of sending an empty slot.
+    """
+    if not os.path.exists(path):
+        raise FileNotFoundError(
+            f"no student-state file at {path}; run "
+            "`python -m tutormoments_build.v2.decompose_situation` first"
+        )
+    out: dict[str, dict] = {}
+    with open(path, encoding="utf-8") as fh:
+        for line in fh:
+            if line.strip():
+                record = json.loads(line)
+                if record.get("facets") is not None:
+                    out[record["moment_id"]] = record
+    return out
+
+
+def attach_descriptions(
+    excerpts: dict[str, list[dict]], states: dict[str, dict]
+) -> None:
+    """Attach each excerpt record's student-state facets, in place.
+
+    Moments without facets are left alone; filling a prompt that needs them
+    then raises (see ``description_slot``).
+    """
+    for records in excerpts.values():
+        for record in records:
+            state = states.get(record["moment_id"])
+            if state:
+                record[DESCRIPTION_KEY] = state
+
+
 # ===========================================================================
 # Prompt building
 # ===========================================================================
 
 
-def fill(template: str, excerpt: str) -> str:
-    """Substitute ``{excerpt}`` into a v2 prompt template.
+def fill(template: str, excerpt: str, slots: dict[str, str] | None = None) -> str:
+    """Substitute ``{excerpt}`` and any gold ``slots`` into a v2 prompt template.
 
-    ``str.replace``, not ``str.format``: both templates print a literal JSON
-    object in their output-format section, and ``format`` would read those
-    braces as fields and raise.
+    Uses ``PLACEHOLDER``, not ``str.format``: both templates contain a literal
+    JSON object, whose braces ``format`` would read as fields.
+
+    Any unfilled placeholder raises, including unknown ones, so a slot renamed
+    in a new prompt version fails loudly instead of reaching the model as
+    literal text. All placeholders are substituted in one pass, so braces in
+    transcript text or teachers' accounts are never treated as slots.
     """
-    return template.replace("{excerpt}", excerpt)
+    values = {**(slots or {}), "excerpt": excerpt}
+    unfilled = [
+        name
+        for name in dict.fromkeys(PLACEHOLDER.findall(template))
+        if name not in values
+    ]
+    if unfilled:
+        raise ValueError(f"template slot(s) left unfilled: {', '.join(unfilled)}")
+    return PLACEHOLDER.sub(lambda match: values[match.group(1)], template)
+
+
+def uses_gold_slots(template: str) -> bool:
+    """Whether a template asks for any gold-filled slot."""
+    return any("{" + name + "}" in template for name in GOLD_SLOTS)
+
+
+def gold_slots(record: dict) -> dict[str, str]:
+    """The gold-filled slot values for one moment.
+
+    Raises instead of guessing when the moment lacks data a slot needs, since a
+    wrong value would misreport the condition the label was made under.
+    """
+    situation = record.get("situation_type")
+    if situation is None:
+        raise KeyError(
+            f"moment {record.get('moment_id')} has no situation_type; rebuild "
+            "the excerpts with `python -m tutormoments_build.v2.excerpts`"
+        )
+    labels = record.get("labels") or {}
+    key = (bool(labels.get("scaffolding_present")), bool(labels.get("rigor_present")))
+    if key not in ACTION_WORDING:
+        raise ValueError(
+            f"moment {record.get('moment_id')}: gold marks neither scaffolding "
+            "nor rigor, so there is no {action} to state"
+        )
+    if situation not in APPROPRIATE_FOR_WORDING:
+        raise ValueError(
+            f"moment {record.get('moment_id')}: unknown situation_type {situation!r}"
+        )
+    return {
+        "is_isnt": "is" if situation in RIGOR_SITUATIONS else "isn't",
+        "is_appropriate_for": APPROPRIATE_FOR_WORDING[situation],
+        "action": ACTION_WORDING[key],
+    }
+
+
+def description_slot(record: dict) -> str:
+    """The ``{descriptions}`` value: the student-state facets as a bullet list.
+
+    Starts with a newline, since templates place the slot after a colon. An
+    empty facet list becomes ``NO_FACETS_LINE``. A moment with no student-state
+    record raises rather than leaving the slot blank, which would misreport the
+    condition the label was made under.
+    """
+    state = record.get(DESCRIPTION_KEY)
+    if not state:
+        raise KeyError(
+            f"moment {record.get('moment_id')} has no student-state facets in "
+            f"{DEFAULT_STUDENT_STATE}"
+        )
+    bullets = [f"- {facet}" for facet in state["facets"]] or [NO_FACETS_LINE]
+    return "\n" + "\n".join(bullets)
+
+
+def over_scaffolding_slots(template: str, record: dict) -> dict[str, str] | None:
+    """Gold slots for the over-scaffolding prompt, or None if it takes none.
+
+    Returns only the slots the template uses, so the record shows exactly what
+    the model was told.
+    """
+    if not uses_gold_slots(template):
+        return None
+    values = gold_slots(record)
+    if "{" + DESCRIPTIONS_SLOT + "}" in template:
+        values[DESCRIPTIONS_SLOT] = description_slot(record)
+    return {
+        name: value for name, value in values.items() if "{" + name + "}" in template
+    }
 
 
 def excerpt_at(record: dict, width: str = EXCERPT_WIDTH) -> str:
@@ -451,9 +628,13 @@ def has_post_cut_content(record: dict) -> bool:
 
 
 def build_entries(
-    records: list[dict], prompts: PromptSet
+    records: list[dict], prompts: PromptSet, passes=PASSES, width: str = EXCERPT_WIDTH
 ) -> tuple[list[dict], Counter]:
-    """Build the batch entries for one round. Returns (entries, per-pass counts)."""
+    """Build the batch entries for one round. Returns (entries, per-pass counts).
+
+    Only the ``passes`` named get entries, each filled from the ``width``
+    rendering of its excerpt.
+    """
     from tutormoments.client import build_batch_entry
 
     action_template = prompts.templates["action_direction"]
@@ -471,20 +652,27 @@ def build_entries(
             counts["no_post_cut_content"] += 1
             continue
 
-        entries.append(
-            build_batch_entry(
-                f"{ACTION_PREFIX}__{moment_id}",
-                fill(action_template, excerpt_at(record)),
-                json_mode=True,
+        if "action_direction" in passes:
+            entries.append(
+                build_batch_entry(
+                    f"{ACTION_PREFIX}__{moment_id}",
+                    fill(action_template, excerpt_at(record, width)),
+                    json_mode=True,
+                )
             )
-        )
-        counts["action_direction"] += 1
+            counts["action_direction"] += 1
 
+        if "over_scaffolding" not in passes:
+            continue
         if wants_over_scaffolding(record):
             entries.append(
                 build_batch_entry(
                     f"{OVER_SCAFFOLDING_PREFIX}__{moment_id}",
-                    fill(over_template, excerpt_at(record)),
+                    fill(
+                        over_template,
+                        excerpt_at(record, width),
+                        over_scaffolding_slots(over_template, record),
+                    ),
                     json_mode=True,
                 )
             )
@@ -617,7 +805,12 @@ def with_max_tokens(entry: dict, max_tokens: int) -> dict:
     return {**entry, "request": {**request, "generation_config": config}}
 
 
-def run_entries(entries: list[dict], cfg: V2Spec, batch_id: str | None = None) -> dict:
+def run_entries(
+    entries: list[dict],
+    cfg: V2Spec,
+    batch_id: str | None = None,
+    display_name: str = "v2_classify_excerpts",
+) -> dict:
     """Submit one batch and return {key: {"text", "usage"} | {"error", ...}}.
 
     ``batch_id`` resumes polling an in-flight batch instead of submitting a new
@@ -648,7 +841,7 @@ def run_entries(entries: list[dict], cfg: V2Spec, batch_id: str | None = None) -
         client,
         entries,
         json_mode=True,
-        display_name="v2_classify_excerpts",
+        display_name=display_name,
         poll_interval=cfg.poll_interval,
         thinking=cfg.thinking,
         existing_batch_id=batch_id,
@@ -692,12 +885,19 @@ def _pass_result(raw: dict | None, parse) -> dict:
 
 
 def build_record(
-    excerpt_record: dict, raw_entries: dict, cfg: V2Spec, prompts: PromptSet
+    excerpt_record: dict,
+    raw_entries: dict,
+    cfg: V2Spec,
+    prompts: PromptSet,
+    passes=PASSES,
+    width: str = EXCERPT_WIDTH,
 ) -> dict:
     """Assemble one prediction record from an excerpt record and the batch results.
 
     ``over_scaffolding`` is None when the pass was not asked about this moment
     (the gold gate), which is distinct from a pass that ran and answered "no".
+    A pass left out of ``passes`` is None too; ``passes`` on the record says
+    which ran.
 
     A moment with nothing after its cut point is not classified at all: both
     passes are None and ``skipped`` says why. The record is still written, so a
@@ -711,16 +911,33 @@ def build_record(
         _pass_result(
             raw_entries.get(f"{ACTION_PREFIX}__{moment_id}"), parse_action_direction
         )
-        if classified
+        if classified and "action_direction" in passes
         else None
     )
 
     over = None
-    if classified and wants_over_scaffolding(excerpt_record):
+    over_slots = None
+    description_from = None
+    if (
+        classified
+        and "over_scaffolding" in passes
+        and wants_over_scaffolding(excerpt_record)
+    ):
         over = _pass_result(
             raw_entries.get(f"{OVER_SCAFFOLDING_PREFIX}__{moment_id}"),
             parse_over_scaffolding,
         )
+        over_slots = over_scaffolding_slots(
+            prompts.templates["over_scaffolding"], excerpt_record
+        )
+        if over_slots and DESCRIPTIONS_SLOT in over_slots:
+            state = excerpt_record[DESCRIPTION_KEY]
+            description_from = {
+                "adjudicators": state["adjudicators"],
+                "situation_method": state["situation_method"],
+                "model": state["model"],
+                "prompt": state["prompt"],
+            }
 
     return {
         "moment_id": moment_id,
@@ -741,13 +958,21 @@ def build_record(
         # templates if the directories are ever reorganised.
         "prompt_version": prompts.version,
         "prompts": dict(prompts.paths),
+        "passes": list(passes),
         # Which rendering of the excerpt the prompts read. Both passes get the
         # same one; it is recorded per pass so a later round that splits them
         # apart again stays readable against this one.
         "context_turns": {
-            "action_direction": EXCERPT_WIDTH,
-            "over_scaffolding": EXCERPT_WIDTH,
+            "action_direction": width,
+            "over_scaffolding": width,
         },
+        # Gold-filled slot values sent to the model, per pass; None if the
+        # template has none or the pass wasn't asked.
+        "prompt_slots": {"over_scaffolding": over_slots},
+        # Provenance of the {descriptions} facets: source adjudicators, merge
+        # method, and the extracting model and prompt. None without that slot.
+        "description_from": description_from,
+        "situation_type": excerpt_record.get("situation_type"),
         "post_cut_rows": excerpt_record.get("post_cut_rows"),
         "post_cut_dialogue_rows": excerpt_record.get("post_cut_dialogue_rows"),
         "classified": classified,
@@ -766,6 +991,8 @@ def classify(
     prompts: PromptSet,
     *,
     batch_id: str | None = None,
+    passes=PASSES,
+    width: str = EXCERPT_WIDTH,
 ) -> tuple[dict[str, list[dict]], Counter]:
     """Classify every split in one pooled batch.
 
@@ -774,17 +1001,20 @@ def classify(
     apart again on the way out.
     """
     flat = [record for records in excerpts.values() for record in records]
-    entries, counts = build_entries(flat, prompts)
+    entries, counts = build_entries(flat, prompts, passes, width)
 
     raw_entries = run_entries(entries, cfg, batch_id=batch_id) if entries else {}
 
     out: dict[str, list[dict]] = {}
     for stem, records in excerpts.items():
-        built = [build_record(record, raw_entries, cfg, prompts) for record in records]
+        built = [
+            build_record(record, raw_entries, cfg, prompts, passes, width)
+            for record in records
+        ]
         for record in built:
             if not record["classified"]:
                 continue
-            if record["action_direction"]["parse_error"]:
+            if record["action_direction"] and record["action_direction"]["parse_error"]:
                 counts["action_direction_unparsed"] += 1
             if record["over_scaffolding"] and record["over_scaffolding"]["parse_error"]:
                 counts["over_scaffolding_unparsed"] += 1
@@ -793,18 +1023,23 @@ def classify(
     return out, counts
 
 
-def prediction_dir(out_dir: str, model: str, prompt_version: str) -> str:
-    """The output directory for one model's predictions at one prompt version.
+def prediction_dir(
+    out_dir: str, model: str, prompt_version: str, width: str = EXCERPT_WIDTH
+) -> str:
+    """The output directory for one model's predictions at one prompt version
+    and excerpt width.
 
     Predictions are filed under the model that made them so a comparison run
     does not overwrite the round before it, and under the prompt version below
     that so a prompt revision does not either -- an edited prompt asks a
     different question, and its answers are a different result set rather than a
-    fresher copy of the old one. Model ids can carry a vendor prefix
+    fresher copy of the old one. Width sits below version for the same reason:
+    the same prompt over a different lead-up is a different experiment. Model
+    ids can carry a vendor prefix
     ("deepseek-ai/DeepSeek-V4-Pro"), which would otherwise nest a directory;
     the separator is flattened so every model gets exactly one level.
     """
-    return os.path.join(out_dir, model.replace("/", "_"), prompt_version)
+    return os.path.join(out_dir, model.replace("/", "_"), prompt_version, width)
 
 
 def existing_outputs(out_dir: str, stems) -> list[str]:
@@ -879,16 +1114,27 @@ def _model_line(cfg: "V2Spec | None") -> list[str]:
     return [f"  model: {cfg.model} ({knobs or 'no reasoning params sent'})", ""]
 
 
-def _prompt_line(prompts: "PromptSet | None", out_dir: str | None) -> list[str]:
-    """The prompt version the round ran, and where its predictions land.
+def _prompt_line(
+    prompts: "PromptSet | None",
+    out_dir: str | None,
+    passes=PASSES,
+    width: str = EXCERPT_WIDTH,
+) -> list[str]:
+    """The prompt version and excerpt width the round ran, and where its
+    predictions land.
 
-    Printed on dry runs too: the version decides both which templates are filled
-    and which file is written, so it is the one setting worth confirming before
-    paying for a round.
+    Printed on dry runs too: version and width decide what the prompts read
+    and where results go, so they're worth confirming before paying for a
+    round. Also notes when --passes narrows the round.
     """
     if prompts is None:
         return []
-    lines = [f"  prompts: v{prompts.version} ({PROMPT_ROOT}/{prompts.version}/)"]
+    lines = [
+        f"  prompts: v{prompts.version} ({PROMPT_ROOT}/{prompts.version}/)",
+        f"  excerpt: {width}",
+    ]
+    if tuple(passes) != PASSES:
+        lines.append(f"  passes:  {', '.join(passes)} only")
     if out_dir:
         lines.append(f"  output:  {out_dir}/")
     return lines + [""]
@@ -901,6 +1147,8 @@ def report(
     cfg: "V2Spec | None" = None,
     prompts: "PromptSet | None" = None,
     out_dir: str | None = None,
+    passes=PASSES,
+    width: str = EXCERPT_WIDTH,
 ) -> str:
     lines = [
         "",
@@ -910,7 +1158,7 @@ def report(
         "",
     ]
     lines += _model_line(cfg)
-    lines += _prompt_line(prompts, out_dir)
+    lines += _prompt_line(prompts, out_dir, passes, width)
 
     if dry_run:
         if counts["no_post_cut_content"]:
@@ -983,6 +1231,24 @@ def report(
 # ===========================================================================
 
 
+def context_width(value: str) -> str:
+    """``--context-turns`` as an ``excerpts`` width key: ``full`` or a turn count.
+
+    Normalised via ``excerpts.width_key``, so "020" and "20" give the same key.
+    """
+    if value == excerpts.FULL_KEY:
+        return value
+    try:
+        turns = int(value)
+    except ValueError:
+        turns = 0
+    if turns <= 0:
+        raise argparse.ArgumentTypeError(
+            f"expected {excerpts.FULL_KEY!r} or a positive turn count, got {value!r}"
+        )
+    return excerpts.width_key(turns)
+
+
 def build_parser() -> argparse.ArgumentParser:
     parser = argparse.ArgumentParser(
         prog="python -m tutormoments_build.v2.classify_excerpts",
@@ -1011,6 +1277,17 @@ def build_parser() -> argparse.ArgumentParser:
         "newest one present. Predictions land in <out-dir>/<model>/<version>/.",
     )
     parser.add_argument(
+        "--context-turns",
+        type=context_width,
+        default=EXCERPT_WIDTH,
+        metavar="WIDTH",
+        help="Which excerpt rendering the prompts read: `full` for the whole "
+        "transcript, or N for the window opening N dialogue turns before the "
+        "cut. Either way it ends on the moment's last row. The excerpt file "
+        "must have been built at this width. Predictions land in "
+        "<out-dir>/<model>/<version>/<width>/.",
+    )
+    parser.add_argument(
         "--overwrite",
         action="store_true",
         help="Replace prediction files that are already there. Without it a "
@@ -1030,6 +1307,15 @@ def build_parser() -> argparse.ArgumentParser:
         default=None,
         metavar="N",
         help="Classify only the first N moments of each split, for a smoke test",
+    )
+    parser.add_argument(
+        "--passes",
+        nargs="+",
+        choices=PASSES,
+        default=list(PASSES),
+        help="Which passes to run. Name one to re-run it alone, e.g. "
+        "`over_scaffolding` when only that prompt changed; the other pass is "
+        "recorded as not run.",
     )
     parser.add_argument(
         "--batch-id",
@@ -1068,7 +1354,11 @@ def pick_moment(excerpts: dict[str, list[dict]], prefix: str) -> dict | None:
 
 
 def _print_prompts(
-    excerpts: dict[str, list[dict]], prefix: str, prompts: PromptSet
+    excerpts: dict[str, list[dict]],
+    prefix: str,
+    prompts: PromptSet,
+    passes=PASSES,
+    width: str = EXCERPT_WIDTH,
 ) -> int:
     record = pick_moment(excerpts, prefix)
     if record is None:
@@ -1086,11 +1376,20 @@ def _print_prompts(
     # Naming the moment makes a random pick reproducible: the id printed here is
     # what `--print <id>` takes to render this exact moment again.
     print(f"===== moment {record['moment_id']} ({record['split']}) =====\n")
-    print(f"===== {action_path} (@{EXCERPT_WIDTH} excerpt) =====\n")
-    print(fill(action_template, excerpt_at(record)))
+    if "action_direction" in passes:
+        print(f"===== {action_path} (@{width} excerpt) =====\n")
+        print(fill(action_template, excerpt_at(record, width)))
+    if "over_scaffolding" not in passes:
+        return 0
     if wants_over_scaffolding(record):
-        print(f"\n\n===== {over_path} (@{EXCERPT_WIDTH} excerpt) =====\n")
-        print(fill(over_template, excerpt_at(record)))
+        print(f"\n\n===== {over_path} (@{width} excerpt) =====\n")
+        print(
+            fill(
+                over_template,
+                excerpt_at(record, width),
+                over_scaffolding_slots(over_template, record),
+            )
+        )
     else:
         print(f"\n\n===== {over_path} =====\n\nnot asked: {NOT_ASKED_LABEL}")
     return 0
@@ -1107,22 +1406,44 @@ def main(argv: list[str] | None = None) -> int:
     # Loaded before anything else uses it so an unknown --prompt-version fails
     # on every path, --print and --dry-run included.
     prompts = load_prompt_set(args.prompt_version)
+    # Deduplicated and in PASSES order, however they were named.
+    passes = tuple(name for name in PASSES if name in args.passes)
+
+    # Before --print and --dry-run, which also fill prompts. The student-state
+    # file is read only if an over-scaffolding prompt with {descriptions} runs.
+    over_template = prompts.templates["over_scaffolding"]
+    if "over_scaffolding" in passes and "{" + DESCRIPTIONS_SLOT + "}" in over_template:
+        attach_descriptions(excerpts, load_student_state())
 
     if args.print_moment:
-        return _print_prompts(excerpts, args.print_moment, prompts)
+        return _print_prompts(
+            excerpts, args.print_moment, prompts, passes, args.context_turns
+        )
 
     # Resolved before the dry run too, so an unknown --model fails there rather
     # than only once a real round is submitted.
     cfg = phase_config(model=args.model)
-    out_dir = prediction_dir(args.out_dir, cfg.model, prompts.version)
+    width = args.context_turns
+    out_dir = prediction_dir(args.out_dir, cfg.model, prompts.version, width)
 
     if args.dry_run:
         _, counts = build_entries(
             [record for records in excerpts.values() for record in records],
             prompts,
+            passes,
+            width,
         )
         print(
-            report({}, counts, dry_run=True, cfg=cfg, prompts=prompts, out_dir=out_dir)
+            report(
+                {},
+                counts,
+                dry_run=True,
+                cfg=cfg,
+                prompts=prompts,
+                out_dir=out_dir,
+                passes=passes,
+                width=width,
+            )
         )
         return 0
 
@@ -1130,14 +1451,17 @@ def main(argv: list[str] | None = None) -> int:
     check_writable(out_dir, args.splits, args.overwrite)
 
     logger.info(
-        "classifying %d moment(s) with model=%s thinking=%s prompts=v%s",
+        "classifying %d moment(s) with model=%s thinking=%s prompts=v%s excerpt=%s",
         sum(len(records) for records in excerpts.values()),
         cfg.model,
         cfg.thinking,
         prompts.version,
+        width,
     )
 
-    out, counts = classify(excerpts, cfg, prompts, batch_id=args.batch_id)
+    out, counts = classify(
+        excerpts, cfg, prompts, batch_id=args.batch_id, passes=passes, width=width
+    )
 
     for stem, records in out.items():
         logger.info(
@@ -1146,7 +1470,18 @@ def main(argv: list[str] | None = None) -> int:
             write_split(out_dir, stem, records),
         )
 
-    print(report(out, counts, dry_run=False, cfg=cfg, prompts=prompts, out_dir=out_dir))
+    print(
+        report(
+            out,
+            counts,
+            dry_run=False,
+            cfg=cfg,
+            prompts=prompts,
+            out_dir=out_dir,
+            passes=passes,
+            width=width,
+        )
+    )
     return 0
 
 

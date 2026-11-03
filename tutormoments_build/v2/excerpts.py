@@ -360,6 +360,9 @@ def build_record(
         "post_cut_rows": len(post_cut),
         "post_cut_dialogue_rows": post_cut_dialogue,
         "labels": moment["labels"],
+        # The teachers' situation judgement. From prompt v5 the
+        # over-scaffolding prompt is given it.
+        "situation_type": moment.get("situation_type"),
         "excerpts": excerpts,
     }
 

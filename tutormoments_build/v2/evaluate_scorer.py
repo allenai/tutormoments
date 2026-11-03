@@ -1,16 +1,17 @@
 """Score v2 predictions against the gold labels: precision, recall, F1.
 
 ``classify_excerpts.py`` writes predictions to
-``<pred-dir>/<model>/<prompt version>/<split>.jsonl``, each record carrying the
-gold ``labels`` it was made against, so those files are all that scoring needs.
+``<pred-dir>/<model>/<prompt version>/<excerpt width>/<split>.jsonl``. Each
+record carries the gold ``labels`` it was made against, so scoring needs nothing
+else.
 
 Every task is reported in up to three blocks:
 
   all moments        every moment with a usable prediction
   agreed             only the moments the ground truth flags as agreed for that
                      construct (the per-record ``agreement`` flags)
-  short moments      only the moments with fewer than ``--short-turns`` (10 by
-                     default) dialogue turns after the cut point
+  short moments      only the moments with ``--short-turns`` (5 by default) or
+                     fewer dialogue turns after the cut point
 
 The agreed block needs ``agreement`` flags on the ground-truth records. The
 current build (``build_ground_truth.py``) resolves each label by majority vote
@@ -54,12 +55,14 @@ Usage::
     python -m tutormoments_build.v2.evaluate_scorer
     python -m tutormoments_build.v2.evaluate_scorer --model claude-opus-5
     python -m tutormoments_build.v2.evaluate_scorer --prompt-version 1
+    python -m tutormoments_build.v2.evaluate_scorer --context-turns 20
     python -m tutormoments_build.v2.evaluate_scorer --splits iteration test
-    python -m tutormoments_build.v2.evaluate_scorer --short-turns 5
+    python -m tutormoments_build.v2.evaluate_scorer --short-turns 3
     python -m tutormoments_build.v2.evaluate_scorer --ground-truth-dir data/ground_truth
 
-With no ``--prompt-version`` every version found under a model is scored, so a
-bare run reports each revision of the prompts against the same gold.
+Without ``--prompt-version`` or ``--context-turns``, every prompt version and
+excerpt width found is scored, so a bare run compares them all against the same
+gold.
 """
 
 import argparse
@@ -70,17 +73,22 @@ import sys
 from collections import Counter
 
 from tutormoments.logging_setup import logging_args_parent, setup_logging
+from tutormoments_build.v2 import excerpts
 from tutormoments_build.v2.build_ground_truth import (
     DEFAULT_OUT_DIR as DEFAULT_GROUND_TRUTH_DIR,
 )
-from tutormoments_build.v2.classify_excerpts import DEFAULT_OUT_DIR, DEFAULT_SPLITS
+from tutormoments_build.v2.classify_excerpts import (
+    DEFAULT_OUT_DIR,
+    DEFAULT_SPLITS,
+    PASSES,
+)
 
 logger = logging.getLogger("tutormoments_build.v2.evaluate_scorer")
 
-# Moments with fewer than this many dialogue turns after the cut are reported
-# again as their own block: a short post-cut span is less evidence to classify
-# from, and the question is whether the model's errors concentrate there.
-SHORT_POST_CUT_TURNS = 10
+# Moments with at most this many dialogue turns after the cut get their own
+# report block: a short post-cut span gives less to classify from, so we check
+# whether errors cluster there.
+SHORT_POST_CUT_TURNS = 5
 
 # (task name, prediction pass, field in that pass, gold field in labels)
 TASKS = (
@@ -99,6 +107,7 @@ TASKS = (
 # checked, with the report's column header for each. A missing gold label has no
 # column: it should not happen, so it gets a line of its own when it does.
 NOT_SCORED_COLUMNS = {
+    "not_run": "not run",
     "no_post_cut_content": "empty post-cut",
     "not_asked": "not asked",
     "response_failed": "response failed",
@@ -143,8 +152,12 @@ def not_scored_reason(record: dict, pass_name: str, field: str, gold_field: str)
 
     A ``NOT_SCORED_COLUMNS`` key, or ``"no_gold"``. "not_asked" is the
     over-scaffolding gold gate; "response_failed" covers both a request that
-    errored and one whose result never made it into the file.
+    errored and one whose result never made it into the file. "not_run" is a
+    pass excluded with --passes (records without a ``passes`` field ran every
+    pass).
     """
+    if pass_name not in record.get("passes", PASSES):
+        return "not_run"
     result = record.get(pass_name)
     if result is None:
         if record.get("skipped"):
@@ -208,7 +221,7 @@ def agreed_records(
 
 
 def short_records(records: list[dict], max_turns: int) -> tuple[list[dict], int]:
-    """Records with fewer than ``max_turns`` dialogue turns after the cut.
+    """Records with ``max_turns`` or fewer dialogue turns after the cut.
 
     Returns (kept, n_unknown); unknown is a record written before
     ``post_cut_dialogue_rows`` existed, which cannot be placed on either side of
@@ -220,7 +233,7 @@ def short_records(records: list[dict], max_turns: int) -> tuple[list[dict], int]
         if turns is None:
             unknown += 1
             continue
-        if turns < max_turns:
+        if turns <= max_turns:
             kept.append(record)
     return kept, unknown
 
@@ -319,6 +332,24 @@ def find_prompt_versions(model_dir: str, prompt_version: str | None) -> list[str
     )
 
 
+def find_widths(version_dir: str, width: str | None) -> list[str]:
+    """Excerpt-width subdirectories to score under one prompt version.
+
+    Defaults to every width present, widest first, so narrower windows print
+    after the full transcript they are compared with. Directories that aren't
+    width keys are skipped.
+    """
+    if width:
+        return [width]
+    if not os.path.isdir(version_dir):
+        return []
+    return excerpts.sort_widths(
+        name
+        for name in _subdirectories(version_dir)
+        if name == excerpts.FULL_KEY or name.isdigit()
+    )
+
+
 def evaluate(
     records: list[dict],
     agreement: dict[str, dict] | None = None,
@@ -329,8 +360,8 @@ def evaluate(
     Each row carries three subsets: ``all``, every moment with a usable
     prediction; ``agreed``, only the moments the ground truth flags as agreed on
     that construct, and None when there are no agreement flags to join against;
-    and ``short``, only the moments with fewer than
-    ``short_turns`` dialogue turns after the cut point.
+    and ``short``, only the moments with ``short_turns`` or fewer dialogue
+    turns after the cut point.
     """
     short, short_unknown = short_records(records, short_turns)
 
@@ -390,7 +421,9 @@ def _no_gold_lines(rows: list[dict], block: str) -> list[str]:
     ]
 
 
-def report(model: str, prompt_version: str, split: str, rows: list[dict]) -> str:
+def report(
+    model: str, prompt_version: str, width: str, split: str, rows: list[dict]
+) -> str:
     """One block per subset: all moments, the ones flagged as agreed, and
     the ones with a short post-cut span."""
     header = (
@@ -401,7 +434,7 @@ def report(model: str, prompt_version: str, split: str, rows: list[dict]) -> str
     )
     lines = [
         "",
-        f"  {model}  --  prompts v{prompt_version}  --  {split}",
+        f"  {model}  --  prompts v{prompt_version}  --  @{width} excerpt  --  {split}",
         "",
         header,
         f"  {'-' * (len(header) - 2)}",
@@ -432,7 +465,7 @@ def report(model: str, prompt_version: str, split: str, rows: list[dict]) -> str
         ]
 
     short = rows[0]["short"]
-    lines += ["", f"  fewer than {short['turns']} turns after the cut"]
+    lines += ["", f"  {short['turns']} or fewer turns after the cut"]
     lines += [_score_line(row["task"], row["short"]) for row in rows]
     lines += _no_gold_lines(rows, "short")
     lines.append(
@@ -493,6 +526,13 @@ def build_parser() -> argparse.ArgumentParser:
         "version found under each model.",
     )
     parser.add_argument(
+        "--context-turns",
+        default=None,
+        metavar="WIDTH",
+        help="Excerpt width whose predictions to score (`full` or a turn "
+        "count). Default: every width found under each prompt version.",
+    )
+    parser.add_argument(
         "--splits",
         nargs="+",
         default=list(DEFAULT_SPLITS),
@@ -503,7 +543,7 @@ def build_parser() -> argparse.ArgumentParser:
         type=int,
         default=SHORT_POST_CUT_TURNS,
         metavar="N",
-        help="Report a separate block over the moments with fewer than N "
+        help="Report a separate block over the moments with N or fewer "
         "dialogue turns after the cut point",
     )
     parser.add_argument(
@@ -545,33 +585,40 @@ def main(argv: list[str] | None = None) -> int:
             logger.warning("no prompt-version directories under %s", model_dir)
             continue
         for version in versions:
-            for split in args.splits:
-                path = os.path.join(model_dir, version, f"{split}.jsonl")
-                if not os.path.exists(path):
-                    logger.warning("no predictions at %s; skipping", path)
-                    continue
-                predictions = read_predictions(path)
-                if split in ground_truths:
-                    stale = stale_moments(predictions, ground_truths[split])
-                    if stale:
-                        logger.warning(
-                            "%d moment(s) in %s carry gold labels that differ from "
-                            "the current ground truth (e.g. %s); re-run "
-                            "classify_excerpts to score against today's gold",
-                            len(stale),
-                            path,
-                            ", ".join(stale[:3]),
-                        )
-                rows = evaluate(predictions, agreement[split], args.short_turns)
-                results.append(
-                    {
-                        "model": model,
-                        "prompt_version": version,
-                        "split": split,
-                        "tasks": rows,
-                    }
-                )
-                print(report(model, version, split, rows))
+            version_dir = os.path.join(model_dir, version)
+            widths = find_widths(version_dir, args.context_turns)
+            if not widths:
+                logger.warning("no excerpt-width directories under %s", version_dir)
+                continue
+            for width in widths:
+                for split in args.splits:
+                    path = os.path.join(version_dir, width, f"{split}.jsonl")
+                    if not os.path.exists(path):
+                        logger.warning("no predictions at %s; skipping", path)
+                        continue
+                    predictions = read_predictions(path)
+                    if split in ground_truths:
+                        stale = stale_moments(predictions, ground_truths[split])
+                        if stale:
+                            logger.warning(
+                                "%d moment(s) in %s carry gold labels that differ "
+                                "from the current ground truth (e.g. %s); re-run "
+                                "classify_excerpts to score against today's gold",
+                                len(stale),
+                                path,
+                                ", ".join(stale[:3]),
+                            )
+                    rows = evaluate(predictions, agreement[split], args.short_turns)
+                    results.append(
+                        {
+                            "model": model,
+                            "prompt_version": version,
+                            "context_turns": width,
+                            "split": split,
+                            "tasks": rows,
+                        }
+                    )
+                    print(report(model, version, width, split, rows))
 
     if not results:
         logger.error("no prediction files found under %s", args.pred_dir)

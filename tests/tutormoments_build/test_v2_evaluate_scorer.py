@@ -144,7 +144,7 @@ def test_report_gives_each_not_scored_reason_its_own_column():
         record("b", gold=GOLD_NO, scaffolding=False, rigor=False),
     ]
 
-    text = E.report("m", "1", "iteration", E.evaluate(records))
+    text = E.report("m", "1", "full", "iteration", E.evaluate(records))
 
     header = next(line for line in text.splitlines() if "not asked" in line)
     over = next(line for line in text.splitlines() if "over-scaffolding" in line)
@@ -258,16 +258,16 @@ def test_stale_predictions_are_detected():
 # ===========================================================================
 
 
-def test_short_records_keeps_only_the_moments_below_the_threshold():
+def test_short_records_keeps_the_moments_at_or_below_the_threshold():
     records = [
-        record("short", gold=GOLD_YES, turns=9),
-        record("boundary", gold=GOLD_YES, turns=10),
-        record("long", gold=GOLD_YES, turns=40),
+        record("short", gold=GOLD_YES, turns=4),
+        record("boundary", gold=GOLD_YES, turns=5),
+        record("long", gold=GOLD_YES, turns=6),
     ]
 
-    kept, unknown = E.short_records(records, 10)
+    kept, unknown = E.short_records(records, 5)
 
-    assert [r["moment_id"] for r in kept] == ["short"]
+    assert [r["moment_id"] for r in kept] == ["short", "boundary"]
     assert unknown == 0
 
 
@@ -293,7 +293,7 @@ def test_evaluate_scores_the_short_subset_separately():
     assert scaffolding["short"]["tp"] == 1
     assert scaffolding["short"]["moments"] == 1
     assert scaffolding["short"]["of_moments"] == 2
-    assert scaffolding["short"]["turns"] == 10
+    assert scaffolding["short"]["turns"] == 5
 
 
 def test_the_short_subset_drops_gold_negatives_too():
@@ -312,8 +312,8 @@ def test_the_short_subset_drops_gold_negatives_too():
 def test_the_short_threshold_is_configurable():
     records = [record("a", gold=GOLD_YES, scaffolding=True, rigor=True, turns=7)]
 
-    assert E.evaluate(records, None, 5)[0]["short"]["n"] == 0
-    assert E.evaluate(records, None, 8)[0]["short"]["n"] == 1
+    assert E.evaluate(records, None, 6)[0]["short"]["n"] == 0
+    assert E.evaluate(records, None, 7)[0]["short"]["n"] == 1
 
 
 # ===========================================================================
@@ -322,12 +322,12 @@ def test_the_short_threshold_is_configurable():
 
 
 def _write_predictions(
-    tmp_path, model="claude-opus-5", split="iteration", prompt_version="1"
+    tmp_path, model="claude-opus-5", split="iteration", prompt_version="1", width="full"
 ):
     # Predictions live under their own directory: every subdirectory of
     # --pred-dir is read as a model name, so the ground truth cannot sit beside
     # them.
-    version_dir = tmp_path / "preds" / model / prompt_version
+    version_dir = tmp_path / "preds" / model / prompt_version / width
     version_dir.mkdir(parents=True)
     records = [
         record(
@@ -377,6 +377,7 @@ def test_cli_reports_and_writes_json(tmp_path, capsys):
     scores = json.loads(out.read_text(encoding="utf-8"))
     assert scores[0]["model"] == "claude-opus-5"
     assert scores[0]["prompt_version"] == "1"
+    assert scores[0]["context_turns"] == "full"
     assert scores[0]["split"] == "iteration"
     scaffolding = scores[0]["tasks"][0]
     assert (scaffolding["all"]["tp"], scaffolding["all"]["fp"]) == (1, 1)
@@ -402,7 +403,7 @@ def test_cli_reports_the_short_moments(tmp_path, capsys):
     assert E.main(["--pred-dir", pred_dir, "--ground-truth-dir", str(tmp_path)]) == 0
 
     out = capsys.readouterr().out
-    assert "fewer than 10 turns after the cut" in out
+    assert "5 or fewer turns after the cut" in out
     assert "1 of 2 moment(s)" in out
 
 
@@ -424,7 +425,7 @@ def test_cli_short_turns_sets_the_threshold(tmp_path, capsys):
     )
 
     out = capsys.readouterr().out
-    assert "fewer than 40 turns after the cut" in out
+    assert "40 or fewer turns after the cut" in out
     assert "2 of 2 moment(s)" in out
 
 
@@ -528,6 +529,31 @@ def test_prompt_versions_sort_numerically(tmp_path):
     assert E.find_prompt_versions(str(tmp_path), None) == ["1", "2", "10"]
 
 
+def test_cli_scores_every_excerpt_width_by_default(tmp_path, capsys):
+    pred_dir = _write_predictions(tmp_path, width="full")
+    _write_predictions(tmp_path, width="20")
+    out_json = tmp_path / "scores.json"
+
+    assert E.main(["--pred-dir", pred_dir, "--json", str(out_json)]) == 0
+    out = capsys.readouterr().out
+    assert "@full excerpt" in out
+    assert "@20 excerpt" in out
+    scores = json.loads(out_json.read_text(encoding="utf-8"))
+    assert [r["context_turns"] for r in scores] == ["full", "20"]
+
+    assert E.main(["--pred-dir", pred_dir, "--context-turns", "20"]) == 0
+    out = capsys.readouterr().out
+    assert "@20 excerpt" in out
+    assert "@full excerpt" not in out
+
+
+def test_widths_sort_widest_first_and_skip_stray_directories(tmp_path):
+    for name in ("5", "full", "20", "scratch"):
+        (tmp_path / name).mkdir()
+
+    assert E.find_widths(str(tmp_path), None) == ["full", "20", "5"]
+
+
 def test_cli_scores_only_the_model_asked_for(tmp_path, capsys):
     pred_dir = _write_predictions(tmp_path)
     _write_predictions(tmp_path, model="gemini-3.5-flash")
@@ -537,3 +563,20 @@ def test_cli_scores_only_the_model_asked_for(tmp_path, capsys):
 
     assert E.main(["--pred-dir", pred_dir, "--model", "claude-opus-5"]) == 0
     assert "gemini-3.5-flash" not in capsys.readouterr().out
+
+
+def test_a_pass_left_out_of_the_round_is_not_run_rather_than_failed():
+    over_only = {
+        **record("a", gold=GOLD_YES, over=True, asked=True),
+        "passes": ["over_scaffolding"],
+    }
+
+    _, action = E.collect(
+        [over_only], "action_direction", "scaffolding", "scaffolding_present"
+    )
+    pairs, over = E.collect(
+        [over_only], "over_scaffolding", "over_scaffolding", "over_scaffolding_present"
+    )
+
+    assert action == {"not_run": 1}
+    assert pairs == [(True, True)] and over == {}
