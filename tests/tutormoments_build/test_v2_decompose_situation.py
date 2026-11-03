@@ -124,8 +124,8 @@ def test_length_tie_is_seeded_by_moment_id():
     picks = {
         D.merge_descriptions(f"m{i}", candidates)["adjudicators"][0] for i in range(40)
     }
-    # Random across moments, but the same moment always gets the same pick,
-    # whatever order its accounts arrive in.
+    # Random across moments, but stable for a given moment regardless of the
+    # order its accounts arrive in.
     assert picks == {"A01", "A02"}
     for i in range(10):
         first = D.merge_descriptions(f"m{i}", candidates)

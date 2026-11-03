@@ -1741,8 +1741,8 @@ def test_run_batch_gemini_injects_thinking_config_without_mutating_entries(
     ],
 )
 def test_run_batch_gemini_applies_batch_output_cap(monkeypatch, model, requested, sent):
-    """A registry batch_max_output_cap clamps each uploaded line's
-    max_output_tokens, without mutating the caller's entries."""
+    """batch_max_output_cap clamps max_output_tokens in the uploaded batch
+    and leaves the caller's entries unchanged."""
     monkeypatch.setenv("GEMINI_API_KEY", "key-test")
     result_text = json.dumps(
         {

@@ -1764,7 +1764,7 @@ def _submit_batch_gemini(client, entries, display_name, wire: WireThinking) -> s
             gen_config = dict(entry["request"].get("generation_config", {}))
             if thinking_config is not None:
                 gen_config["thinking_config"] = dict(thinking_config)
-            # Some models' batch API rejects outputs their sync API allows.
+            # Clamp to the model's batch-only cap (see models.yaml).
             if batch_cap is not None and gen_config.get("max_output_tokens"):
                 gen_config["max_output_tokens"] = min(
                     gen_config["max_output_tokens"], batch_cap

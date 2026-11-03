@@ -360,8 +360,8 @@ def test_validate_registry_rejects_bad_output_cap(cap_key):
 
 
 def test_batch_max_output_cap():
-    # Gemini 4 Argon's batch API rejects max_output_tokens above 32,768; its
-    # sync calls are not capped.
+    # Argon's batch API rejects max_output_tokens above 32,768; sync calls
+    # stay uncapped.
     assert batch_max_output_cap("gemini-4-argon") == 32768
     assert max_output_cap("gemini-4-argon") is None
     assert batch_max_output_cap("gemini-3.5-flash") is None

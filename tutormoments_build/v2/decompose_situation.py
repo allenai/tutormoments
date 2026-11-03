@@ -7,22 +7,20 @@ cut. Per moment those accounts are merged into one situation description:
   two, very similar           the longer account (length ties broken at random)
   two, different              both accounts, concatenated in the order saved
 
-"Very similar" is a ``difflib`` similarity ratio of at least
-``SIMILARITY_THRESHOLD``. The ratio is recorded on every record, so a different
-cutoff can be judged without re-running anything.
+"Very similar" means a ``difflib`` ratio of at least ``SIMILARITY_THRESHOLD``.
+Each record stores the ratio, so another cutoff can be assessed without
+re-running.
 
 The merged description fills ``prompts/v2_helper/student_state.md``, which asks
 for a JSON array of standalone facets describing the student's state, behaviour
 and actions. The array is parsed with the ground-truth pipeline's lenient facet
 parser (``tutormoments.scoring._parse_decomposed``).
 
-Only moments in the ground truth are decomposed. Output is one file,
-``data/ground_truth/student_state.jsonl``, one record per ground-truth moment in
-ground-truth file order. Each record carries ``moment_id`` and ``split``
-(``iteration`` or ``test``), so it joins on ``moment_id`` against
-``data/ground_truth/<split>.jsonl``. A moment no adjudicator described is still
-written, with ``facets`` None and ``skipped`` saying why, so the join never
-comes up short.
+Only ground-truth moments are decomposed. Output is
+``data/ground_truth/student_state.jsonl``: one record per ground-truth moment, in
+ground-truth order, with ``moment_id`` and ``split`` for joining against
+``data/ground_truth/<split>.jsonl``. Moments no adjudicator described are still
+written (``facets`` None, ``skipped`` giving the reason), so every moment joins.
 
 ``--model`` defaults to ``claude-opus-5-5`` and must be configured as for
 ``classify_excerpts`` (``v2`` block, ``v2.models``, or a ``benchmark_models``
@@ -77,26 +75,27 @@ from tutormoments_build.v2.splits import DEFAULT_ANNOTATIONS_FILES
 logger = logging.getLogger("tutormoments_build.v2.decompose_situation")
 
 
-# Resolves to its `benchmark_models` arm, so it decomposes at the parameters
-# the benchmark runs it with.
+# Resolved through its `benchmark_models` arm, so it runs with the same
+# reasoning parameters as in the benchmark.
 DEFAULT_MODEL = "claude-opus-5-5"
 
 PROMPT_PATH = "prompts/v2_helper/student_state.md"
 
-# Accounts at least this similar count as the same account, and the longer is
-# kept; below it, both are kept. A judgement call: adjudicators often paste the
-# same text and edit it lightly, and a light edit should not double the
-# description. The ratio is recorded per moment (see merge_descriptions).
+# Accounts at least this similar are treated as one and the longer is kept;
+# otherwise both are kept. Adjudicators often paste the same text and edit it
+# lightly, which shouldn't double the description. A judgement call; the ratio
+# is recorded per moment so it can be revisited.
 SIMILARITY_THRESHOLD = 0.8
 
-# Seeds the length-tie pick. Mixed with the moment id, so a moment's pick is the
-# same on every run and does not depend on which other moments were loaded.
+# Seed for breaking length ties. Combined with the moment id, so each moment's
+# pick is stable across runs whatever other moments are loaded.
 TIE_SEED = "v2-student-state"
 
-# How two or more accounts are joined when they differ.
+# Joins accounts that differ.
 CONCAT_SEPARATOR = "\n\n"
 
-# Batch-entry key prefix. A moment_id is a UUID, so a key splits on "__".
+# Batch-entry key prefix. Keys are "<prefix>__<moment_id>"; UUIDs never
+# contain "__", so they split cleanly.
 ENTRY_PREFIX = "state"
 
 NO_DESCRIPTION = "no_description"
@@ -114,11 +113,10 @@ def load_adjudicator_descriptions(
 ) -> dict[str, list[dict]]:
     """Return {moment_id: [{"adjudicator": label, "text": why}, ...]}.
 
-    Each adjudicator's ``situation.why`` from their final answers, in the order
-    they saved. Staff and superseded re-saves are dropped exactly as the ground
-    truth build drops them; an adjudicator who threw the moment out or left the
-    box blank contributes nothing. Adjudicators are named by their de-identified
-    label, never their name.
+    Each adjudicator's final ``situation.why``, in save order. Staff and
+    superseded re-saves are dropped as in the ground-truth build; adjudicators
+    who discarded the moment or left the field blank contribute nothing.
+    Adjudicators are identified only by their de-identified label.
     """
     excluded = load_excluded_annotators(excluded_path)
     labels = load_annotator_labels(labels_path)
@@ -143,7 +141,7 @@ def load_adjudicator_descriptions(
 def load_ground_truth(gt_dir: str, stems=SPLIT_STEMS) -> list[dict]:
     """Ground-truth records across ``stems``, in file order.
 
-    A missing split file is not an error -- a build may have produced only one.
+    A missing split file is skipped, since a build may produce only one.
     """
     out: list[dict] = []
     for stem in stems:
@@ -180,8 +178,8 @@ def merge_descriptions(moment_id: str, candidates: list[dict]) -> dict:
     None for a single account) and ``adjudicators`` (whose accounts the text
     holds, in order).
 
-    The accounts are kept whole only if every pair is similar, so this holds
-    for more than two adjudicators as well, though the data has at most two.
+    The longer account is used only if every pair is similar, so this works
+    for more than two adjudicators (the data has at most two).
     """
     if len(candidates) == 1:
         only = candidates[0]
@@ -223,9 +221,9 @@ def merge_descriptions(moment_id: str, candidates: list[dict]) -> dict:
 def fill(template: str, situation: str) -> str:
     """Substitute ``{situation}`` into the template.
 
-    One pass with the shared placeholder pattern, so an adjudicator's text is
-    never itself searched for slot names, and any other placeholder raises
-    rather than reaching the model as a literal.
+    A single substitution pass, so braces in an adjudicator's text are never
+    read as slots. Any other slot in the template raises instead of reaching
+    the model unfilled.
     """
     unfilled = [name for name in PLACEHOLDER.findall(template) if name != "situation"]
     if unfilled:
@@ -250,9 +248,9 @@ def build_entries(merged: dict[str, dict], template: str) -> list[dict]:
 def parse_facets(text: str) -> tuple[list[str] | None, bool]:
     """Parse a response into facet strings. Returns (facets, had_error).
 
-    ``facets`` is None when the response could not be parsed, which is
-    distinct from ``[]``: the prompt asks for an empty array when the
-    description says nothing about the student.
+    ``facets`` is None if the response couldn't be parsed. That differs from
+    ``[]``, which the prompt asks for when the description says nothing about
+    the student.
     """
     from tutormoments.scoring import _parse_decomposed
 
@@ -506,7 +504,7 @@ def main(argv: list[str] | None = None) -> int:
             _print_prompt(merged, RANDOM, template)
         return 0
 
-    # Before the batch, not after it: see classify_excerpts.check_writable.
+    # Check before submitting the batch (see classify_excerpts.check_writable).
     if os.path.exists(out_path) and not args.overwrite:
         raise FileExistsError(
             f"{out_path} already exists. Pass --overwrite to replace it, or "

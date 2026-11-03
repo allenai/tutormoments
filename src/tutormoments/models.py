@@ -270,7 +270,7 @@ def max_output_cap(model: str) -> int | None:
 
 
 def batch_max_output_cap(model: str) -> int | None:
-    """Per-model output cap for batch requests only, or None when none applies."""
+    """Output token cap for batch requests only; None if the model has none."""
     found = _find_model_entry(model)
     if found is None:
         return None

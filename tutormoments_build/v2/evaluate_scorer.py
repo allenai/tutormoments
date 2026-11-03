@@ -1,9 +1,9 @@
 """Score v2 predictions against the gold labels: precision, recall, F1.
 
 ``classify_excerpts.py`` writes predictions to
-``<pred-dir>/<model>/<prompt version>/<excerpt width>/<split>.jsonl``, each
-record carrying the gold ``labels`` it was made against, so those files are all
-that scoring needs.
+``<pred-dir>/<model>/<prompt version>/<excerpt width>/<split>.jsonl``. Each
+record carries the gold ``labels`` it was made against, so scoring needs nothing
+else.
 
 Every task is reported in up to three blocks:
 
@@ -60,9 +60,9 @@ Usage::
     python -m tutormoments_build.v2.evaluate_scorer --short-turns 3
     python -m tutormoments_build.v2.evaluate_scorer --ground-truth-dir data/ground_truth
 
-With no ``--prompt-version`` every version found under a model is scored, so a
-bare run reports each revision of the prompts against the same gold. Likewise
-with no ``--context-turns``: every excerpt width found under a version.
+Without ``--prompt-version`` or ``--context-turns``, every prompt version and
+excerpt width found is scored, so a bare run compares them all against the same
+gold.
 """
 
 import argparse
@@ -85,9 +85,9 @@ from tutormoments_build.v2.classify_excerpts import (
 
 logger = logging.getLogger("tutormoments_build.v2.evaluate_scorer")
 
-# Moments with this many dialogue turns after the cut or fewer are reported
-# again as their own block: a short post-cut span is less evidence to classify
-# from, and the question is whether the model's errors concentrate there.
+# Moments with at most this many dialogue turns after the cut get their own
+# report block: a short post-cut span gives less to classify from, so we check
+# whether errors cluster there.
 SHORT_POST_CUT_TURNS = 5
 
 # (task name, prediction pass, field in that pass, gold field in labels)
@@ -153,8 +153,8 @@ def not_scored_reason(record: dict, pass_name: str, field: str, gold_field: str)
     A ``NOT_SCORED_COLUMNS`` key, or ``"no_gold"``. "not_asked" is the
     over-scaffolding gold gate; "response_failed" covers both a request that
     errored and one whose result never made it into the file. "not_run" is a
-    pass the round left out with --passes; records from before that flag ran
-    every pass.
+    pass excluded with --passes (records without a ``passes`` field ran every
+    pass).
     """
     if pass_name not in record.get("passes", PASSES):
         return "not_run"
@@ -335,9 +335,9 @@ def find_prompt_versions(model_dir: str, prompt_version: str | None) -> list[str
 def find_widths(version_dir: str, width: str | None) -> list[str]:
     """Excerpt-width subdirectories to score under one prompt version.
 
-    Default is every width present, widest first, so a bare run puts a narrow
-    window beside the full transcript it is measured against. A directory that
-    is not a width key is not a result set and is left out.
+    Defaults to every width present, widest first, so narrower windows print
+    after the full transcript they are compared with. Directories that aren't
+    width keys are skipped.
     """
     if width:
         return [width]

@@ -17,16 +17,15 @@ in a manner that allows for comparison w/ gold labels.
 It is sent only where the gold marks ``scaffolding_present``, and its answer is
 scored against ``over_scaffolding_present``.
 
-From prompt v8 the over-scaffolding prompt is also told what the adjudicators
-wrote about the student before the cut (``{descriptions}``): the atomic facets
-``decompose_situation.py`` extracted into ``data/ground_truth/student_state.jsonl``,
-as a bullet list -- an oracle input like the gold-filled slots.
+From prompt v8 the over-scaffolding prompt also receives ``{descriptions}``: a
+bullet list of the student-state facets ``decompose_situation.py`` extracted from
+the adjudicators' accounts (``data/ground_truth/student_state.jsonl``). Like the
+gold-filled slots, this is an oracle input.
 
-Both prompts are run in one batch, and both read the same excerpt. By default
-that is the whole transcript from its first row through the moment's last (the
-``full`` rendering created by ``excerpts.py``); ``--context-turns 20`` picks the
-rendering that opens 20 dialogue turns before the cut instead. ``--passes`` runs
-only the one(s) named, e.g. the over-scaffolding pass alone when only its prompt
+Both prompts run in one batch and read the same excerpt: by default, 20 dialogue
+turns before the cut through the moment's last row; with ``--context-turns
+full``, the whole transcript (``excerpts.py`` builds both). ``--passes`` runs
+only the named prompt(s), e.g. just over-scaffolding when only its prompt
 changed.
 
 ``--model`` sets the model; looking up settings in default_config.yaml.
@@ -35,9 +34,8 @@ Examples of models this script could run with:
 - gemini-3.5-flash
 - gpt-5.6-sol
 
-Predictions are written per model, prompt version and excerpt width:
-``<out-dir>/<model>/<prompt version>/<width>/<split>.jsonl``. An existing file is never
-replaced unless ``--overwrite`` says to.
+Predictions go to ``<out-dir>/<model>/<prompt version>/<width>/<split>.jsonl``.
+Existing files are only replaced with ``--overwrite``.
 
 Only the ``iteration`` split runs by default. The ``test`` split is held out
 unless specified w/ ``--splits test``.
@@ -50,7 +48,7 @@ Usage::
     python -m tutormoments_build.v2.classify_excerpts --splits test
     python -m tutormoments_build.v2.classify_excerpts --model claude-opus-5
     python -m tutormoments_build.v2.classify_excerpts --prompt-version 2
-    python -m tutormoments_build.v2.classify_excerpts --context-turns 20
+    python -m tutormoments_build.v2.classify_excerpts --context-turns full
     python -m tutormoments_build.v2.classify_excerpts --passes over_scaffolding
     python -m tutormoments_build.v2.classify_excerpts --overwrite
     python -m tutormoments_build.v2.classify_excerpts --print
@@ -110,49 +108,46 @@ PROMPT_FILES = {
     "over_scaffolding": "over-scaffolding.md",
 }
 
-# Every pass, in the order a round runs them. ``--passes`` narrows a round to a
-# subset, e.g. re-running only the over-scaffolding pass when only its prompt
-# changed; a pass left out is recorded as not run rather than as failed.
+# Every pass, in run order. ``--passes`` selects a subset; passes left out are
+# recorded as not run, not as failed.
 PASSES = tuple(PROMPT_FILES)
 
-# What both prompts read: the excerpt rendered with no lead-up window at all --
-# the transcript from its first row through the moment's last. Neither question
-# is settled by the immediate exchange alone (over-scaffolding asks whether the
-# student had already shown they could do the work, and even action direction
-# reads differently against what the tutor has already tried), so rather than
-# guess a width that holds for both, they get the whole session. It is the
-# default only: ``--context-turns`` picks another width the excerpt file was
-# built at, to measure what the narrower lead-up costs.
-EXCERPT_WIDTH = excerpts.FULL_KEY
+# Default excerpt for both prompts: 20 dialogue turns before the cut through the
+# moment's last row. Neither question can be judged from the immediate exchange
+# alone: over-scaffolding asks whether the student had already shown they could
+# do the work, and action direction depends on what the tutor already tried.
+# ``--context-turns`` selects another width the excerpts were built at, e.g.
+# ``full``.
+EXCERPT_WIDTH = excerpts.width_key(20)
 
-# Gold-filled template slots. From prompt v5 the over-scaffolding prompt is told
-# the teachers' situation judgement ({is_isnt}) and what the tutor did after the
-# cut ({action}), both read from the gold labels -- an oracle condition, so its
-# scores are an upper bound rather than comparable with versions that lack them.
-# From v7 the situation judgement is {is_appropriate_for}, which names what the
-# moment calls for rather than only whether it calls for rigor. From v8
-# {descriptions} carries the student-state facets decompose_situation.py
-# extracted from the adjudicators' accounts of the situation before the cut.
+# Gold-filled slots in the over-scaffolding prompt. These are oracle inputs, so
+# scores using them are an upper bound, not comparable with earlier versions.
+#   v5+  {is_isnt}: the teachers' situation judgement.
+#        {action}: what the tutor did after the cut.
+#   v7+  {is_appropriate_for} replaces {is_isnt}, naming what the moment calls
+#        for rather than only whether it calls for rigor.
+#   v8+  {descriptions}: student-state facets decompose_situation.py extracted
+#        from the adjudicators' accounts.
 DESCRIPTIONS_SLOT = "descriptions"
 GOLD_SLOTS = ("is_isnt", "is_appropriate_for", "action", DESCRIPTIONS_SLOT)
 
-# Where an excerpt record carries its student-state facets once attached (see
-# attach_descriptions). Set in memory only; excerpt files never hold it.
+# Excerpt-record key for attached student-state facets (see
+# attach_descriptions). In memory only; never written to excerpt files.
 DESCRIPTION_KEY = "student_state"
 
 # decompose_situation.py's output: one record per ground-truth moment.
 DEFAULT_STUDENT_STATE = "data/ground_truth/student_state.jsonl"
 
-# {descriptions} for a moment whose adjudicators wrote only about the tutor, so
-# decomposition found no facet about the student.
+# {descriptions} when decomposition found no facets about the student, e.g.
+# the adjudicators wrote only about the tutor.
 NO_FACETS_LINE = "- (no description of the student)"
 
-# Situation types in which teachers tend to judge the moment calls for rigor.
-# Every other type, fifty_fifty included, fills {is_isnt} with "isn't".
+# Situation types that fill {is_isnt} with "is" (the moment calls for rigor).
+# All others, including fifty_fifty, get "isn't".
 RIGOR_SITUATIONS = ("rigor_only", "rigor_maj")
 
 # situation_type -> {is_appropriate_for}. Unlike {is_isnt}, an even split gets
-# its own wording instead of falling in with the scaffolding side.
+# its own wording rather than counting as scaffolding.
 APPROPRIATE_FOR_WORDING = {
     "rigor_only": "is appropriate for a push for rigor",
     "rigor_maj": "is appropriate for a push for rigor",
@@ -161,12 +156,12 @@ APPROPRIATE_FOR_WORDING = {
     "scaffold_only": "is appropriate for scaffolding",
 }
 
-# Any {name} placeholder in a template. The JSON output-format blocks never
-# match: their braces open onto a newline or a quote, not a bare name.
+# A {name} placeholder. The templates' JSON output examples never match, since
+# their braces are followed by a newline or a quote.
 PLACEHOLDER = re.compile(r"\{([a-z_]+)\}")
 
-# (scaffolding_present, rigor_present) -> {action}. Neither has no wording: the
-# gold gate only asks about moments where scaffolding is present.
+# (scaffolding_present, rigor_present) -> {action}. (False, False) has no
+# wording; the gold gate never asks about such moments.
 ACTION_WORDING = {
     (True, True): "scaffolding and pushing for rigor",
     (True, False): "scaffolding",
@@ -450,9 +445,9 @@ def load_excerpts(excerpt_dir: str, stems=DEFAULT_SPLITS) -> dict[str, list[dict
 def load_student_state(path: str = DEFAULT_STUDENT_STATE) -> dict[str, dict]:
     """Return {moment_id: student-state record} from decompose_situation.py.
 
-    Records whose facets are None (no description, or an unparsed response)
-    are left out, so filling a prompt for that moment raises (see
-    ``description_slot``) rather than telling the model nothing.
+    Records with ``facets`` None (no description, or an unparsed response) are
+    skipped, so filling that moment's prompt raises (see ``description_slot``)
+    instead of sending an empty slot.
     """
     if not os.path.exists(path):
         raise FileNotFoundError(
@@ -472,10 +467,10 @@ def load_student_state(path: str = DEFAULT_STUDENT_STATE) -> dict[str, dict]:
 def attach_descriptions(
     excerpts: dict[str, list[dict]], states: dict[str, dict]
 ) -> None:
-    """Set each excerpt record's student-state facets, in place.
+    """Attach each excerpt record's student-state facets, in place.
 
-    A moment with no facets is left without them; filling a prompt that asks
-    for them then raises (see ``description_slot``).
+    Moments without facets are left alone; filling a prompt that needs them
+    then raises (see ``description_slot``).
     """
     for records in excerpts.values():
         for record in records:
@@ -492,16 +487,13 @@ def attach_descriptions(
 def fill(template: str, excerpt: str, slots: dict[str, str] | None = None) -> str:
     """Substitute ``{excerpt}`` and any gold ``slots`` into a v2 prompt template.
 
-    ``str.replace``, not ``str.format``: both templates print a literal JSON
-    object in their output-format section, and ``format`` would read those
-    braces as fields and raise.
+    Uses ``PLACEHOLDER``, not ``str.format``: both templates contain a literal
+    JSON object, whose braces ``format`` would read as fields.
 
-    Any placeholder left unfilled raises rather than reaching the model as a
-    literal ``{is_isnt}`` -- including one this module has never heard of, so
-    renaming a slot in a new prompt version fails loudly instead of silently.
-    Every placeholder is substituted in one pass over the template, so neither
-    transcript text nor a teacher's written account is itself searched for slot
-    names.
+    Any unfilled placeholder raises, including unknown ones, so a slot renamed
+    in a new prompt version fails loudly instead of reaching the model as
+    literal text. All placeholders are substituted in one pass, so braces in
+    transcript text or teachers' accounts are never treated as slots.
     """
     values = {**(slots or {}), "excerpt": excerpt}
     unfilled = [
@@ -522,9 +514,8 @@ def uses_gold_slots(template: str) -> bool:
 def gold_slots(record: dict) -> dict[str, str]:
     """The gold-filled slot values for one moment.
 
-    Raises rather than guessing when the moment lacks what a slot needs: a
-    prompt telling the model the wrong situation would misreport the condition
-    its label was made under.
+    Raises instead of guessing when the moment lacks data a slot needs, since a
+    wrong value would misreport the condition the label was made under.
     """
     situation = record.get("situation_type")
     if situation is None:
@@ -553,11 +544,10 @@ def gold_slots(record: dict) -> dict[str, str]:
 def description_slot(record: dict) -> str:
     """The ``{descriptions}`` value: the student-state facets as a bullet list.
 
-    Starts on a new line, since the templates put the slot after a colon. An
-    empty facet list is NO_FACETS_LINE. A moment with no facets at all raises
-    rather than leaving the slot blank: a prompt saying "teachers describe the
-    situation as:" followed by nothing would misreport the condition its label
-    was made under.
+    Starts with a newline, since templates place the slot after a colon. An
+    empty facet list becomes ``NO_FACETS_LINE``. A moment with no student-state
+    record raises rather than leaving the slot blank, which would misreport the
+    condition the label was made under.
     """
     state = record.get(DESCRIPTION_KEY)
     if not state:
@@ -572,8 +562,8 @@ def description_slot(record: dict) -> str:
 def over_scaffolding_slots(template: str, record: dict) -> dict[str, str] | None:
     """Gold slots for the over-scaffolding prompt, or None if it takes none.
 
-    Only the slots the template asks for, so the record states exactly what the
-    model was told.
+    Returns only the slots the template uses, so the record shows exactly what
+    the model was told.
     """
     if not uses_gold_slots(template):
         return None
@@ -976,12 +966,11 @@ def build_record(
             "action_direction": width,
             "over_scaffolding": width,
         },
-        # What the gold-filled slots told the model, per pass; None for a pass
-        # whose template has none (or that was not asked).
+        # Gold-filled slot values sent to the model, per pass; None if the
+        # template has none or the pass wasn't asked.
         "prompt_slots": {"over_scaffolding": over_slots},
-        # Whose accounts the {descriptions} facets came from, how they were
-        # merged, and the model and prompt that extracted them; None when the
-        # prompt has no such slot.
+        # Provenance of the {descriptions} facets: source adjudicators, merge
+        # method, and the extracting model and prompt. None without that slot.
         "description_from": description_from,
         "situation_type": excerpt_record.get("situation_type"),
         "post_cut_rows": excerpt_record.get("post_cut_rows"),
@@ -1044,9 +1033,9 @@ def prediction_dir(
     does not overwrite the round before it, and under the prompt version below
     that so a prompt revision does not either -- an edited prompt asks a
     different question, and its answers are a different result set rather than a
-    fresher copy of the old one. The excerpt width sits below the version for
-    the same reason: the same prompt over a shorter lead-up is a different
-    experiment. Model ids can carry a vendor prefix
+    fresher copy of the old one. Width sits below version for the same reason:
+    the same prompt over a different lead-up is a different experiment. Model
+    ids can carry a vendor prefix
     ("deepseek-ai/DeepSeek-V4-Pro"), which would otherwise nest a directory;
     the separator is flattened so every model gets exactly one level.
     """
@@ -1134,9 +1123,9 @@ def _prompt_line(
     """The prompt version and excerpt width the round ran, and where its
     predictions land.
 
-    Printed on dry runs too: the version and width decide both what the prompts
-    read and which file is written, so they are the settings worth confirming
-    before paying for a round. A round narrowed by --passes says so.
+    Printed on dry runs too: version and width decide what the prompts read
+    and where results go, so they're worth confirming before paying for a
+    round. Also notes when --passes narrows the round.
     """
     if prompts is None:
         return []
@@ -1245,7 +1234,7 @@ def report(
 def context_width(value: str) -> str:
     """``--context-turns`` as an ``excerpts`` width key: ``full`` or a turn count.
 
-    Normalised through ``excerpts.width_key`` so "020" files where "20" does.
+    Normalised via ``excerpts.width_key``, so "020" and "20" give the same key.
     """
     if value == excerpts.FULL_KEY:
         return value
@@ -1417,11 +1406,11 @@ def main(argv: list[str] | None = None) -> int:
     # Loaded before anything else uses it so an unknown --prompt-version fails
     # on every path, --print and --dry-run included.
     prompts = load_prompt_set(args.prompt_version)
-    # Ordered as PASSES whatever order they were named in, and deduplicated.
+    # Deduplicated and in PASSES order, however they were named.
     passes = tuple(name for name in PASSES if name in args.passes)
 
-    # Before --print and --dry-run, which fill the prompts too. Only a round
-    # filling {descriptions} reads the student-state file.
+    # Before --print and --dry-run, which also fill prompts. The student-state
+    # file is read only if an over-scaffolding prompt with {descriptions} runs.
     over_template = prompts.templates["over_scaffolding"]
     if "over_scaffolding" in passes and "{" + DESCRIPTIONS_SLOT + "}" in over_template:
         attach_descriptions(excerpts, load_student_state())

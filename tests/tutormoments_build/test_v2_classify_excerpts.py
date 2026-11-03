@@ -871,7 +871,7 @@ def test_load_excerpts_raises_when_nothing_is_there(tmp_path):
 def test_prediction_dir_flattens_a_vendor_prefixed_id():
     """A vendor-prefixed id must not nest two directories."""
     assert C.prediction_dir("out", "deepseek-ai/DeepSeek-V4-Pro", "1") == os.path.join(
-        "out", "deepseek-ai_DeepSeek-V4-Pro", "1", "full"
+        "out", "deepseek-ai_DeepSeek-V4-Pro", "1", "20"
     )
 
 
@@ -1073,7 +1073,7 @@ def test_predictions_are_filed_under_the_model_that_made_them(tmp_path, monkeypa
     )
 
     assert code == 0
-    path = out_dir / "claude-sonnet-5" / "1" / "full" / "iteration.jsonl"
+    path = out_dir / "claude-sonnet-5" / "1" / "20" / "iteration.jsonl"
     assert path.exists()
     record = json.loads(path.read_text(encoding="utf-8").splitlines()[0])
     assert record["model"] == "claude-sonnet-5"
@@ -1096,7 +1096,7 @@ def test_the_default_model_gets_its_own_directory_too(tmp_path, monkeypatch):
         ]
     )
 
-    assert (out_dir / "claude-opus-5" / "1" / "full" / "iteration.jsonl").exists()
+    assert (out_dir / "claude-opus-5" / "1" / "20" / "iteration.jsonl").exists()
 
 
 def test_the_chosen_model_reaches_the_batch(tmp_path, monkeypatch):
@@ -1327,29 +1327,29 @@ def test_missing_field_warns_with_the_rebuild_command(caplog):
 # ===========================================================================
 
 
-def test_both_prompts_are_filled_from_the_whole_transcript():
-    """Neither pass reads a lead-up window; both get the full rendering."""
+def test_both_prompts_are_filled_from_the_20_turn_window_by_default():
+    """By default both passes read the 20-turn lead-up, not the whole session."""
     entries, _ = C.build_entries([SCAFFOLDED], PROMPTS)
     by_key = {
         e["key"]: e["request"]["contents"][0]["parts"][0]["text"] for e in entries
     }
 
-    assert "whole transcript" in by_key["action__aaa"]
-    assert "whole transcript" in by_key["overscaffold__aaa"]
-    assert "wide lead-up" not in by_key["overscaffold__aaa"]
+    assert "wide lead-up" in by_key["action__aaa"]
+    assert "wide lead-up" in by_key["overscaffold__aaa"]
+    assert "whole transcript" not in by_key["overscaffold__aaa"]
 
 
-def test_excerpt_at_defaults_to_the_full_rendering():
-    assert C.EXCERPT_WIDTH == "full"
-    assert C.excerpt_at(SCAFFOLDED).startswith("whole transcript")
-    assert C.excerpt_at(SCAFFOLDED, "20").startswith("wide lead-up")
+def test_excerpt_at_defaults_to_the_20_turn_rendering():
+    assert C.EXCERPT_WIDTH == "20"
+    assert C.excerpt_at(SCAFFOLDED).startswith("wide lead-up")
+    assert C.excerpt_at(SCAFFOLDED, "full").startswith("whole transcript")
 
 
 def test_a_missing_width_names_the_rebuild_command():
-    """An excerpt file built before `full` existed must not silently truncate."""
+    """An excerpt file lacking the requested width must not silently fall back."""
     windowed_only = dict(SCAFFOLDED, excerpts={"5": {"excerpt": "x"}})
 
-    with pytest.raises(KeyError, match="v2.excerpts --context-turns full"):
+    with pytest.raises(KeyError, match="v2.excerpts --context-turns 20"):
         C.excerpt_at(windowed_only)
 
 
@@ -1357,8 +1357,8 @@ def test_the_widths_each_pass_used_are_recorded():
     record = C.build_record(SCAFFOLDED, RAW, CFG, PROMPTS)
 
     assert record["context_turns"] == {
-        "action_direction": "full",
-        "over_scaffolding": "full",
+        "action_direction": "20",
+        "over_scaffolding": "20",
     }
 
 
@@ -1378,20 +1378,20 @@ def test_context_turns_fills_both_prompts_from_that_window():
 
 
 def test_context_turns_is_recorded_and_files_the_round_apart(tmp_path, monkeypatch):
-    """A windowed round must not land on, or read as, the full-transcript one."""
+    """A full-transcript round must not land on, or read as, the default one."""
     monkeypatch.setattr(C, "run_entries", lambda entries, cfg, batch_id=None: RAW)
     out_dir = tmp_path / "out"
     args = ["--excerpt-dir", _write_excerpts(tmp_path), "--out-dir", str(out_dir)]
 
     assert C.main(args) == 0
-    assert C.main(args + ["--context-turns", "20"]) == 0
+    assert C.main(args + ["--context-turns", "full"]) == 0
 
-    (windowed,) = out_dir.glob("*/*/20/iteration.jsonl")
-    assert (windowed.parent.parent / "full" / "iteration.jsonl").exists()
-    record = json.loads(windowed.read_text(encoding="utf-8").splitlines()[0])
+    (whole,) = out_dir.glob("*/*/full/iteration.jsonl")
+    assert (whole.parent.parent / "20" / "iteration.jsonl").exists()
+    record = json.loads(whole.read_text(encoding="utf-8").splitlines()[0])
     assert record["context_turns"] == {
-        "action_direction": "20",
-        "over_scaffolding": "20",
+        "action_direction": "full",
+        "over_scaffolding": "full",
     }
 
 
@@ -1403,7 +1403,8 @@ def test_context_turns_rejects_what_is_not_a_width(value):
 
 def test_context_turns_is_normalised_to_the_excerpt_key():
     assert C.build_parser().parse_args(["--context-turns", "020"]).context_turns == "20"
-    assert C.build_parser().parse_args([]).context_turns == "full"
+    assert C.build_parser().parse_args([]).context_turns == "20"
+    assert C.build_parser().parse_args(["--context-turns", "full"]).context_turns == "full"
 
 
 # ===========================================================================
@@ -1427,14 +1428,14 @@ def test_a_second_round_refuses_to_replace_the_first(tmp_path, monkeypatch):
     ]
 
     assert C.main(argv) == 0
-    written = (out_dir / "claude-opus-5" / "1" / "full" / "iteration.jsonl").read_text(
+    written = (out_dir / "claude-opus-5" / "1" / "20" / "iteration.jsonl").read_text(
         encoding="utf-8"
     )
 
     with pytest.raises(FileExistsError, match="--overwrite"):
         C.main(argv)
 
-    assert (out_dir / "claude-opus-5" / "1" / "full" / "iteration.jsonl").read_text(
+    assert (out_dir / "claude-opus-5" / "1" / "20" / "iteration.jsonl").read_text(
         encoding="utf-8"
     ) == written
 
@@ -1470,7 +1471,7 @@ def test_overwrite_replaces_the_earlier_round(tmp_path, monkeypatch):
 
     assert C.main(argv) == 0
     assert C.main(argv + ["--overwrite"]) == 0
-    assert (out_dir / "claude-opus-5" / "1" / "full" / "iteration.jsonl").exists()
+    assert (out_dir / "claude-opus-5" / "1" / "20" / "iteration.jsonl").exists()
 
 
 def test_a_new_prompt_version_is_not_an_overwrite(tmp_path, monkeypatch):
@@ -1490,8 +1491,8 @@ def test_a_new_prompt_version_is_not_an_overwrite(tmp_path, monkeypatch):
     assert C.main(argv + ["--prompt-version", "1"]) == 0
     assert C.main(argv + ["--prompt-version", "2"]) == 0
 
-    assert (out_dir / "claude-opus-5" / "1" / "full" / "iteration.jsonl").exists()
-    assert (out_dir / "claude-opus-5" / "2" / "full" / "iteration.jsonl").exists()
+    assert (out_dir / "claude-opus-5" / "1" / "20" / "iteration.jsonl").exists()
+    assert (out_dir / "claude-opus-5" / "2" / "20" / "iteration.jsonl").exists()
 
 
 # ===========================================================================
