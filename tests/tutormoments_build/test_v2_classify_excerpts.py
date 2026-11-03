@@ -1404,7 +1404,9 @@ def test_context_turns_rejects_what_is_not_a_width(value):
 def test_context_turns_is_normalised_to_the_excerpt_key():
     assert C.build_parser().parse_args(["--context-turns", "020"]).context_turns == "20"
     assert C.build_parser().parse_args([]).context_turns == "20"
-    assert C.build_parser().parse_args(["--context-turns", "full"]).context_turns == "full"
+    assert (
+        C.build_parser().parse_args(["--context-turns", "full"]).context_turns == "full"
+    )
 
 
 # ===========================================================================
