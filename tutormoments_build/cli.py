@@ -8,6 +8,9 @@ Subcommands:
                               released dataset @ revision -> facet-level A-M
                               classifications (action_taxonomy.jsonl + manifest)
   viewer                      annotation review site (maintainer-local, never committed)
+  release snapshot            freeze the release inputs in the bucket
+  release build               snapshot -> checked release build + manifest, in the bucket
+  release verify              re-check a finished build against its manifest
 
 These create or package the benchmark; the runtime `tutormoments` CLI only
 consumes released datasets.
@@ -316,7 +319,91 @@ def _build_parser() -> argparse.ArgumentParser:
         help="Release version string for manifest (default: 0)",
     )
 
+    _add_release_parser(subs, log_parent)
     return parser
+
+
+def _add_release_parser(subs, log_parent) -> None:
+    release_p = subs.add_parser(
+        "release",
+        help="Snapshot, build and verify the public data release (works in the bucket)",
+    )
+    release_subs = release_p.add_subparsers(dest="release_command")
+    common = argparse.ArgumentParser(add_help=False, parents=[log_parent])
+    common.add_argument(
+        "--root",
+        default=None,
+        help="s3://<bucket> of the de-identified bucket, or a local dir "
+        "(default: $TUTORMOMENTS_RELEASE_ROOT)",
+    )
+    common.add_argument(
+        "--release",
+        default="release-v2",
+        help="Release prefix inside the root (default: %(default)s)",
+    )
+
+    snap_p = release_subs.add_parser(
+        "snapshot", help="Freeze the release inputs", parents=[common]
+    )
+    snap_p.add_argument(
+        "--id",
+        dest="snapshot_id",
+        default=None,
+        help="Snapshot id (default: UTC minute)",
+    )
+    snap_p.add_argument(
+        "--dry-run",
+        action="store_true",
+        dest="dry_run",
+        help="List what would be frozen; copy nothing",
+    )
+
+    build_p = release_subs.add_parser(
+        "build", help="Build and check a release from a snapshot", parents=[common]
+    )
+    build_p.add_argument("--snapshot", required=True, dest="snapshot_id")
+    build_p.add_argument(
+        "--allow-dirty",
+        action="store_true",
+        dest="allow_dirty",
+        help="Build from uncommitted code (recorded in the manifest)",
+    )
+
+    verify_p = release_subs.add_parser(
+        "verify",
+        help="Re-check a finished build against its manifest",
+        parents=[common],
+    )
+    verify_p.add_argument("--build", required=True, dest="build_id")
+
+
+def _cmd_release(args) -> None:
+    from tutormoments_build.release.build import run_build, verify_build
+    from tutormoments_build.release.snapshot import create_snapshot
+    from tutormoments_build.release.store import open_store, resolve_root
+
+    store = open_store(resolve_root(args.root))
+    if args.release_command == "snapshot":
+        record = create_snapshot(
+            store,
+            release=args.release,
+            snapshot_id=args.snapshot_id,
+            dry_run=args.dry_run,
+        )
+        for key in record["inputs"]:
+            logger.info("  %s", key)
+    elif args.release_command == "build":
+        manifest = run_build(
+            store, args.snapshot_id, release=args.release, allow_dirty=args.allow_dirty
+        )
+        logger.info("build id: %s", manifest["build_id"])
+    else:
+        problems = verify_build(store, args.build_id, release=args.release)
+        for problem in problems:
+            logger.error("%s", problem)
+        if problems:
+            raise SystemExit(f"build {args.build_id}: {len(problems)} problem(s)")
+        logger.info("build %s verified", args.build_id)
 
 
 def _cmd_build_action_taxonomy(args, command_line: str) -> None:
@@ -416,8 +503,10 @@ def main(argv=None) -> None:
     parser = _build_parser()
     args = parser.parse_args(argv)
 
-    if args.command is None or (
-        args.command == "dataset" and not getattr(args, "dataset_command", None)
+    if (
+        args.command is None
+        or (args.command == "dataset" and not getattr(args, "dataset_command", None))
+        or (args.command == "release" and not getattr(args, "release_command", None))
     ):
         parser.print_help()
         sys.exit(0 if args.command is None else 1)
@@ -430,6 +519,9 @@ def main(argv=None) -> None:
 
     if args.command == "viewer":
         _cmd_viewer(args)
+        return
+    if args.command == "release":
+        _cmd_release(args)
         return
 
     from tutormoments_build.moments_build import (

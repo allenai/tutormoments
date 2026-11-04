@@ -1,0 +1,100 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "transcript_core.schema.json",
+  "title": "Transcript core contract",
+  "description": "The fields every provider's transcripts carry, with the same names and meanings. Each `transcripts/<source>.jsonl` row also validates against its provider's own strict schema; this one allows extra fields so provider-specific data passes through. Code written against these fields alone works on every provider.",
+  "type": "object",
+  "required": [
+    "transcript_id",
+    "source",
+    "batch",
+    "has_video",
+    "turns",
+    "session"
+  ],
+  "properties": {
+    "transcript_id": {
+      "type": "string",
+      "pattern": "^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$",
+      "description": "UUIDv5 surrogate for the transcript. Primary key; annotations and moments join on it."
+    },
+    "source": {
+      "type": "string",
+      "pattern": "^tutoring_provider_[a-z]+$",
+      "description": "The provider this transcript came from; matches the file name. Pattern `tutoring_provider_<letter>`."
+    },
+    "batch": {
+      "type": "string",
+      "minLength": 1,
+      "description": "Partner delivery this transcript came from."
+    },
+    "has_video": {
+      "type": "boolean",
+      "description": "Whether the partner provided a recording of the session. Recordings are not released."
+    },
+    "turns": {
+      "type": "array",
+      "minItems": 1,
+      "description": "Ordered dialogue turns. `turn_number` is the order authority.",
+      "items": {
+        "type": "object",
+        "required": [
+          "turn_number",
+          "role",
+          "text",
+          "start_seconds"
+        ],
+        "properties": {
+          "turn_number": {
+            "type": "integer",
+            "minimum": 1,
+            "description": "1-indexed position in the transcript. Annotations refer to turns by this number."
+          },
+          "role": {
+            "type": "string",
+            "enum": [
+              "Tutor",
+              "Student",
+              "Unattributed"
+            ],
+            "description": "The speaker. `Unattributed` is speech assigned to neither participant; not every provider uses it."
+          },
+          "text": {
+            "type": "string",
+            "description": "What the speaker said. De-identified with surrogate names; names that are part of problem content (e.g. a word problem) may be left unchanged."
+          },
+          "start_seconds": {
+            "type": "number",
+            "description": "Offset of the turn's start, in seconds. Where zero falls is provider-specific; some providers also give `end_seconds`."
+          }
+        }
+      }
+    },
+    "session": {
+      "type": "object",
+      "required": [
+        "session_id",
+        "tutor_id",
+        "student_id"
+      ],
+      "description": "Surrogate identifiers for the session and its participants. Providers add their own session fields alongside these.",
+      "properties": {
+        "session_id": {
+          "type": "string",
+          "pattern": "^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$",
+          "description": "UUIDv5 surrogate for the partner's session ID."
+        },
+        "tutor_id": {
+          "type": "string",
+          "pattern": "^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$",
+          "description": "UUIDv5 surrogate for the partner's tutor ID. Stable across this tutor's sessions. Not shared across providers."
+        },
+        "student_id": {
+          "type": "string",
+          "pattern": "^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$",
+          "description": "UUIDv5 surrogate for the partner's student ID. Stable across this student's sessions. Not shared across providers. Joins to the provider's assessments file."
+        }
+      }
+    }
+  }
+}

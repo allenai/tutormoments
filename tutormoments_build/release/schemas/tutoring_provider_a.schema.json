@@ -1,0 +1,221 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "tutoring_provider_a.schema.json",
+  "title": "transcripts/tutoring_provider_a.jsonl",
+  "description": "One de-identified Tutoring Provider A transcript per line, unique on `transcript_id`. Every row also satisfies `transcript_core.schema.json`.",
+  "type": "object",
+  "additionalProperties": false,
+  "required": [
+    "transcript_id",
+    "source",
+    "batch",
+    "has_video",
+    "turns",
+    "session",
+    "eedi_content_link"
+  ],
+  "properties": {
+    "transcript_id": {
+      "type": "string",
+      "format": "uuid",
+      "description": "UUIDv5 surrogate for the transcript. Primary key; annotations and moments join on it."
+    },
+    "source": {
+      "type": "string",
+      "const": "tutoring_provider_a",
+      "description": "The provider this transcript came from; matches the file name."
+    },
+    "batch": {
+      "type": "string",
+      "description": "Partner delivery this transcript came from. Six deliveries, e.g. `\"2025-10-16\"`."
+    },
+    "has_video": {
+      "type": "boolean",
+      "description": "Whether the partner provided a recording of the session. Recordings are not released."
+    },
+    "turns": {
+      "type": "array",
+      "minItems": 1,
+      "items": {
+        "$ref": "#/$defs/Turn"
+      },
+      "description": "Ordered dialogue turns. `turn_number` is the order authority."
+    },
+    "session": {
+      "$ref": "#/$defs/Session",
+      "description": "Surrogate identifiers for the session and its participants. Also carries Provider A's session metadata."
+    },
+    "eedi_content_link": {
+      "type": "array",
+      "description": "Eedi quiz sessions overlapping this tutoring session, matched on start and end times. May be empty. A tutoring session can overlap several quiz sessions when a quiz started near the end of one tutoring session and finished after the start of another.",
+      "items": {
+        "$ref": "#/$defs/EediContentLink"
+      }
+    },
+    "enrichments": {
+      "type": "array",
+      "description": "Screen, pause and problem-change events narrated from the session video by Gemini. Present only on rows from the 2025-10-16 batch (~1% of the corpus); absent on all others.",
+      "items": {
+        "$ref": "#/$defs/Enrichment"
+      }
+    }
+  },
+  "$defs": {
+    "Turn": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "turn_number",
+        "start_seconds",
+        "end_seconds",
+        "role",
+        "text"
+      ],
+      "properties": {
+        "turn_number": {
+          "type": "integer",
+          "minimum": 1,
+          "description": "1-indexed position in the transcript. Annotations refer to turns by this number."
+        },
+        "start_seconds": {
+          "type": "number",
+          "description": "Offset of the turn's start, in seconds. Measured from the start of the recording."
+        },
+        "end_seconds": {
+          "type": "number",
+          "description": "Offset of the turn's end, in seconds, from the start of the recording."
+        },
+        "role": {
+          "type": "string",
+          "enum": [
+            "Student",
+            "Tutor"
+          ],
+          "description": "The speaker. Provider A uses only `Tutor` and `Student`."
+        },
+        "text": {
+          "type": "string",
+          "description": "What the speaker said. De-identified with surrogate names; names that are part of problem content (e.g. a word problem) may be left unchanged."
+        }
+      }
+    },
+    "Session": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "session_id",
+        "tutor_id",
+        "student_id",
+        "transcription_by",
+        "primary_language"
+      ],
+      "properties": {
+        "session_id": {
+          "type": "string",
+          "format": "uuid",
+          "description": "UUIDv5 surrogate for the partner's session ID."
+        },
+        "tutor_id": {
+          "type": "string",
+          "format": "uuid",
+          "description": "UUIDv5 surrogate for the partner's tutor ID. Stable across this tutor's sessions."
+        },
+        "student_id": {
+          "type": "string",
+          "format": "uuid",
+          "description": "UUIDv5 surrogate for the partner's student ID. Stable across this student's sessions. Joins to `assessments/tutoring_provider_a.jsonl` `student_id`."
+        },
+        "transcription_by": {
+          "type": "string",
+          "description": "Who produced the transcript. Observed values: `\"LS\"`, `\"tutoring_provider_a\"` (the provider's own pipeline), `\"tutoring_provider_a (Gemini 2.5 Pro)\"` (2025-10-16 batch only)."
+        },
+        "primary_language": {
+          "type": "string",
+          "description": "ISO 639-1 code supplied by the partner (e.g. `\"en\"`, `\"es\"`); empty string when unknown."
+        },
+        "session_date": {
+          "type": "string",
+          "format": "date",
+          "description": "Session date (YYYY-MM-DD), shifted by a per-student random offset. Intervals within one student are preserved; absolute dates and comparisons across students are not."
+        },
+        "uses_provider_ai_tools": {
+          "type": "string",
+          "description": "Partner-supplied flag, `\"1\"` or `\"0\"`. Indicates whether the provider's AI tutoring assistance was available during the session."
+        }
+      },
+      "description": "Surrogate identifiers for the session and its participants. Also carries Provider A's session metadata."
+    },
+    "EediContentLink": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "quiz_session_id"
+      ],
+      "properties": {
+        "quiz_session_id": {
+          "type": "string",
+          "format": "uuid",
+          "description": "Joins to `assessments/tutoring_provider_a.jsonl` `quiz_session_id`."
+        },
+        "start_seconds": {
+          "type": "number",
+          "description": "Offset in seconds from the tutoring session's recording start to when the linked quiz session started (wall-clock anchor, NOT bounded by recording length). Can be arbitrarily negative — a student may have opened the quiz minutes, hours, days, or longer before the recording began. To find when the quiz was active *during this recording*, intersect with the recording window: `max(0, start_seconds)`."
+        },
+        "end_seconds": {
+          "type": "number",
+          "description": "Offset in seconds from the tutoring session's recording start to when the linked quiz session completed (wall-clock anchor, NOT bounded by recording length). Can extend arbitrarily far past the recording when the quiz was finished later. Absent when the quiz was not completed. To find when the quiz was active *during this recording*, intersect with the recording window: `min(recording_length, end_seconds)`."
+        }
+      }
+    },
+    "Enrichment": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "enrichment_number",
+        "type",
+        "start_seconds",
+        "end_seconds",
+        "before_turn",
+        "label",
+        "content"
+      ],
+      "properties": {
+        "enrichment_number": {
+          "type": "integer",
+          "minimum": 1,
+          "description": "1-based position in enrichments[], mirroring turn_number. The canonical handle for referencing an enrichment: (transcript_id, enrichment_number). Positional (raw line order), not timestamp-derived — enrichments may share identical start_seconds/end_seconds."
+        },
+        "type": {
+          "type": "string",
+          "enum": [
+            "pause",
+            "screen_update",
+            "screen_interaction",
+            "problem_change",
+            "other"
+          ]
+        },
+        "start_seconds": {
+          "type": "number"
+        },
+        "end_seconds": {
+          "type": "number"
+        },
+        "before_turn": {
+          "type": [
+            "integer",
+            "null"
+          ],
+          "description": "Turn number this enrichment precedes; null when after the final turn. May not be precise in all cases."
+        },
+        "label": {
+          "type": "string"
+        },
+        "content": {
+          "type": "string",
+          "description": "Description of what happened in the session video with PII surrogated. Generated by a Gemini-based pipeline. May be empty. Present only for the 2025-10-16 batch."
+        }
+      }
+    }
+  }
+}
