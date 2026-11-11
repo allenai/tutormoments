@@ -23,7 +23,7 @@ CLI `tutormoments-build release snapshot|build|verify`.
 | 1 | `transcripts/<provider>.jsonl` | Schemas approved 2026-11-04; writer done; first real build 2026-11-11 (below) | Screenshot fields wait on stage 6 |
 | 2 | `annotations/<provider>.jsonl` | Schema, writer and guide in PR #98 (stacked on #97); first real build 2026-11-11 (below) | Review of #98 and the build by the annotation manager and Albert; one data-quality decision pending (internal). The `transcript_selection` change (2026-11-11) is not in that build |
 | 3 | `benchmark/dev.jsonl`, `test.jsonl` | Schema approved 2026-11-11; schema and writer in PR #99 (stacked on #98) | The stage 2 data-quality decision changes provider C's labels, so no C build is reviewed before it |
-| 4 | `benchmark/moments.jsonl` | Schema approved 2026-11-11; writer on `feature/v2-moments` (stacked on #99) | Open research questions (persona, continuation length) are runtime choices; the runtime needs a v2 loader and a wait-time tool |
+| 4 | `benchmark/moments.jsonl` | Schema approved 2026-11-11; schema and writer in PR #100 (stacked on #99) | Open research questions (persona, continuation length) are runtime choices; the runtime needs a v2 loader and a wait-time tool |
 | 5 | `assessments/`, `reference/eedi_*` | Not started | Full release vs annotated students only; C's third-party LaTeX renderer links |
 | 6 | `screenshots/<transcript_id>/` | Waiting on the de-identified set | Layout, transcript `seconds`/`path` fields, OCR text |
 | 7 | `manifest.json` schema, README dataset card | Not started (builds already write a manifest) | Card carries A's two dropped fields and the surrogate-name caveat |
@@ -122,7 +122,7 @@ All in the de-identified bucket, under `release-v2/`.
 
 1. Review #97, then #98 and build `20261111T1640Z-a12705f` (finish its `verify`).
 2. Review #99 (benchmark labels schema and writer).
-3. Review the stage 4 moments writer (`feature/v2-moments`, stacked on #99).
+3. Review #100 (benchmark moments schema and writer).
 4. Apply the pending data-quality decision in the annotations writer, then one new snapshot and build: corrected annotations plus the first benchmark labels and moments.
 5. Make the first release and bring the research path into sync with it; then every experiment run logs the release (build) ID it used. Decide the release workflow (open decision above) before the second release.
 6. Runtime (separate from the release): a v2 moments loader, a wait-time tool for the replay tutor, runs recording the build ID and the moments file's sha256. Scorer: the over-scaffolding prompt is gated on the human tutor's gold scaffolding label, which a replay lacks.
