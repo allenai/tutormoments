@@ -21,7 +21,7 @@ CLI `tutormoments-build release snapshot|build|verify`.
 |---|---|---|---|
 | 0 | Plumbing: snapshot, build, checks, manifest, verify | Done (`f9f4aac`) | Push + PR into `v2` |
 | 1 | `transcripts/<provider>.jsonl` | Schemas approved 2026-11-04; writer done | First real snapshot + build. Screenshot fields wait on stage 6 |
-| 2 | `annotations/<provider>.jsonl` | Data reviewed and schema approved 2026-11-11; annotation guide added | One data-quality decision pending (internal); then the writer |
+| 2 | `annotations/<provider>.jsonl` | Schema approved and writer done 2026-11-11; builds ship `docs/annotation_guide.md` | One data-quality decision pending (internal) |
 | 3 | `benchmark/dev.jsonl`, `test.jsonl` | Not started | Schema draft from `ground_truth_v2` output |
 | 4 | `benchmark/moments.jsonl` | Not started | Builder rules (benchmark-defining: needs sign-off), student persona, context format, runtime loader |
 | 5 | `assessments/`, `reference/eedi_*` | Not started | Full release vs annotated students only; C's third-party LaTeX renderer links |
@@ -57,6 +57,8 @@ CLI `tutormoments-build release snapshot|build|verify`.
   - Field descriptions follow the annotators' guiding sheet.
 - **Annotation guide** ships as `docs/annotation_guide.md` (`release/docs/annotation_guide.md`): the annotators' guiding sheet with its comments, feedback tab, images (crossed out in the source), internal notes and author line removed; the guidance text is otherwise word for word.
 
-## Next: annotations writer (stage 2)
+## Annotations writer (stage 2)
 
-Build `annotations/<provider>.jsonl` from `v2_annotations/source/<provider>_annotations.jsonl` (refreshed nightly; builds read only the frozen snapshot copy) to the approved schema, with tests on synthetic rows. Wait on the pending data-quality decision before the first real snapshot; the writer should support excluding a set of annotators' entries.
+`release/annotations.py` builds `annotations/<provider>.jsonl` from the frozen `v2_annotations/source/<provider>_annotations.jsonl` (the nightly export) and `annotator_labels.json`. It fails on an annotator with no label and on any export field it does not list as kept or dropped, so upstream additions are reviewed before they ship. Builds also copy the packaged docs (`release/docs/`) to `docs/`.
+
+Open: the pending data-quality decision may change which entries ship; it will be applied in the writer and recorded here.
