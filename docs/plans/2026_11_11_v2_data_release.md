@@ -21,7 +21,7 @@ CLI `tutormoments-build release snapshot|build|verify`.
 |---|---|---|---|
 | 0 | Plumbing: snapshot, build, checks, manifest, verify | Done (`f9f4aac`) | Push + PR into `v2` |
 | 1 | `transcripts/<provider>.jsonl` | Schemas approved 2026-11-04; writer done | First real snapshot + build. Screenshot fields wait on stage 6 |
-| 2 | `annotations/<provider>.jsonl` | Not started | Schema draft (below) |
+| 2 | `annotations/<provider>.jsonl` | Data reviewed and schema approved 2026-11-11; annotation guide added | One data-quality decision pending (internal); then the writer |
 | 3 | `benchmark/dev.jsonl`, `test.jsonl` | Not started | Schema draft from `ground_truth_v2` output |
 | 4 | `benchmark/moments.jsonl` | Not started | Builder rules (benchmark-defining: needs sign-off), student persona, context format, runtime loader |
 | 5 | `assessments/`, `reference/eedi_*` | Not started | Full release vs annotated students only; C's third-party LaTeX renderer links |
@@ -47,16 +47,16 @@ CLI `tutormoments-build release snapshot|build|verify`.
   7,110 programs have sessions; the other 78 are programs whose sessions were all
   excluded.
 
-## Next: annotations (stage 2)
+- **Annotations** ship as one schema for all providers (`release/schemas/annotations.schema.json`), one row per moment or per "no key moments" record, with every annotator's entry on it. Approved 2026-11-11:
+  - `purpose` is `rigor_scaffolding` and `batch` is `v2`; later kinds of annotation or passes become new values.
+  - Annotator names are stripped and IDs replaced by labels; the writer fails on any unmapped ID.
+  - Each entry's answers ship exactly as exported, so the ground-truth build can be rerun from the release.
+  - Dropped: retracted moments (A 3, C 1); earlier saves of the same role by the same annotator (the last save is kept, as `build_ground_truth.py` does) and `revision`; A's turn-by-turn `transcript_selection`; the transcript fingerprints (`selection_source_sha256`, `corpus_revision`), which match no released transcript file; the tool-computed turn counts (`dialogue_turns` and variants), wrong on 17 early A moments.
+  - Kept: thrown-out moments with their status, A's `enrichment_numbers`, and the v1 rigor hint fields, so researchers can account for annotators being shown hints.
+  - No summary fields (outcome, agreement): resolved labels belong in `benchmark/`.
+  - Field descriptions follow the annotators' guiding sheet.
+- **Annotation guide** ships as `docs/annotation_guide.md` (`release/docs/annotation_guide.md`): the annotators' guiding sheet with its comments, feedback tab, images (crossed out in the source), internal notes and author line removed; the guidance text is otherwise word for word.
 
-Draft the schema for review. Known requirements:
+## Next: annotations writer (stage 2)
 
-- One schema for all providers; annotator names stripped (the export carries
-  them); annotator IDs replaced by labels, failing on any unmapped ID.
-- A `purpose` field so later kinds (e.g. gold replay classifications) are new
-  values, not new schemas, plus `batch` for later passes. Decide whether replay
-  classifications need a `replays/` file to join to.
-- Proposed summary fields: `outcome`, `n_adjudicators`, `adjudicators_agree`,
-  `duplicate_of`. C's `corpus_revision` becomes `transcript_revision`.
-- Inputs: `v2_annotations/source/<provider>_annotations.jsonl` (refreshed nightly;
-  builds read only the frozen snapshot copy).
+Build `annotations/<provider>.jsonl` from `v2_annotations/source/<provider>_annotations.jsonl` (refreshed nightly; builds read only the frozen snapshot copy) to the approved schema, with tests on synthetic rows. Wait on the pending data-quality decision before the first real snapshot; the writer should support excluding a set of annotators' entries.

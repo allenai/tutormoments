@@ -1,0 +1,796 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "annotations.schema.json",
+  "title": "annotations/<source>.jsonl",
+  "description": "Expert teacher annotations of tutoring transcripts. There is one file per provider, and every provider is on this one schema. A row is one moment (a stretch of transcript an annotator selected as a teaching decision point) with every annotator's entry on it, or one annotator's record that a transcript had no such moment (`moment` is null). Each moment passed through three roles: a selector picked it and annotated it, a reannotator annotated it independently and may move its boundaries or throw it out, and one or two adjudicators settled the final answer. Annotators appear as stable labels (`A01` and so on), one per person across providers. The instructions the annotators followed are in `docs/annotation_guide.md`.",
+  "type": "object",
+  "additionalProperties": false,
+  "required": [
+    "transcript_id",
+    "source",
+    "purpose",
+    "batch",
+    "moment",
+    "v1_rigor_hinted",
+    "v1_rigor_regions",
+    "annotations"
+  ],
+  "properties": {
+    "transcript_id": {
+      "type": "string",
+      "pattern": "^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$",
+      "description": "UUIDv5 surrogate for the annotated transcript. Joins to `transcripts/<source>.jsonl` `transcript_id`."
+    },
+    "source": {
+      "type": "string",
+      "pattern": "^tutoring_provider_[a-z]+$",
+      "description": "The provider the transcript came from; matches the file name."
+    },
+    "purpose": {
+      "type": "string",
+      "enum": [
+        "rigor_scaffolding"
+      ],
+      "description": "What the annotation was for. `rigor_scaffolding`: selecting the moments where the tutor had to choose between scaffolding and pushing for rigor, and judging the tutor's choice."
+    },
+    "batch": {
+      "type": "string",
+      "enum": [
+        "v2"
+      ],
+      "description": "The annotation campaign this row came from."
+    },
+    "moment": {
+      "oneOf": [
+        {
+          "$ref": "#/$defs/Moment"
+        },
+        {
+          "type": "null"
+        }
+      ],
+      "description": "The selected moment, as the selector drew it. Null on a row recording that the transcript had no key moments."
+    },
+    "v1_rigor_hinted": {
+      "type": "boolean",
+      "description": "Whether the annotation tool showed annotators where the earlier v1 annotations had marked rigor on this transcript. True on some provider A transcripts only. Researchers can use it to account for annotators being steered towards those regions."
+    },
+    "v1_rigor_regions": {
+      "type": "array",
+      "description": "The turn ranges shown as v1 rigor hints, each as [first turn, last turn]. Empty unless `v1_rigor_hinted`.",
+      "items": {
+        "type": "array",
+        "prefixItems": [
+          {
+            "type": "integer",
+            "minimum": 1
+          },
+          {
+            "type": "integer",
+            "minimum": 1
+          }
+        ],
+        "items": false,
+        "minItems": 2
+      }
+    },
+    "annotations": {
+      "type": "array",
+      "minItems": 1,
+      "description": "Every annotator's entry on the moment, in the order the tool recorded them. Where an annotator saved the same role more than once, only their last save is kept. A row with no moment has exactly one entry.",
+      "items": {
+        "$ref": "#/$defs/Entry"
+      }
+    }
+  },
+  "allOf": [
+    {
+      "if": {
+        "properties": {
+          "moment": {
+            "type": "null"
+          }
+        }
+      },
+      "then": {
+        "properties": {
+          "annotations": {
+            "maxItems": 1,
+            "items": {
+              "properties": {
+                "role": {
+                  "const": "selector"
+                },
+                "payload": {
+                  "$ref": "#/$defs/NoKeyMomentsPayload"
+                }
+              }
+            }
+          }
+        }
+      },
+      "else": {
+        "properties": {
+          "annotations": {
+            "items": {
+              "allOf": [
+                {
+                  "if": {
+                    "properties": {
+                      "role": {
+                        "const": "selector"
+                      }
+                    }
+                  },
+                  "then": {
+                    "properties": {
+                      "payload": {
+                        "$ref": "#/$defs/SelectorPayload"
+                      }
+                    }
+                  }
+                },
+                {
+                  "if": {
+                    "properties": {
+                      "role": {
+                        "const": "reannotator"
+                      }
+                    }
+                  },
+                  "then": {
+                    "properties": {
+                      "payload": {
+                        "$ref": "#/$defs/ReannotatorPayload"
+                      }
+                    }
+                  }
+                },
+                {
+                  "if": {
+                    "properties": {
+                      "role": {
+                        "const": "adjudicator"
+                      }
+                    }
+                  },
+                  "then": {
+                    "properties": {
+                      "payload": {
+                        "$ref": "#/$defs/AdjudicatorPayload"
+                      }
+                    }
+                  }
+                }
+              ]
+            }
+          }
+        }
+      }
+    }
+  ],
+  "$defs": {
+    "AnnotatorLabel": {
+      "type": "string",
+      "pattern": "^A[0-9]{2}$",
+      "description": "The annotator's ID. One label per person, the same in every provider's file."
+    },
+    "Turn": {
+      "type": "integer",
+      "minimum": 1,
+      "description": "A `turn_number` in the transcript."
+    },
+    "Moment": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "moment_id",
+        "start_turn",
+        "cut_turn",
+        "end_turn",
+        "status",
+        "selected_by",
+        "created_at",
+        "in_v1_rigor_region"
+      ],
+      "properties": {
+        "moment_id": {
+          "type": "string",
+          "pattern": "^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$",
+          "description": "UUIDv5 surrogate for the moment. Unique within the file; benchmark rows refer to moments by it."
+        },
+        "start_turn": {
+          "$ref": "#/$defs/Turn",
+          "description": "First turn of the moment: the start of the situation that leads to the tutor's decision."
+        },
+        "cut_turn": {
+          "$ref": "#/$defs/Turn",
+          "description": "The last turn before the tutor's decision. The benchmark gives a model the transcript up to and including this turn."
+        },
+        "end_turn": {
+          "$ref": "#/$defs/Turn",
+          "description": "Last turn of the moment. A moment ends after the tutor's first strategy decision following the cut and the student's response to it."
+        },
+        "status": {
+          "type": "string",
+          "enum": [
+            "adjudicated",
+            "thrown_out"
+          ],
+          "description": "`adjudicated`: the moment went through every role and has a final answer. `thrown_out`: a later role ruled the selection unusable (see the entries' `meta.throw_out_reason`)."
+        },
+        "selected_by": {
+          "$ref": "#/$defs/AnnotatorLabel",
+          "description": "The annotator who selected the moment."
+        },
+        "created_at": {
+          "type": "string",
+          "format": "date-time",
+          "description": "When the moment was selected (UTC)."
+        },
+        "in_v1_rigor_region": {
+          "type": [
+            "boolean",
+            "null"
+          ],
+          "description": "Whether the moment overlaps a v1 rigor hint. Null where the transcript had no hints."
+        }
+      }
+    },
+    "Entry": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "annotator",
+        "role",
+        "created_at",
+        "interface_version",
+        "schema_version",
+        "payload"
+      ],
+      "properties": {
+        "annotator": {
+          "$ref": "#/$defs/AnnotatorLabel"
+        },
+        "role": {
+          "type": "string",
+          "enum": [
+            "selector",
+            "reannotator",
+            "adjudicator"
+          ],
+          "description": "The annotator's role on this moment. Sets the shape of `payload`."
+        },
+        "created_at": {
+          "type": "string",
+          "format": "date-time",
+          "description": "When the entry was saved (UTC)."
+        },
+        "interface_version": {
+          "type": "string",
+          "pattern": "^[0-9]+\\.[0-9]+\\.[0-9]+$",
+          "description": "Version of the annotation tool the entry was saved in."
+        },
+        "schema_version": {
+          "type": "string",
+          "enum": [
+            "2.5",
+            "2.6",
+            "2.7"
+          ],
+          "description": "Version of the tool's answer format. The payload fields are the same across these versions."
+        },
+        "enrichment_numbers": {
+          "type": "array",
+          "description": "Provider A only: the transcript's `enrichments` (screen events narrated from the video) that fall inside the stretch this entry annotated, by `enrichment_number`.",
+          "items": {
+            "type": "integer",
+            "minimum": 1
+          }
+        },
+        "payload": {
+          "type": "object",
+          "description": "The annotator's answers. Its shape depends on `role`, or is a no-key-moments record when the row has no moment."
+        }
+      }
+    },
+    "Situation": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "scaffolding_appropriate",
+        "rigor_appropriate",
+        "why"
+      ],
+      "description": "What strategy the moment called for, judged from the transcript up to the cut. Both can be true.",
+      "properties": {
+        "scaffolding_appropriate": {
+          "type": "boolean",
+          "description": "Scaffolding the student would be an appropriate move here."
+        },
+        "rigor_appropriate": {
+          "type": "boolean",
+          "description": "Pushing the student for rigor would be an appropriate move here."
+        },
+        "why": {
+          "type": "string",
+          "description": "The annotator's reasoning."
+        }
+      }
+    },
+    "Action": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "scaffolding_present",
+        "scaffolding_amount",
+        "scaffolding_strategies",
+        "scaffolding_strategy_other",
+        "over_scaffolding_reasons",
+        "rigor_present",
+        "rigor_amount",
+        "rigor_strategies",
+        "rigor_strategy_other",
+        "explanation"
+      ],
+      "description": "The tutor's first strategy decision after the cut, up to the end of the moment. The tutor may have scaffolded, pushed for rigor, both, or neither.",
+      "properties": {
+        "scaffolding_present": {
+          "type": "boolean",
+          "description": "The tutor scaffolded: gave support that makes the task more accessible to the student."
+        },
+        "scaffolding_amount": {
+          "enum": [
+            "appropriate",
+            "over_scaffolding",
+            "under_scaffolding",
+            "unclear",
+            null
+          ],
+          "description": "Whether the amount of scaffolding was right. `over_scaffolding`: too much support, replacing the student's thinking. `under_scaffolding`: too little. `appropriate`: the right level, even if aimed at the wrong difficulty (the annotator then says so in `explanation`). `unclear`: hard to tell. Null when `scaffolding_present` is false."
+        },
+        "scaffolding_strategies": {
+          "type": "array",
+          "uniqueItems": true,
+          "description": "Scaffolding strategies the tutor used. `guiding_questions`: questions leading the student towards the solution. `break_into_steps`: breaks the problem into steps. `re_explain`: re-explains a concept (different example, metaphor or phrasing). `re_explain_procedure`: re-explains a procedure (likewise). `model_example`: models an example solution. `co_solve`: solves some steps for the student. `simpler_language`: rephrases the problem more simply, or gives a simpler alternative. `draw_diagram`: draws a diagram. `different_representation`: represents the problem differently (another form, a real-world analogy). `reduce_options`: narrows the answer options. `hint`: gives a starting point. `remind_prior_problem`: points back to a similar earlier problem. `highlight_problem_text`: highlights parts of the problem text. `give_answer`: gives away the answer. `state_correction`: states a correction.",
+          "items": {
+            "enum": [
+              "break_into_steps",
+              "co_solve",
+              "different_representation",
+              "draw_diagram",
+              "give_answer",
+              "guiding_questions",
+              "highlight_problem_text",
+              "hint",
+              "model_example",
+              "re_explain",
+              "re_explain_procedure",
+              "reduce_options",
+              "remind_prior_problem",
+              "simpler_language",
+              "state_correction"
+            ]
+          }
+        },
+        "scaffolding_strategy_other": {
+          "type": "string",
+          "description": "Free-text strategy not in the list; empty when none."
+        },
+        "over_scaffolding_reasons": {
+          "type": "array",
+          "uniqueItems": true,
+          "description": "How the tutor over-scaffolded. Empty unless `scaffolding_amount` is `over_scaffolding`. Each means the tutor unnecessarily: `most_cognitive_work` did most of the cognitive work; `no_opening_contribute` gave no opening for the student to contribute; `no_opening_demonstrate` gave no opening for the student to show what they can do; `procedural_insufficient_reasoning` reduced the task to procedural steps with too little reasoning; `premature_scaffolding` scaffolded before the student had shown what they can do; `gives_away_answers` gave away answers or key steps; `over_explains` over-explained; `re_scaffolds` scaffolded the same procedure or concept too many times; `oversimplifies` oversimplified the problem; `fails_to_fade` failed to fade the scaffolding; `jumps_in_struggle` jumped in during productive struggle.",
+          "items": {
+            "enum": [
+              "fails_to_fade",
+              "gives_away_answers",
+              "jumps_in_struggle",
+              "most_cognitive_work",
+              "no_opening_contribute",
+              "no_opening_demonstrate",
+              "over_explains",
+              "oversimplifies",
+              "premature_scaffolding",
+              "procedural_insufficient_reasoning",
+              "re_scaffolds"
+            ]
+          }
+        },
+        "rigor_present": {
+          "type": "boolean",
+          "description": "The tutor pushed for rigor: raised the conceptual challenge to build critical thinking, independence and deeper understanding."
+        },
+        "rigor_amount": {
+          "enum": [
+            "strong",
+            "weak",
+            "unclear",
+            null
+          ],
+          "description": "How strong the push for rigor was. `strong`: the student is expected to demonstrate and communicate deep knowledge, e.g. explain why something works or find their own mistakes. `weak`: the tutor seems to intend a push but falls short, e.g. a question answerable by guessing, recall or following leading prompts. `unclear`: hard to tell, or in between. Null when `rigor_present` is false."
+        },
+        "rigor_strategies": {
+          "type": "array",
+          "uniqueItems": true,
+          "description": "Rigor strategies the tutor used. `justify_explain`: asks the student to justify or explain an answer, solution or process. `withdraw_support`: lets the student work independently or struggle productively. `increase_complexity`: raises the problem's complexity or difficulty. `define_term`: asks the student to define or use a key mathematical term. `find_fix_errors`: asks the student to find and fix their own errors.",
+          "items": {
+            "enum": [
+              "define_term",
+              "find_fix_errors",
+              "increase_complexity",
+              "justify_explain",
+              "withdraw_support"
+            ]
+          }
+        },
+        "rigor_strategy_other": {
+          "type": "string",
+          "description": "Free-text strategy not in the list; empty when none."
+        },
+        "explanation": {
+          "type": "string",
+          "description": "The annotator's reasoning."
+        }
+      }
+    },
+    "Result": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "problem_success",
+        "cognitive_engagement",
+        "explanation"
+      ],
+      "description": "How the student responded to the tutor's decision, judged within the moment.",
+      "properties": {
+        "problem_success": {
+          "enum": [
+            "meaningful_success",
+            "not_meaningful",
+            "no_success",
+            "not_enough_evidence"
+          ],
+          "description": "The student's success on the problem within the moment."
+        },
+        "cognitive_engagement": {
+          "enum": [
+            "high_or_good",
+            "low",
+            "not_enough_evidence"
+          ],
+          "description": "The student's cognitive engagement within the moment."
+        },
+        "explanation": {
+          "type": "string",
+          "description": "The annotator's reasoning."
+        }
+      }
+    },
+    "SelectorPayload": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "situation",
+        "action",
+        "result",
+        "other_observations"
+      ],
+      "properties": {
+        "situation": {
+          "$ref": "#/$defs/Situation"
+        },
+        "action": {
+          "$ref": "#/$defs/Action"
+        },
+        "result": {
+          "$ref": "#/$defs/Result"
+        },
+        "other_observations": {
+          "type": "string",
+          "description": "Anything else the annotator noted; empty when nothing."
+        }
+      }
+    },
+    "ReannotatorMeta": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "throw_out",
+        "throw_out_reason",
+        "changed_boundaries",
+        "new_start_turn",
+        "new_end_turn",
+        "redrew_cut_point",
+        "new_cut_turn"
+      ],
+      "description": "The reannotator's ruling on the selection itself.",
+      "properties": {
+        "throw_out": {
+          "type": "boolean",
+          "description": "The reannotator ruled the selection unusable. Their situation, action and result are then null."
+        },
+        "throw_out_reason": {
+          "type": "string",
+          "description": "Why; empty unless `throw_out`."
+        },
+        "changed_boundaries": {
+          "type": "boolean",
+          "description": "The reannotator moved the moment's start or end."
+        },
+        "new_start_turn": {
+          "oneOf": [
+            {
+              "$ref": "#/$defs/Turn"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "description": "The moved start; null unless `changed_boundaries`."
+        },
+        "new_end_turn": {
+          "oneOf": [
+            {
+              "$ref": "#/$defs/Turn"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "description": "The moved end; null unless `changed_boundaries`."
+        },
+        "redrew_cut_point": {
+          "type": "boolean",
+          "description": "The reannotator moved the cut. Ground-truth builds drop these moments, since the annotators then judged different excerpts."
+        },
+        "new_cut_turn": {
+          "oneOf": [
+            {
+              "$ref": "#/$defs/Turn"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "description": "The moved cut; null unless `redrew_cut_point`."
+        }
+      }
+    },
+    "ReannotatorPayload": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "situation",
+        "action",
+        "result",
+        "other_observations",
+        "meta"
+      ],
+      "properties": {
+        "situation": {
+          "oneOf": [
+            {
+              "$ref": "#/$defs/Situation"
+            },
+            {
+              "type": "null"
+            }
+          ]
+        },
+        "action": {
+          "oneOf": [
+            {
+              "$ref": "#/$defs/Action"
+            },
+            {
+              "type": "null"
+            }
+          ]
+        },
+        "result": {
+          "oneOf": [
+            {
+              "$ref": "#/$defs/Result"
+            },
+            {
+              "type": "null"
+            }
+          ]
+        },
+        "other_observations": {
+          "type": "string",
+          "description": "Anything else the annotator noted; empty when nothing."
+        },
+        "meta": {
+          "$ref": "#/$defs/ReannotatorMeta"
+        }
+      }
+    },
+    "Final": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "situation",
+        "action",
+        "result",
+        "other_observations"
+      ],
+      "description": "The adjudicator's final answer.",
+      "properties": {
+        "situation": {
+          "$ref": "#/$defs/Situation"
+        },
+        "action": {
+          "$ref": "#/$defs/Action"
+        },
+        "result": {
+          "$ref": "#/$defs/Result"
+        },
+        "other_observations": {
+          "type": "string"
+        }
+      }
+    },
+    "Decision": {
+      "enum": [
+        "agreed",
+        "selector",
+        "reannotator",
+        "combined"
+      ],
+      "description": "Where the adjudicator's answer for this section came from: `agreed` (the two annotators already agreed), `selector` or `reannotator` (took that annotator's answer), `combined` (wrote their own from both)."
+    },
+    "AdjudicatorPayload": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "final",
+        "decisions",
+        "final_start_turn",
+        "final_cut_turn",
+        "final_end_turn",
+        "rationale",
+        "reverted_throw_out",
+        "meta"
+      ],
+      "properties": {
+        "final": {
+          "oneOf": [
+            {
+              "$ref": "#/$defs/Final"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "description": "Null when the adjudicator threw the moment out."
+        },
+        "decisions": {
+          "oneOf": [
+            {
+              "type": "object",
+              "additionalProperties": false,
+              "required": [
+                "situation",
+                "action",
+                "result",
+                "boundaries",
+                "other_observations"
+              ],
+              "properties": {
+                "situation": {
+                  "$ref": "#/$defs/Decision"
+                },
+                "action": {
+                  "$ref": "#/$defs/Decision"
+                },
+                "result": {
+                  "$ref": "#/$defs/Decision"
+                },
+                "boundaries": {
+                  "$ref": "#/$defs/Decision"
+                },
+                "other_observations": {
+                  "$ref": "#/$defs/Decision"
+                }
+              }
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "description": "Per section, where the final answer came from. Null when the adjudicator threw the moment out."
+        },
+        "final_start_turn": {
+          "oneOf": [
+            {
+              "$ref": "#/$defs/Turn"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "description": "The moment's start as adjudicated; null when thrown out."
+        },
+        "final_cut_turn": {
+          "oneOf": [
+            {
+              "$ref": "#/$defs/Turn"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "description": "The cut as adjudicated; null when thrown out."
+        },
+        "final_end_turn": {
+          "oneOf": [
+            {
+              "$ref": "#/$defs/Turn"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "description": "The moment's end as adjudicated; null when thrown out."
+        },
+        "rationale": {
+          "type": "string",
+          "description": "The adjudicator's reasoning."
+        },
+        "reverted_throw_out": {
+          "type": "boolean",
+          "description": "The reannotator had thrown the moment out and the adjudicator reinstated it."
+        },
+        "meta": {
+          "type": "object",
+          "additionalProperties": false,
+          "required": [
+            "throw_out",
+            "throw_out_category",
+            "throw_out_reason"
+          ],
+          "properties": {
+            "throw_out": {
+              "type": "boolean",
+              "description": "The adjudicator ruled the selection unusable."
+            },
+            "throw_out_category": {
+              "enum": [
+                "not_math",
+                "too_vague",
+                "too_contentious",
+                "other",
+                null
+              ],
+              "description": "Why, as a category; null unless `throw_out`."
+            },
+            "throw_out_reason": {
+              "type": "string",
+              "description": "Why, in the adjudicator's words; empty unless `throw_out`."
+            }
+          }
+        }
+      }
+    },
+    "NoKeyMomentsPayload": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "no_key_moments",
+        "note"
+      ],
+      "properties": {
+        "no_key_moments": {
+          "const": true,
+          "description": "The annotator found no key moment in the transcript."
+        },
+        "note": {
+          "type": "string",
+          "description": "Why, in the annotator's words."
+        }
+      }
+    }
+  }
+}
