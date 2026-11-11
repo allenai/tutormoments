@@ -22,7 +22,7 @@ CLI `tutormoments-build release snapshot|build|verify`.
 | 0 | Plumbing: snapshot, build, checks, manifest, verify | Done (`f9f4aac`); PR #97 into `v2` | Review + merge #97. `verify` needs retries on long S3 reads if it times out again |
 | 1 | `transcripts/<provider>.jsonl` | Schemas approved 2026-11-04; writer done; first real build 2026-11-11 (below) | Screenshot fields wait on stage 6 |
 | 2 | `annotations/<provider>.jsonl` | Schema, writer and guide in PR #98 (stacked on #97); first real build 2026-11-11 (below) | Review of #98 and the build by the annotation manager and Albert; one data-quality decision pending (internal). The `transcript_selection` change (2026-11-11) is not in that build |
-| 3 | `benchmark/dev.jsonl`, `test.jsonl` | Schema approved 2026-11-11 (stacked on #98) | Writer and its rebuild check; the stage 2 data-quality decision changes provider C's labels, so no C build is reviewed before it |
+| 3 | `benchmark/dev.jsonl`, `test.jsonl` | Schema approved 2026-11-11; PR #99 (stacked on #98) | Writer and its rebuild check; the stage 2 data-quality decision changes provider C's labels, so no C build is reviewed before it |
 | 4 | `benchmark/moments.jsonl` | Not started | Builder rules (benchmark-defining: needs sign-off), student persona, context format, runtime loader. Whether `student_state.jsonl` (model-generated facets used by the scorer prompts) ships |
 | 5 | `assessments/`, `reference/eedi_*` | Not started | Full release vs annotated students only; C's third-party LaTeX renderer links |
 | 6 | `screenshots/<transcript_id>/` | Waiting on the de-identified set | Layout, transcript `seconds`/`path` fields, OCR text |
@@ -81,4 +81,4 @@ All in the de-identified bucket, under `release-v2/`.
 
 1. Review #97, then #98 and build `20261111T1640Z-a12705f`.
 2. Apply the pending data-quality decision in the annotations writer, then snapshot and build again.
-3. Review the stage 3 schema PR (stacked on #98), then write the benchmark labels writer: rebuild with `build_ground_truth.py` from the snapshot, write `dev`/`test`, and fail the build unless a rebuild from the released annotations matches.
+3. Review the stage 3 schema PR #99 (stacked on #98), then write the benchmark labels writer: rebuild with `build_ground_truth.py` from the snapshot, write `dev`/`test`, and fail the build unless a rebuild from the released annotations matches.
