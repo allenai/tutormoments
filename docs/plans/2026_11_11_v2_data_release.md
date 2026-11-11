@@ -23,7 +23,7 @@ CLI `tutormoments-build release snapshot|build|verify`.
 | 1 | `transcripts/<provider>.jsonl` | Schemas approved 2026-11-04; writer done; first real build 2026-11-11 (below) | Screenshot fields wait on stage 6 |
 | 2 | `annotations/<provider>.jsonl` | Schema, writer and guide in PR #98 (stacked on #97); first real build 2026-11-11 (below) | Review of #98 and the build by the annotation manager and Albert; one data-quality decision pending (internal). The `transcript_selection` change (2026-11-11) is not in that build |
 | 3 | `benchmark/dev.jsonl`, `test.jsonl` | Schema approved 2026-11-11; schema and writer in PR #99 (stacked on #98) | The stage 2 data-quality decision changes provider C's labels, so no C build is reviewed before it |
-| 4 | `benchmark/moments.jsonl` | Not started | Builder rules (benchmark-defining: needs sign-off), student persona, context format, runtime loader. Whether `student_state.jsonl` (model-generated facets used by the scorer prompts) ships |
+| 4 | `benchmark/moments.jsonl` | Schema approved 2026-11-11; writer on `feature/v2-moments` (stacked on #99) | Open research questions (persona, continuation length) are runtime choices; the runtime needs a v2 loader and a wait-time tool |
 | 5 | `assessments/`, `reference/eedi_*` | Not started | Full release vs annotated students only; C's third-party LaTeX renderer links |
 | 6 | `screenshots/<transcript_id>/` | Waiting on the de-identified set | Layout, transcript `seconds`/`path` fields, OCR text |
 | 7 | `manifest.json` schema, README dataset card | Not started (builds already write a manifest) | Card carries A's two dropped fields and the surrogate-name caveat |
@@ -63,6 +63,32 @@ CLI `tutormoments-build release snapshot|build|verify`.
   - `annotators` and `annotator_roles` (parallel arrays) become one array of `{annotator, role}`, so a consumer can't separate a role from its annotator. Order is the tool's (two adjudicators: first to save first); it affects neither labels nor boundaries (checked on all 363 two-adjudicator moments).
   - Dropped: `moment_status` (always `adjudicated`) and `moment_created_at` (on the annotations row). `original_boundaries` is on every row, null where the selector's boundaries stand.
   - Known: 4 provider A moments have no turn after the cut (`cut_turn == end_turn`). They pass the current rules and ship unless a rule changes (benchmark-defining: needs sign-off).
+- **Benchmark moments** (`benchmark/moments.jsonl`, `release/schemas/moments.schema.json`): one row per labelled moment, holding everything needed to replay it. Approved 2026-11-11:
+  - A new v2 shape; v1's `moments.jsonl`, schema and runtime loader are untouched. No v1 `dimension`: the gold is `situation_type` (all five values) and `situation_votes`, the benchmark's target. The human tutor's action labels are the classifier's gold and stay only in `dev.jsonl` / `test.jsonl`.
+  - Not frozen, versioned: the manifest gives the file's sha256 and runs should record it. Only the build a publication uses is pinned and signed off.
+  - Self-contained: everything needed to run the benchmark is on the row, so nothing model-generated ships separately. The student persona and the student-state facets (`student_state.jsonl`) are not on it: the persona is an open research question and the facets are no longer used. Either goes on the row, with its model, prompt and settings, if the analysis adopts it.
+  - `transcript` is the whole session, each turn and screen event copied unchanged from `transcripts/<source>.jsonl` (timing kept: wait time matters), events placed by `before_turn`. The code decides where to cut and how much continuation the simulated student gets.
+  - `annotator_view` (provider A) is what the annotator whose boundaries the moment uses actually saw: their `transcript_selection`, with the cut where they drew it. Both placements ship so the code can compare them. Annotators could cut after a screen-event row, and `cut_turn` is then the tool's conversion to a turn number, one turn off in either direction: of the 797 provider A moments, 49 name the turn before the cut row, 22 the turn after it (so they include the tutor's decision turn), and 3 have screen events only.
+  - Provider C rows carry the session's `problems`. Annotators saw the slide images, which cannot be released; `problem_text` stands in, and `learning_objective.year` is the year annotators saw.
+  - Cuts stay where annotators drew them, with no v1-style role adjustment. In 245 moments (19%) the student speaks next, mostly because the tutor waited; the replay tutor will get a wait-time tool.
+
+## Open decision: release workflow and provenance
+
+Raised 2026-11-11, not yet decided. In v1 we lost track of which branch generated which data, what was run against it, and whether local code that changed bucket data was ever committed. v2 builds are traceable (snapshot, commit and per-file sha256 in each manifest), but the workflow around them is not settled:
+
+- **Two paths produce benchmark data from the same annotation export.** The research path (the team's working `build_ground_truth.py`, `excerpts.py` and `decompose_situation.py`, run locally, writing `synthetic/ground_truth_v2/` and local `data/`) records no provenance. The release path (`release-v2/builds/<build_id>/`) does. They agree today, but the research code is changing and the release deliberately runs the merged version, so they will drift.
+- **Builds can fork.** Builds sit side by side and nothing says which is current, so people working from different branches can each build and work against different releases without noticing.
+- **Known gaps in the build command:** untracked files do not count as uncommitted changes (`code_state` uses `--untracked-files=no`), so a never-committed module can run in a build whose manifest names a commit without it; nothing checks the recorded commit is on GitHub; and rebasing the stacked PRs rewrites commits a build may name.
+
+Options discussed:
+
+- **A. The release is the only source.** Everyone reads builds; a rule change is a PR, then a build. One truth; slower research iteration.
+- **B. Two paths with explicit roles.** Research iterates freely; anything shared or published (paper, website, Hugging Face) cites a release build made from merged code.
+- **C. Research starts from a release build.** Research scripts read a pinned build's transcripts and annotations and record its ID in what they derive; rule changes stay local until merged and released.
+
+Candidate mechanics for any option: canonical builds only from the integration branch (`v2`, later `main`), with branch builds marked as previews; one pointer (`release-v2/current.json`) naming the current build; a `release status` command saying whether a checkout contains the current build's commit; a pushed git tag per bucket build so its commit survives rebases; untracked files counted as uncommitted; `--allow-dirty` for local stores only.
+
+Plan for now (2026-11-11): finish the stages, make one release, bring the research and release paths into sync on it, then log the release (build) ID with every experiment run so each result records exactly what data it used. Decide the workflow before the second release.
 
 ## Annotations writer (stage 2)
 
@@ -78,6 +104,12 @@ Open: the pending data-quality decision may change which entries ship; it will b
 
 Checked 2026-11-11 without writing to the bucket: the annotations and benchmark writers run on a local copy of snapshot `20261111T1636Z`'s annotation inputs (sha256-checked against the snapshot), with #99's writer code (re-run on `b0ebd3e`, after the rebase onto the `transcript_selection` change), pass every build check and give dev 640 (A 401, C 239) and test 631 (A 396, C 235), with the same labels, boundaries and annotators as the working ground truth. No bucket build has benchmark files yet; the first will be the one after the pending data-quality decision.
 
+## Moments writer (stage 4)
+
+`release/moments.py` builds `benchmark/moments.jsonl` only from files the same build has already written (`transcripts/`, `annotations/`, `benchmark/dev.jsonl` and `test.jsonl`), so it runs last and the release can always rebuild it. Rows follow the labels files, dev first. The view is the `transcript_selection` of the annotator whose boundaries the moment uses (the first saved where two match); where the moment's cut is not that annotator's own (two adjudicators drew different spans and the majority cut won), the cut goes after the last row holding `cut_turn`. The build fails if a view names a turn or screen event the transcript lacks, or if the schema's copies of the provider definitions drift from the provider schemas.
+
+Checked 2026-11-11 without writing to the bucket: a full local build (transcripts, annotations, labels, moments) on snapshot `20261111T1636Z`'s inputs (sha256-checked against the snapshot) passes every check and `verify`, and gives 1,271 moments (110 MB): dev A 401 / C 239, test A 396 / C 235. All 797 provider A views are the boundaries' annotator's; 723 cut after the `cut_turn` row and 74 after a screen-event row.
+
 ## Builds
 
 All in the de-identified bucket, under `release-v2/`.
@@ -90,6 +122,8 @@ All in the de-identified bucket, under `release-v2/`.
 
 1. Review #97, then #98 and build `20261111T1640Z-a12705f` (finish its `verify`).
 2. Review #99 (benchmark labels schema and writer).
-3. Apply the pending data-quality decision in the annotations writer, then one new snapshot and build: corrected annotations plus the first benchmark labels.
-4. Stage 4: `benchmark/moments.jsonl` (builder rules need sign-off; decide on `student_state.jsonl`).
-5. Before publishing: update `build_ground_truth.py` to read the released annotations and write the release shape, once the team's work on it allows.
+3. Review the stage 4 moments writer (`feature/v2-moments`, stacked on #99).
+4. Apply the pending data-quality decision in the annotations writer, then one new snapshot and build: corrected annotations plus the first benchmark labels and moments.
+5. Make the first release and bring the research path into sync with it; then every experiment run logs the release (build) ID it used. Decide the release workflow (open decision above) before the second release.
+6. Runtime (separate from the release): a v2 moments loader, a wait-time tool for the replay tutor, runs recording the build ID and the moments file's sha256. Scorer: the over-scaffolding prompt is gated on the human tutor's gold scaffolding label, which a replay lacks.
+7. Before publishing: update `build_ground_truth.py` to read the released annotations and write the release shape, once the team's work on it allows.
