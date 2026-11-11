@@ -80,11 +80,19 @@ def raw_entry(
     }
     if provider == "a":
         entry["selection_source_sha256"] = SHA
-        entry["transcript_selection"] = {
-            "rows": [{"turn_number": 4, "enrichment_numbers": [2], "is_cut": True}]
-        }
-        entry["enrichment_numbers"] = [2]
+        entry["transcript_selection"] = {"rows": copy.deepcopy(SELECTION_ROWS)}
+        entry["enrichment_numbers"] = [1, 2]
     return entry
+
+
+# As the tool showed a moment from turn 3 to turn 5: event 1 on its own row, event 2
+# folded into turn 4, the cut after turn 4.
+SELECTION_ROWS = [
+    {"turn_number": 3, "enrichment_numbers": [], "is_cut": False},
+    {"turn_number": None, "enrichment_numbers": [1], "is_cut": False},
+    {"turn_number": 4, "enrichment_numbers": [2], "is_cut": True},
+    {"turn_number": 5, "enrichment_numbers": [], "is_cut": False},
+]
 
 
 def selector(revision=1, **kw):
@@ -255,10 +263,17 @@ def test_moment_row_ships_labels_and_answers_without_dropped_fields(tmp_path):
         "created_at",
         "interface_version",
         "schema_version",
-        "enrichment_numbers",
+        "transcript_selection",
         "payload",
     }
-    assert selector_entry["enrichment_numbers"] == [2]
+    assert selector_entry["transcript_selection"] == {
+        "rows": [
+            {"turn_number": 3, "enrichment_numbers": [], "in_situation": True},
+            {"turn_number": None, "enrichment_numbers": [1], "in_situation": True},
+            {"turn_number": 4, "enrichment_numbers": [2], "in_situation": True},
+            {"turn_number": 5, "enrichment_numbers": [], "in_situation": False},
+        ]
+    }
     assert selector_entry["payload"] == {**sar(), "other_observations": ""}
     assert "new_dialogue_turns" not in row["annotations"][1]["payload"]["meta"]
     assert row["annotations"][1]["payload"]["meta"]["new_start_turn"] == 3
@@ -279,7 +294,49 @@ def test_c_rows_carry_no_provider_a_fields(tmp_path):
     store = store_with(tmp_path, [raw_a()], [raw_c()])
     [row] = released(store, build(store), "tutoring_provider_c")
     assert row["source"] == "tutoring_provider_c"
-    assert all("enrichment_numbers" not in e for e in row["annotations"])
+    for entry in row["annotations"]:
+        assert "transcript_selection" not in entry
+        assert "enrichment_numbers" not in entry
+
+
+def with_selection(rows):
+    entry = selector()
+    entry["transcript_selection"] = {"rows": rows}
+    return raw_a(annotations=[entry, reannotator(), adjudicator()])
+
+
+@pytest.mark.parametrize(
+    "rows",
+    [
+        pytest.param([{**r, "is_cut": False} for r in SELECTION_ROWS], id="no cut row"),
+        pytest.param(
+            [{**r, "is_cut": r["turn_number"] in (3, 4)} for r in SELECTION_ROWS],
+            id="two cut rows",
+        ),
+    ],
+)
+def test_selection_without_exactly_one_cut_fails(tmp_path, rows):
+    store = store_with(tmp_path, [with_selection(rows)], [raw_c()])
+    with pytest.raises(SystemExit, match="cut"):
+        build(store)
+
+
+@pytest.mark.parametrize(
+    "selection",
+    [
+        pytest.param({"rows": SELECTION_ROWS, "scroll": 0}, id="selection field"),
+        pytest.param(
+            {"rows": [{**SELECTION_ROWS[0], "row_id": 7}, *SELECTION_ROWS[1:]]},
+            id="row field",
+        ),
+    ],
+)
+def test_unknown_selection_field_fails(tmp_path, selection):
+    row = with_selection(SELECTION_ROWS)
+    row["annotations"][0]["transcript_selection"] = copy.deepcopy(selection)
+    store = store_with(tmp_path, [row], [raw_c()])
+    with pytest.raises(SystemExit, match="unknown"):
+        build(store)
 
 
 def test_retracted_moments_are_dropped(tmp_path):

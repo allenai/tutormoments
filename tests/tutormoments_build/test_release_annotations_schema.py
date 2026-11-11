@@ -178,8 +178,29 @@ def test_accepts_provider_a_extras(validator):
     row["v1_rigor_hinted"] = True
     row["v1_rigor_regions"] = [[12, 20]]
     row["moment"]["in_v1_rigor_region"] = True
-    row["annotations"][0]["enrichment_numbers"] = [3, 4]
+    row["annotations"][0]["transcript_selection"] = {
+        "rows": [
+            {"turn_number": 12, "enrichment_numbers": [3], "in_situation": True},
+            {"turn_number": None, "enrichment_numbers": [4], "in_situation": False},
+        ]
+    }
     assert list(validator.iter_errors(row)) == []
+
+
+def test_rejects_the_dropped_flat_enrichment_list(validator):
+    row = moment_row()
+    row["source"] = "tutoring_provider_a"
+    row["annotations"][0]["enrichment_numbers"] = [3, 4]
+    assert list(validator.iter_errors(row)) != []
+
+
+def test_rejects_the_tools_cut_flag(validator):
+    row = moment_row()
+    row["source"] = "tutoring_provider_a"
+    row["annotations"][0]["transcript_selection"] = {
+        "rows": [{"turn_number": 12, "enrichment_numbers": [], "is_cut": True}]
+    }
+    assert list(validator.iter_errors(row)) != []
 
 
 def mutated(row, change):

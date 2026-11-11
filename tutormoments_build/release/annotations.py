@@ -27,8 +27,9 @@ BATCH = "v2"
 RETRACTED = "retracted"
 
 # Export fields, by level. Kept fields are renamed or copied below; dropped ones are
-# the transcript fingerprints (they match no released transcript file), provider A's
-# turn-by-turn selection, names, and the tool's revision counter.
+# the transcript fingerprints (they match no released transcript file), names, the
+# tool's revision counter, and provider A's flat ``enrichment_numbers`` (always the
+# events listed in ``transcript_selection``, which ships).
 ROW_FIELDS = {
     "transcript_id",
     "source",
@@ -65,6 +66,10 @@ ENTRY_FIELDS = {
     "enrichment_numbers",
 }
 
+# Provider A's record of how the tool showed the moment: its rows, top to bottom.
+SELECTION_FIELDS = {"rows"}
+SELECTION_ROW_FIELDS = {"turn_number", "enrichment_numbers", "is_cut"}
+
 # Tool-computed turn counts (end - start + 1), wrong on some early provider A moments.
 PAYLOAD_DROPS = ("final_dialogue_turns",)
 META_DROPS = ("new_dialogue_turns",)
@@ -99,6 +104,34 @@ def last_saves(entries: list[dict]) -> list[dict]:
     return [e for e in entries if latest[(e["annotator_id"], e["role"])] is e]
 
 
+def release_selection(raw: dict, where: str) -> dict:
+    """The tool's selection with its one cut flag turned into a per-row side.
+
+    ``is_cut`` marks the row the cut falls after. ``in_situation`` says on every row
+    which side of the cut it is: true up to and including the cut row (what the
+    annotator judged the situation from), false after it (the tutor's action).
+    """
+    check_fields(raw, SELECTION_FIELDS, f"{where} transcript_selection")
+    rows = raw["rows"]
+    for row in rows:
+        check_fields(row, SELECTION_ROW_FIELDS, f"{where} transcript_selection row")
+    cuts = [i for i, row in enumerate(rows) if row["is_cut"]]
+    if len(cuts) != 1:
+        raise SystemExit(
+            f"{where}: transcript_selection has {len(cuts)} cut rows; expected exactly one"
+        )
+    return {
+        "rows": [
+            {
+                "turn_number": row["turn_number"],
+                "enrichment_numbers": row["enrichment_numbers"],
+                "in_situation": i <= cuts[0],
+            }
+            for i, row in enumerate(rows)
+        ]
+    }
+
+
 def release_entry(raw: dict, provider: str, labels: Labels, where: str) -> dict:
     check_fields(raw, ENTRY_FIELDS, where)
     entry = {
@@ -108,8 +141,10 @@ def release_entry(raw: dict, provider: str, labels: Labels, where: str) -> dict:
         "interface_version": raw["interface_version"],
         "schema_version": raw["schema_version"],
     }
-    if provider == "tutoring_provider_a" and "enrichment_numbers" in raw:
-        entry["enrichment_numbers"] = raw["enrichment_numbers"]
+    if provider == "tutoring_provider_a" and "transcript_selection" in raw:
+        entry["transcript_selection"] = release_selection(
+            raw["transcript_selection"], where
+        )
     payload = {k: v for k, v in raw["payload"].items() if k not in PAYLOAD_DROPS}
     if isinstance(payload.get("meta"), dict):
         payload["meta"] = {

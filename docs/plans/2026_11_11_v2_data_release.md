@@ -21,7 +21,7 @@ CLI `tutormoments-build release snapshot|build|verify`.
 |---|---|---|---|
 | 0 | Plumbing: snapshot, build, checks, manifest, verify | Done (`f9f4aac`); PR #97 into `v2` | Review + merge #97. `verify` needs retries on long S3 reads if it times out again |
 | 1 | `transcripts/<provider>.jsonl` | Schemas approved 2026-11-04; writer done; first real build 2026-11-11 (below) | Screenshot fields wait on stage 6 |
-| 2 | `annotations/<provider>.jsonl` | Schema, writer and guide in PR #98 (stacked on #97); first real build 2026-11-11 (below) | Review of #98 and the build by the annotation manager and Albert; one data-quality decision pending (internal) |
+| 2 | `annotations/<provider>.jsonl` | Schema, writer and guide in PR #98 (stacked on #97); first real build 2026-11-11 (below) | Review of #98 and the build by the annotation manager and Albert; one data-quality decision pending (internal). The `transcript_selection` change (2026-11-11) is not in that build |
 | 3 | `benchmark/dev.jsonl`, `test.jsonl` | Not started | Schema draft from `ground_truth_v2` output |
 | 4 | `benchmark/moments.jsonl` | Not started | Builder rules (benchmark-defining: needs sign-off), student persona, context format, runtime loader |
 | 5 | `assessments/`, `reference/eedi_*` | Not started | Full release vs annotated students only; C's third-party LaTeX renderer links |
@@ -50,8 +50,9 @@ CLI `tutormoments-build release snapshot|build|verify`.
   - `purpose` is `rigor_scaffolding` and `batch` is `v2`; later kinds of annotation or passes become new values.
   - Annotator names are stripped and IDs replaced by labels; the writer fails on any unmapped ID.
   - Each entry's answers ship exactly as exported, so the ground-truth build can be rerun from the release.
-  - Dropped: retracted moments (A 3, C 1); earlier saves of the same role by the same annotator (the last save is kept, as `build_ground_truth.py` does) and `revision`; A's turn-by-turn `transcript_selection`; the transcript fingerprints (`selection_source_sha256`, `corpus_revision`), which match no released transcript file; the tool-computed turn counts (`dialogue_turns` and variants), wrong on 17 early A moments.
-  - Kept: thrown-out moments with their status, A's `enrichment_numbers`, and the v1 rigor hint fields, so researchers can account for annotators being shown hints.
+  - Dropped: retracted moments (A 3, C 1); earlier saves of the same role by the same annotator (the last save is kept, as `build_ground_truth.py` does) and `revision`; the transcript fingerprints (`selection_source_sha256`, `corpus_revision`), which match no released transcript file; the tool-computed turn counts (`dialogue_turns` and variants), wrong on 17 early A moments; A's flat `enrichment_numbers` (always the events listed in `transcript_selection`; dropped 2026-11-11).
+  - Kept: thrown-out moments with their status, and the v1 rigor hint fields, so researchers can account for annotators being shown hints.
+  - A's `transcript_selection` ships (reversed 2026-11-11): it is the only record of what each annotator saw. The tool showed some screen events as part of the turn before them instead of on their own row, varying by tool version (none before 2.10) and annotator, so an event's `before_turn` does not say which side of the cut the annotator saw it on. The tool's one-row `is_cut` flag becomes `in_situation` on every row (true up to and including the cut row). Found while drafting stage 4: in the moments' after-cut screen events, 85 of 333 were shown before the cut.
   - No summary fields (outcome, agreement): resolved labels belong in `benchmark/`.
   - Field descriptions follow the annotators' guiding sheet.
 - **Annotation guide** ships as `docs/annotation_guide.md` (`release/docs/annotation_guide.md`): the annotators' guiding sheet with its comments, feedback tab, images (crossed out in the source), internal notes and author line removed; the guidance text is otherwise word for word.
