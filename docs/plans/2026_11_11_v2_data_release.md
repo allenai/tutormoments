@@ -68,7 +68,7 @@ All in the de-identified bucket, under `release-v2/`.
 
 | Build | Snapshot | Code | Contents | Status |
 |---|---|---|---|---|
-| `20261111T1640Z-a12705f` | `20261111T1636Z` (30 inputs, incl. the 2026-11-11 nightly annotation export) | `a12705f` (PR #98), clean tree | `transcripts/` A 40,176 / C 16,510 rows; `annotations/` A 1,261 / C 661 rows; `docs/annotation_guide.md`; 4 schemas; manifest | All checks passed, manifest written. For review; not for publishing (the pending decision may change it). `verify` re-run in progress: the first attempt hit an S3 read timeout |
+| `20261111T1640Z-a12705f` | `20261111T1636Z` (30 inputs, incl. the 2026-11-11 nightly annotation export) | `a12705f` (PR #98), clean tree | `transcripts/` A 40,176 / C 16,510 rows; `annotations/` A 1,261 / C 661 rows; `docs/annotation_guide.md`; 4 schemas; manifest | All checks passed, manifest written. For review; not for publishing (the pending decision may change it). `verify` not yet completed: the first run hit an S3 read timeout and the second was stopped on a slow connection; rerun from inside AWS |
 
 ## Next
 
