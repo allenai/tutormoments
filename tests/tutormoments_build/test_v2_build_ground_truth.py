@@ -349,3 +349,156 @@ def test_record_carries_one_situation_and_one_action_set(tmp_path):
     assert record["situation_type"] in G.SITUATION_TYPES
     assert set(record["labels"]) == set(G.ACTION_FIELDS)
     assert "original_boundaries" not in record
+
+
+# ---------------------------------------------------------------------------
+# Release format: annotations/<source>.jsonl in, benchmark/dev|test.jsonl out
+# ---------------------------------------------------------------------------
+
+
+def _released(row, labels):
+    """An export row as the annotations release ships it (names gone, IDs labelled)."""
+    released = {
+        "transcript_id": row["transcript_id"],
+        "source": "tutoring_provider_x",
+        "purpose": "rigor_scaffolding",
+        "batch": "v2",
+        "moment": None,
+        "v1_rigor_hinted": False,
+        "v1_rigor_regions": [],
+    }
+    if "moment" in row:
+        released["moment"] = row["moment"]
+        entries = row["annotations"]
+    else:
+        entries = [row["no_key_moments_record"]]
+    released["annotations"] = [
+        {
+            "annotator": labels[a["annotator_id"]],
+            **{
+                k: v
+                for k, v in a.items()
+                if k not in ("annotator_id", "annotator_name", "revision")
+            },
+        }
+        for a in entries
+    ]
+    return released
+
+
+def _mixed_rows():
+    return [
+        _row("plain"),
+        _row(
+            "two-adjudicators",
+            annotations=[
+                _annotation(rigor_present=True),
+                _annotation(role="reannotator", name="Bob"),
+                _adjudicator("Ben", final_turns={"end_turn": 18, "cut_turn": 15}),
+                _adjudicator(
+                    "Ann",
+                    rigor_present=True,
+                    final_turns={"end_turn": 19, "cut_turn": 16},
+                ),
+            ],
+        ),
+        _row(
+            "thrown",
+            annotations=[
+                _annotation(),
+                _annotation(role="reannotator", name="Bob", meta={"throw_out": True}),
+            ],
+        ),
+        {"transcript_id": "t2", "no_key_moments_record": _annotation()},
+        {**_row("held-out"), "transcript_id": "t2"},
+    ]
+
+
+LABELS = {"id-grace": "A01", "id-bob": "A02", "id-ben": "A03", "id-ann": "A04"}
+ASSIGNMENTS = {"t1": {"split": "iterate"}, "t2": {"split": "heldout"}}
+
+
+def test_release_format_annotations_build_the_same_ground_truth(tmp_path):
+    export_dir, release_dir = tmp_path / "export", tmp_path / "release"
+    export_dir.mkdir()
+    release_dir.mkdir()
+    labels = export_dir / "labels.json"
+    labels.write_text(json.dumps(LABELS))
+    missing = str(tmp_path / "missing.json")
+
+    paths, splits = _write(export_dir, _mixed_rows(), ASSIGNMENTS)
+    from_export = G.build(paths, splits, str(labels), missing)
+
+    released = release_dir / "tutoring_provider_x.jsonl"
+    released.write_text(
+        "".join(json.dumps(_released(r, LABELS)) + "\n" for r in _mixed_rows())
+    )
+    from_release = G.build([str(released)], splits, missing, missing)
+
+    assert from_release == from_export
+    two = from_export[0]["iteration"][1]
+    assert two["moment_id"] == "two-adjudicators"
+    assert two["annotators"] == ["A01", "A02", "A03", "A04"]
+
+
+def test_release_record_renames_the_split_and_pairs_annotators_with_roles(tmp_path):
+    paths, splits = _write(tmp_path, [_row("m1")])
+    record = G.build(paths, splits, *_no_label_files(tmp_path))[0]["iteration"][0]
+
+    released = G.release_record(record)
+    assert released["split"] == "dev"
+    assert released["annotators"] == [
+        {"annotator": "id-grace", "role": "selector"},
+        {"annotator": "id-bob", "role": "reannotator"},
+    ]
+    assert released["original_boundaries"] is None
+    for dropped in ("annotator_roles", "moment_status", "moment_created_at"):
+        assert dropped not in released
+
+
+def test_release_record_keeps_moved_boundaries(tmp_path):
+    annotations = [
+        _annotation(),
+        _annotation(role="reannotator", name="Bob", meta={"new_end_turn": 18}),
+    ]
+    paths, splits = _write(tmp_path, [_row("m1", annotations=annotations)])
+    record = G.build(paths, splits, *_no_label_files(tmp_path))[0]["iteration"][0]
+
+    released = G.release_record(record)
+    assert released["boundaries_source"] == "reannotator"
+    assert released["original_boundaries"] == {
+        "start_turn": 10,
+        "end_turn": 20,
+        "cut_turn": 15,
+    }
+
+
+def test_cli_release_writes_dev_and_test(tmp_path):
+    paths, splits = _write(tmp_path, _mixed_rows(), ASSIGNMENTS)
+    out_dir = tmp_path / "benchmark"
+    missing = str(tmp_path / "missing.json")
+    G.main(
+        [
+            "--annotations",
+            *paths,
+            "--splits",
+            splits,
+            "--annotator-labels",
+            missing,
+            "--excluded-annotators",
+            missing,
+            "--out-dir",
+            str(out_dir),
+            "--release",
+        ]
+    )
+    assert sorted(p.name for p in out_dir.iterdir()) == ["dev.jsonl", "test.jsonl"]
+
+    def ids(stem):
+        lines = (out_dir / f"{stem}.jsonl").read_text().splitlines()
+        rows = [json.loads(line) for line in lines]
+        assert {r["split"] for r in rows} == {stem}
+        return [r["moment_id"] for r in rows]
+
+    assert ids("dev") == ["plain", "two-adjudicators"]
+    assert ids("test") == ["held-out"]

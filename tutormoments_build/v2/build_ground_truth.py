@@ -37,10 +37,21 @@ usable votes.
 
 **Boundaries.** See ``adjudicated_boundaries``.
 
+**Release.** The build also reads the released annotation files
+(``annotations/<source>.jsonl``), where annotators are already labels, and
+``--release`` writes ``dev.jsonl`` / ``test.jsonl`` in the release shape
+(``release_record``). The release build (``tutormoments_build.release.benchmark``)
+runs this same code, so running it on the released annotations reproduces the
+released ``benchmark/`` files exactly.
+
 Usage::
 
     python -m tutormoments_build.v2.build_ground_truth --dry-run
     python -m tutormoments_build.v2.build_ground_truth
+    python -m tutormoments_build.v2.build_ground_truth --release \\
+        --annotations annotations/tutoring_provider_a.jsonl \\
+                      annotations/tutoring_provider_c.jsonl \\
+        --out-dir benchmark
 """
 
 import argparse
@@ -48,6 +59,7 @@ import json
 import logging
 import math
 import os
+import re
 import sys
 from collections import Counter
 
@@ -71,6 +83,13 @@ DEFAULT_ANNOTATOR_LABELS = "data/v2_annotations/annotator_labels.json"
 
 # split name in splits.json -> output file stem
 SPLIT_FILES = {"iterate": "iteration", "heldout": "test"}
+
+# output file stem -> the release's name for it (benchmark/<name>.jsonl).
+# Hugging Face reads "dev" as the validation split; it does not know "iteration".
+RELEASE_SPLITS = {"iteration": "dev", "test": "test"}
+
+# Annotators in the released annotation files are labels already, e.g. "A04".
+RELEASE_LABEL = re.compile(r"^A[0-9]{2}$")
 
 # The moment status the tool sets on a selection its selector withdrew before it
 # reached a second pass.
@@ -468,13 +487,78 @@ def build_record(row: dict, split: str, labels_map: dict[str, str]) -> dict:
     return record
 
 
+def release_record(record: dict) -> dict:
+    """One ground-truth record in its release shape (``benchmark_labels.schema.json``).
+
+    The split takes its release name, each annotator is paired with their role
+    in one object rather than two parallel lists, ``original_boundaries`` is on
+    every row (null where the selector's stand), and the moment's status (always
+    adjudicated here) and selection time (on the annotations row) are dropped.
+    """
+    return {
+        "moment_id": record["moment_id"],
+        "source": record["source"],
+        "transcript_id": record["transcript_id"],
+        "split": RELEASE_SPLITS[record["split"]],
+        **{f: record[f] for f in TURN_FIELDS},
+        "boundaries_source": record["boundaries_source"],
+        "original_boundaries": record.get("original_boundaries"),
+        "situation_type": record["situation_type"],
+        "situation_votes": record["situation_votes"],
+        "labels": record["labels"],
+        "action_ties": record["action_ties"],
+        "n_votes": record["n_votes"],
+        "annotators": [
+            {"annotator": annotator, "role": role}
+            for annotator, role in zip(
+                record["annotators"], record["annotator_roles"], strict=True
+            )
+        ],
+    }
+
+
 # ===========================================================================
 # Build
 # ===========================================================================
 
 
+def from_release(row: dict) -> dict:
+    """A released annotations row (``annotations.schema.json``) in the export's shape.
+
+    The release names each annotator by label (``annotator``) where the export
+    has ``annotator_id``, and records a transcript with no key moments as
+    ``moment: null`` with one entry where the export has
+    ``no_key_moments_record``. Nothing this build reads is otherwise different:
+    the release keeps only each annotator's last save of a role, which is what
+    ``latest_annotations`` keeps anyway.
+    """
+    entries = [
+        {
+            "annotator_id": e["annotator"],
+            **{k: v for k, v in e.items() if k != "annotator"},
+        }
+        for e in row["annotations"]
+    ]
+    shaped = {k: v for k, v in row.items() if k not in ("moment", "annotations")}
+    if row["moment"] is None:
+        (shaped["no_key_moments_record"],) = entries
+    else:
+        shaped["moment"] = row["moment"]
+        shaped["annotations"] = entries
+    return shaped
+
+
+def is_release_row(row: dict) -> bool:
+    """Whether a row comes from the released annotation files rather than the export."""
+    return "purpose" in row
+
+
 def read_rows(annotations_paths: list[str]):
-    """Yield every annotations row, tagged with its provider in ``source``."""
+    """Yield every annotations row, tagged with its provider in ``source``.
+
+    Reads the annotation tool's export and the released annotation files
+    alike; released rows are reshaped by ``from_release``.
+    """
     for path in annotations_paths:
         source = source_of_file(path)
         with open(path, encoding="utf-8") as fh:
@@ -483,6 +567,8 @@ def read_rows(annotations_paths: list[str]):
                 if not line:
                     continue
                 row = json.loads(line)
+                if is_release_row(row):
+                    row = from_release(row)
                 if row.setdefault("source", source) != source:
                     raise ValueError(
                         f"{path}:{lineno}: row has source {row['source']!r}, "
@@ -558,8 +644,9 @@ def build(
             continue
 
         for annotation in annotations:
-            if annotation["annotator_id"] not in labels_map:
-                unmapped.add(annotation["annotator_id"])
+            annotator_id = annotation["annotator_id"]
+            if annotator_id not in labels_map and not RELEASE_LABEL.match(annotator_id):
+                unmapped.add(annotator_id)
 
         record = build_record(row, split, labels_map)
         out[record["split"]].append(record)
@@ -698,7 +785,20 @@ def build_parser() -> argparse.ArgumentParser:
     parser.add_argument(
         "--dry-run", action="store_true", help="Report without writing any file"
     )
+    parser.add_argument(
+        "--release",
+        action="store_true",
+        help="Write the release files (dev.jsonl, test.jsonl) in their release shape",
+    )
     return parser
+
+
+def release_splits(out: dict[str, list[dict]]) -> dict[str, list[dict]]:
+    """``build`` output as the release files: {"dev": [...], "test": [...]}."""
+    return {
+        RELEASE_SPLITS[stem]: [release_record(r) for r in records]
+        for stem, records in out.items()
+    }
 
 
 def main(argv: list[str] | None = None) -> int:
@@ -713,7 +813,8 @@ def main(argv: list[str] | None = None) -> int:
     )
 
     if not args.dry_run:
-        for stem, records in out.items():
+        files = release_splits(out) if args.release else out
+        for stem, records in files.items():
             logger.info(
                 "wrote %d moment(s) to %s",
                 len(records),

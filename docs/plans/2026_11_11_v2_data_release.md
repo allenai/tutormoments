@@ -22,7 +22,7 @@ CLI `tutormoments-build release snapshot|build|verify`.
 | 0 | Plumbing: snapshot, build, checks, manifest, verify | Done (`f9f4aac`); PR #97 into `v2` | Review + merge #97. `verify` needs retries on long S3 reads if it times out again |
 | 1 | `transcripts/<provider>.jsonl` | Schemas approved 2026-11-04; writer done; first real build 2026-11-11 (below) | Screenshot fields wait on stage 6 |
 | 2 | `annotations/<provider>.jsonl` | Schema, writer and guide in PR #98 (stacked on #97); first real build 2026-11-11 (below) | Review of #98 and the build by the annotation manager and Albert; one data-quality decision pending (internal). The `transcript_selection` change (2026-11-11) is not in that build |
-| 3 | `benchmark/dev.jsonl`, `test.jsonl` | Schema approved 2026-11-11; PR #99 (stacked on #98) | Writer and its rebuild check; the stage 2 data-quality decision changes provider C's labels, so no C build is reviewed before it |
+| 3 | `benchmark/dev.jsonl`, `test.jsonl` | Schema approved 2026-11-11; schema and writer in PR #99 (stacked on #98) | The stage 2 data-quality decision changes provider C's labels, so no C build is reviewed before it |
 | 4 | `benchmark/moments.jsonl` | Not started | Builder rules (benchmark-defining: needs sign-off), student persona, context format, runtime loader. Whether `student_state.jsonl` (model-generated facets used by the scorer prompts) ships |
 | 5 | `assessments/`, `reference/eedi_*` | Not started | Full release vs annotated students only; C's third-party LaTeX renderer links |
 | 6 | `screenshots/<transcript_id>/` | Waiting on the de-identified set | Layout, transcript `seconds`/`path` fields, OCR text |
@@ -68,6 +68,12 @@ CLI `tutormoments-build release snapshot|build|verify`.
 `release/annotations.py` builds `annotations/<provider>.jsonl` from the frozen `v2_annotations/source/<provider>_annotations.jsonl` (the nightly export) and `annotator_labels.json`. It fails on an annotator with no label and on any export field it does not list as kept or dropped, so upstream additions are reviewed before they ship. Builds also copy the packaged docs (`release/docs/`) to `docs/`.
 
 Open: the pending data-quality decision may change which entries ship; it will be applied in the writer and recorded here.
+
+## Benchmark labels writer (stage 3)
+
+`release/benchmark.py` builds `benchmark/dev.jsonl` and `test.jsonl` by running `v2/build_ground_truth.py` on the snapshot's annotation exports with the committed `splits.json`, in the release shape (`release_record`). Nothing is copied from `synthetic/ground_truth_v2/`. It then rebuilds them from the `annotations/` files the annotations writer just wrote and fails the build unless both runs give the same bytes, so it runs after `write_annotations`.
+
+`build_ground_truth.py` now also reads the released annotation files and has `--release`, which writes `dev.jsonl` / `test.jsonl` in the release shape: the reproduction route the schema describes. Its existing output is unchanged.
 
 ## Builds
 
