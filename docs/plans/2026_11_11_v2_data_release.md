@@ -76,7 +76,7 @@ Open: the pending data-quality decision may change which entries ship; it will b
 
 `build_ground_truth.py` is not changed for the release while the team's work on it is in progress (decided 2026-11-11): finish the data release first, then update the code. Before publishing, the code has to catch up with the schema's description, which says running the script on the released annotation files reproduces these files. Today it doesn't read the release format or write the release shape.
 
-Checked 2026-11-11 without writing to the bucket: the annotations and benchmark writers run on a local copy of snapshot `20261111T1636Z`'s annotation inputs (sha256-checked against the snapshot), with #99's writer code (`fc9f3d7`), pass every build check and give dev 640 (A 401, C 239) and test 631 (A 396, C 235), with the same labels, boundaries and annotators as the working ground truth. No bucket build has benchmark files yet; the first will be the one after the pending data-quality decision.
+Checked 2026-11-11 without writing to the bucket: the annotations and benchmark writers run on a local copy of snapshot `20261111T1636Z`'s annotation inputs (sha256-checked against the snapshot), with #99's writer code (re-run on `b0ebd3e`, after the rebase onto the `transcript_selection` change), pass every build check and give dev 640 (A 401, C 239) and test 631 (A 396, C 235), with the same labels, boundaries and annotators as the working ground truth. No bucket build has benchmark files yet; the first will be the one after the pending data-quality decision.
 
 ## Builds
 
