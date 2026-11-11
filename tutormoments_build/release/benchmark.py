@@ -1,15 +1,17 @@
 """Write ``benchmark/dev.jsonl`` and ``test.jsonl``: the gold labels for every moment.
 
-The labels are built by ``tutormoments_build.v2.build_ground_truth`` from the
-snapshot's annotation exports and the committed ``splits.json``, and written in
-their release shape (``release_splits``). Nothing is copied from the working
-ground truth in the bucket.
+The labels come from ``tutormoments_build.v2.build_ground_truth``, run unchanged
+on the snapshot's annotation exports with ``splits.json``, and are written in
+their release shape (``release_record``). Nothing is copied from the working
+ground truth in the bucket. ``build_ground_truth.py`` itself is not changed for
+the release while the team's work on it is in progress, so the release shape
+lives here.
 
-The release promises that running that script on the released annotation files
-gives these files exactly. Every build checks it: the labels are built a second
-time from the ``annotations/`` files the annotations writer just wrote, and the
-build fails unless both runs give the same bytes. So this writer must run after
-``write_annotations``.
+Every build also checks that the released annotations hold everything the labels
+depend on: the labels are built a second time from the ``annotations/`` files the
+annotations writer just wrote (reshaped back to the export's form by
+``as_export_row``), and the build fails unless both runs give the same bytes. So
+this writer must run after ``write_annotations``.
 
 Staff are excluded upstream, so no exclusion list is read; a staff annotator
 would have no release label and fail the annotations writer first.
@@ -31,9 +33,68 @@ SPLITS = gt.DEFAULT_MANIFEST
 ANNOTATIONS_DIR = "annotations/"
 BENCHMARK_DIR = "benchmark/"
 
+# build_ground_truth output stem -> release file name. Hugging Face reads "dev"
+# as the validation split; it does not know "iteration".
+RELEASE_SPLITS = {"iteration": "dev", "test": "test"}
+
+BOUNDARY_FIELDS = ("start_turn", "end_turn", "cut_turn")
+
 
 def export_key(provider: str) -> str:
     return f"v2_annotations/source/{provider}_annotations.jsonl"
+
+
+def release_record(record: dict) -> dict:
+    """One ground-truth record in its release shape (``benchmark_labels.schema.json``).
+
+    The split takes its release name, each annotator is paired with their role
+    in one object rather than two parallel lists, ``original_boundaries`` is on
+    every row (null where the selector's stand), and the moment's status (always
+    adjudicated here) and selection time (on the annotations row) are dropped.
+    """
+    return {
+        "moment_id": record["moment_id"],
+        "source": record["source"],
+        "transcript_id": record["transcript_id"],
+        "split": RELEASE_SPLITS[record["split"]],
+        **{f: record[f] for f in BOUNDARY_FIELDS},
+        "boundaries_source": record["boundaries_source"],
+        "original_boundaries": record.get("original_boundaries"),
+        "situation_type": record["situation_type"],
+        "situation_votes": record["situation_votes"],
+        "labels": record["labels"],
+        "action_ties": record["action_ties"],
+        "n_votes": record["n_votes"],
+        "annotators": [
+            {"annotator": annotator, "role": role}
+            for annotator, role in zip(
+                record["annotators"], record["annotator_roles"], strict=True
+            )
+        ],
+    }
+
+
+def as_export_row(row: dict) -> dict:
+    """A released annotations row in the annotation tool's export shape.
+
+    The release names each annotator by label (``annotator``) where the export
+    has ``annotator_id``, and records a transcript with no key moments as
+    ``moment: null`` with one entry where the export has ``no_key_moments_record``.
+    """
+    entries = [
+        {
+            "annotator_id": e["annotator"],
+            **{k: v for k, v in e.items() if k != "annotator"},
+        }
+        for e in row["annotations"]
+    ]
+    shaped = {k: v for k, v in row.items() if k not in ("moment", "annotations")}
+    if row["moment"] is None:
+        (shaped["no_key_moments_record"],) = entries
+    else:
+        shaped["moment"] = row["moment"]
+        shaped["annotations"] = entries
+    return shaped
 
 
 def labels_files(
@@ -44,8 +105,14 @@ def labels_files(
         [str(p) for p in annotations], SPLITS, str(labels), str(no_staff)
     )
     files = {
-        name: Path(gt.write_split(str(out_dir), name, records))
-        for name, records in gt.release_splits(out).items()
+        RELEASE_SPLITS[stem]: Path(
+            gt.write_split(
+                str(out_dir),
+                RELEASE_SPLITS[stem],
+                [release_record(r) for r in records],
+            )
+        )
+        for stem, records in out.items()
     }
     return files, dropped
 
@@ -75,6 +142,8 @@ def write_benchmark_labels(ctx: BuildContext) -> list[Output]:
         dict(dropped),
     )
 
+    # The released annotations, reshaped for build_ground_truth. Their annotators
+    # are labels already, so the label map they need is labels -> themselves.
     released = []
     for provider in PROVIDERS:
         key = ctx.build_prefix + ANNOTATIONS_DIR + f"{provider}.jsonl"
@@ -83,8 +152,16 @@ def write_benchmark_labels(ctx: BuildContext) -> list[Output]:
                 f"{ANNOTATIONS_DIR}{provider}.jsonl is not in the build; the benchmark "
                 "labels are checked against it, so write_annotations must run first"
             )
-        released.append(ctx.store.download(key, released_dir / f"{provider}.jsonl"))
-    rebuilt, _ = labels_files(released, labels, no_staff, work / "from_release")
+        path = released_dir / f"{provider}_annotations.jsonl"
+        with open(path, "w", encoding="utf-8") as out:
+            for line in ctx.store.iter_lines(key):
+                out.write(json.dumps(as_export_row(json.loads(line))) + "\n")
+        released.append(path)
+    own_labels = work / "release_labels.json"
+    own_labels.write_text(
+        json.dumps({label: label for label in json.loads(labels.read_text()).values()})
+    )
+    rebuilt, _ = labels_files(released, own_labels, no_staff, work / "from_release")
 
     outputs = []
     for name, path in built.items():

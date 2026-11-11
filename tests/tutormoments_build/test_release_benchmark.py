@@ -95,9 +95,68 @@ def test_release_files_match_the_ground_truth_script_run_on_the_export(
     no_staff.write_text("[]")
     out, _ = gt.build(paths, str(splits), str(labels), str(no_staff))
 
-    for name, records in gt.release_splits(out).items():
+    for stem, name in (("iteration", "dev"), ("test", "test")):
+        records = [benchmark.release_record(r) for r in out[stem]]
         expected = "".join(json.dumps(r) + "\n" for r in records).encode()
         assert released(store, manifest, f"benchmark/{name}.jsonl") == expected
+
+
+def ground_truth_record(**overrides):
+    record = {
+        "moment_id": U(2),
+        "source": "tutoring_provider_a",
+        "transcript_id": U(1),
+        "split": "iteration",
+        "start_turn": 2,
+        "end_turn": 6,
+        "cut_turn": 4,
+        "boundaries_source": "selector",
+        "situation_type": "scaffold_only",
+        "situation_votes": {"scaffolding": 2, "rigor": 0},
+        "labels": {
+            "scaffolding_present": True,
+            "rigor_present": False,
+            "over_scaffolding_present": False,
+        },
+        "action_ties": [],
+        "n_votes": 2,
+        "annotators": ["A01", "A02"],
+        "annotator_roles": ["selector", "reannotator"],
+        "moment_status": "adjudicated",
+        "moment_created_at": "2026-10-01T11:00:00Z",
+    }
+    record.update(overrides)
+    return record
+
+
+def test_release_record_renames_the_split_and_pairs_annotators_with_roles():
+    row = benchmark.release_record(ground_truth_record())
+    assert row["split"] == "dev"
+    assert row["annotators"] == [
+        {"annotator": "A01", "role": "selector"},
+        {"annotator": "A02", "role": "reannotator"},
+    ]
+    assert row["original_boundaries"] is None
+    for dropped in ("annotator_roles", "moment_status", "moment_created_at"):
+        assert dropped not in row
+
+
+def test_release_record_keeps_moved_boundaries():
+    original = {"start_turn": 2, "end_turn": 8, "cut_turn": 4}
+    row = benchmark.release_record(
+        ground_truth_record(
+            split="test",
+            boundaries_source="reannotator",
+            original_boundaries=original,
+        )
+    )
+    assert row["split"] == "test"
+    assert row["original_boundaries"] == original
+
+
+def test_release_record_refuses_unpaired_roles():
+    with pytest.raises(ValueError):
+        benchmark.release_record(ground_truth_record(annotator_roles=["selector"]))
 
 
 def test_writer_needs_the_annotations_release(tmp_path, splits):

@@ -71,9 +71,9 @@ Open: the pending data-quality decision may change which entries ship; it will b
 
 ## Benchmark labels writer (stage 3)
 
-`release/benchmark.py` builds `benchmark/dev.jsonl` and `test.jsonl` by running `v2/build_ground_truth.py` on the snapshot's annotation exports with the committed `splits.json`, in the release shape (`release_record`). Nothing is copied from `synthetic/ground_truth_v2/`. It then rebuilds them from the `annotations/` files the annotations writer just wrote and fails the build unless both runs give the same bytes, so it runs after `write_annotations`.
+`release/benchmark.py` builds `benchmark/dev.jsonl` and `test.jsonl` by running `v2/build_ground_truth.py` (unchanged) on the snapshot's annotation exports with the committed `splits.json`, and writes them in the release shape (`release_record`, in the writer). Nothing is copied from `synthetic/ground_truth_v2/`. It then rebuilds them from the `annotations/` files the annotations writer just wrote, reshaped back to the export's form, and fails the build unless both runs give the same bytes, so it runs after `write_annotations`.
 
-`build_ground_truth.py` now also reads the released annotation files and has `--release`, which writes `dev.jsonl` / `test.jsonl` in the release shape: the reproduction route the schema describes. Its existing output is unchanged.
+`build_ground_truth.py` is not changed for the release while the team's work on it is in progress (decided 2026-11-11): finish the data release first, then update the code. Before publishing, the code has to catch up with the schema's description, which says running the script on the released annotation files reproduces these files. Today it doesn't read the release format or write the release shape.
 
 ## Builds
 
