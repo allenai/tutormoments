@@ -14,6 +14,8 @@ CLI `tutormoments-build release snapshot|build|verify`.
   (`<UTC minute>-<commit>`). The bucket is passed via `--root` /
   `TUTORMOMENTS_RELEASE_ROOT` and never written in code or docs.
 - Publish target: a new Hugging Face dataset repo (name TBD), screenshots included.
+- Bucket builds run only when asked: one build per real change. Writers are checked first with a local build (`LocalStore`) on the snapshot's inputs, sha256-checked against the snapshot.
+- PRs are stacked: #97 (plumbing, into `v2`) ← #98 (annotations) ← #99 (benchmark labels) ← #100 (moments). Each stage branches from the one before; a change lower in the stack is pushed there and the branches above are rebased.
 
 ## Stages
 
@@ -24,7 +26,7 @@ CLI `tutormoments-build release snapshot|build|verify`.
 | 2 | `annotations/<provider>.jsonl` | Schema, writer and guide in PR #98 (stacked on #97); first real build 2026-11-11 (below) | Review of #98 and the build by the annotation manager and Albert; one data-quality decision pending (internal). The `transcript_selection` change (2026-11-11) is not in that build |
 | 3 | `benchmark/dev.jsonl`, `test.jsonl` | Schema approved 2026-11-11; schema and writer in PR #99 (stacked on #98) | The stage 2 data-quality decision changes provider C's labels, so no C build is reviewed before it |
 | 4 | `benchmark/moments.jsonl` | Schema approved 2026-11-11; schema and writer in PR #100 (stacked on #99) | Open research questions (persona, continuation length) are runtime choices; the runtime needs a v2 loader and a wait-time tool |
-| 5 | `assessments/`, `reference/eedi_*` | Not started | Full release vs annotated students only; C's third-party LaTeX renderer links |
+| 5 | `assessments/`, `reference/eedi_*` | Not started; see "Starting stage 5" | Full release vs annotated students only; C's third-party LaTeX renderer links |
 | 6 | `screenshots/<transcript_id>/` | Waiting on the de-identified set | Layout, transcript `seconds`/`path` fields, OCR text |
 | 7 | `manifest.json` schema, README dataset card | Not started (builds already write a manifest) | Card carries A's two dropped fields and the surrogate-name caveat |
 | — | Publish | Not started | HF repo, full build, verify, dry-run push |
@@ -110,6 +112,27 @@ Checked 2026-11-11 without writing to the bucket: the annotations and benchmark 
 
 Checked 2026-11-11 without writing to the bucket: a full local build (transcripts, annotations, labels, moments) on snapshot `20261111T1636Z`'s inputs (sha256-checked against the snapshot) passes every check and `verify`, and gives 1,271 moments (110 MB): dev A 401 / C 239, test A 396 / C 235. All 797 provider A views are the boundaries' annotator's; 723 cut after the `cut_turn` row and 74 after a screen-event row.
 
+## Starting stage 5
+
+Stage 5 ships the assessment data and the Eedi reference tables. Every input is already frozen in snapshot `20261111T1636Z`, with its bucket schema (`schemas/`) and data dictionary (`docs/`):
+
+| Release file | Snapshot input | Size | What it is |
+|---|---|---|---|
+| `assessments/tutoring_provider_a.jsonl` | `source/tutoring_provider_a_eedi_quiz_sessions.jsonl` | 163 MB | One row per Eedi quiz session a provider A student attempted, with its questions |
+| `assessments/tutoring_provider_c.jsonl` | `source/tutoring_provider_c_assessments.jsonl` | 199 MB | One row per assessment: pre- and post-program, or end of a single session. Key: `assessment_type`, `program_id`, `session_id` (absent on program assessments) |
+| `reference/eedi_constructs.jsonl`, `eedi_diagnostic_questions.jsonl`, `eedi_misconceptions.jsonl`, `eedi_subjects.jsonl` | `source/eedi_*.jsonl` | under 2 MB each | Public Eedi data: constructs, question text and answers, misconceptions, the subject taxonomy |
+
+Joins: A quiz sessions join transcripts on `student_id`, and `questions[].parent_question_id` resolves to `eedi_diagnostic_questions`. C assessments join on `program_id` (pre/post-program; see "C programs" above) and `session_id` (end of session).
+
+Decisions to make, schema first as in earlier stages, with real rows converted for review:
+
+1. **Full release or annotated students only.** The release plan marks both assessment files "if full release": ship every student's assessments, or only those of students with annotated transcripts.
+2. **Provider C's links to a third-party LaTeX renderer** in question content: keep, strip or replace.
+3. **Public-facing schema text**, as in stage 1: the A quiz-session schema's description cites an internal pipeline path, and join references should name release files.
+4. **Reference tables**: the plan ships them unchanged; check the licence and attribution the dataset card (stage 7) must carry.
+
+The stage 1 pattern (`transcripts.py`: the bucket schema plus declared changes, re-checked every build by `check_schema_drift`) likely fits: these files ship mostly as the bucket has them. Branch from #100's branch (`feature/v2-moments`).
+
 ## Builds
 
 All in the de-identified bucket, under `release-v2/`.
@@ -122,8 +145,9 @@ All in the de-identified bucket, under `release-v2/`.
 
 1. Review #97, then #98 and build `20261111T1640Z-a12705f` (finish its `verify`).
 2. Review #99 (benchmark labels schema and writer).
-3. Review #100 (benchmark moments schema and writer).
-4. Apply the pending data-quality decision in the annotations writer, then one new snapshot and build: corrected annotations plus the first benchmark labels and moments.
-5. Make the first release and bring the research path into sync with it; then every experiment run logs the release (build) ID it used. Decide the release workflow (open decision above) before the second release.
-6. Runtime (separate from the release): a v2 moments loader, a wait-time tool for the replay tutor, runs recording the build ID and the moments file's sha256. Scorer: the over-scaffolding prompt is gated on the human tutor's gold scaffolding label, which a replay lacks.
-7. Before publishing: update `build_ground_truth.py` to read the released annotations and write the release shape, once the team's work on it allows.
+3. Review #100 (benchmark moments schema and writer). Separately, #101: revisit how the cut is placed for classifier excerpts so it matches what annotators saw (some `cut_turn` values sit one turn from the drawn cut; see "Benchmark moments" above).
+4. Stage 5 (see "Starting stage 5").
+5. Apply the pending data-quality decision in the annotations writer, then one new snapshot and build: corrected annotations plus the first benchmark labels and moments.
+6. Make the first release and bring the research path into sync with it; then every experiment run logs the release (build) ID it used. Decide the release workflow (open decision above) before the second release.
+7. Runtime (separate from the release): a v2 moments loader, a wait-time tool for the replay tutor, runs recording the build ID and the moments file's sha256. Scorer: the over-scaffolding prompt is gated on the human tutor's gold scaffolding label, which a replay lacks.
+8. Before publishing: update `build_ground_truth.py` to read the released annotations and write the release shape, once the team's work on it allows.
