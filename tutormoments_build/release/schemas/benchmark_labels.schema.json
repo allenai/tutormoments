@@ -1,0 +1,213 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "benchmark_labels.schema.json",
+  "title": "benchmark/dev.jsonl, benchmark/test.jsonl",
+  "description": "Gold labels for the benchmark moments, resolved from the expert annotations in `annotations/<source>.jsonl`. One row per moment. `dev.jsonl` is for developing and tuning classifiers; `test.jsonl` is held out and should not be read until a classifier is final. Transcripts were assigned to one split or the other, so every moment of a transcript is in the same file. A moment is included only if it was adjudicated, nobody threw it out or redrew its cut point, and at least two annotators answered. Each label is a majority over every annotator who answered (selector, reannotator and each adjudicator), with a tie counting as true. Both files are generated from `annotations/<source>.jsonl` by `tutormoments_build/v2/build_ground_truth.py` in the TutorMoments code repository, which assigns transcripts to splits from the repository's `tutormoments_build/v2/splits.json`; running it on the released annotation files gives these files exactly.",
+  "type": "object",
+  "additionalProperties": false,
+  "required": [
+    "moment_id",
+    "source",
+    "transcript_id",
+    "split",
+    "start_turn",
+    "end_turn",
+    "cut_turn",
+    "boundaries_source",
+    "original_boundaries",
+    "situation_type",
+    "situation_votes",
+    "labels",
+    "action_ties",
+    "n_votes",
+    "annotators"
+  ],
+  "properties": {
+    "moment_id": {
+      "type": "string",
+      "pattern": "^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$",
+      "description": "UUIDv5 surrogate for the moment. Joins to `annotations/<source>.jsonl` `moment.moment_id`. Unique across both files."
+    },
+    "source": {
+      "type": "string",
+      "pattern": "^tutoring_provider_[a-z]+$",
+      "description": "The provider the transcript came from."
+    },
+    "transcript_id": {
+      "type": "string",
+      "pattern": "^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$",
+      "description": "UUIDv5 surrogate for the transcript. Joins to `transcripts/<source>.jsonl` `transcript_id`."
+    },
+    "split": {
+      "type": "string",
+      "enum": [
+        "dev",
+        "test"
+      ],
+      "description": "The file the row is in."
+    },
+    "start_turn": {
+      "type": "integer",
+      "minimum": 1,
+      "description": "First turn of the moment: the start of the situation that leads to the tutor's decision. A `turn_number` in the transcript."
+    },
+    "end_turn": {
+      "type": "integer",
+      "minimum": 1,
+      "description": "Last turn of the moment. A moment ends after the tutor's first strategy decision following the cut and the student's response to it."
+    },
+    "cut_turn": {
+      "type": "integer",
+      "minimum": 1,
+      "description": "The last turn before the tutor's decision, between `start_turn` and `end_turn`. The benchmark gives a model the transcript up to and including this turn."
+    },
+    "boundaries_source": {
+      "type": "string",
+      "enum": [
+        "selector",
+        "reannotator",
+        "adjudicator"
+      ],
+      "description": "Whose boundaries these are. `selector`: as the moment was selected. `reannotator`: as the reannotator redrew them. `adjudicator`: as an adjudicator drew them. Where two adjudicators drew different spans, the span that ends earliest is used (on an equal end, the one that starts later), with the cut most annotators chose if it falls inside that span, and otherwise that adjudicator's own cut."
+    },
+    "original_boundaries": {
+      "oneOf": [
+        {
+          "$ref": "#/$defs/Boundaries"
+        },
+        {
+          "type": "null"
+        }
+      ],
+      "description": "The boundaries as the selector drew them, where a later role changed them. Null when `boundaries_source` is `selector`."
+    },
+    "situation_type": {
+      "type": "string",
+      "enum": [
+        "scaffold_only",
+        "scaffold_maj",
+        "fifty_fifty",
+        "rigor_maj",
+        "rigor_only"
+      ],
+      "description": "What the moment called for, from the annotators' situation answers (judged from the transcript up to the cut). An annotator can say both scaffolding and rigor would be appropriate, and counts on both sides. `scaffold_only`: every annotator said scaffolding and none said rigor. `scaffold_maj`: more said scaffolding than rigor. `fifty_fifty`: as many said each. `rigor_maj`: more said rigor than scaffolding. `rigor_only`: every annotator said rigor and none said scaffolding."
+    },
+    "situation_votes": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "scaffolding",
+        "rigor"
+      ],
+      "description": "How many annotators said each strategy would be appropriate. Each count is at most `n_votes`.",
+      "properties": {
+        "scaffolding": {
+          "type": "integer",
+          "minimum": 0,
+          "description": "Annotators who said scaffolding the student would be appropriate."
+        },
+        "rigor": {
+          "type": "integer",
+          "minimum": 0,
+          "description": "Annotators who said pushing the student for rigor would be appropriate."
+        }
+      }
+    },
+    "labels": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "scaffolding_present",
+        "rigor_present",
+        "over_scaffolding_present"
+      ],
+      "description": "The gold labels: what the tutor did in their first strategy decision after the cut, up to the end of the moment. Each is a majority over the annotators who answered; a tie counts as true (`action_ties` lists the labels a tie settled).",
+      "properties": {
+        "scaffolding_present": {
+          "type": "boolean",
+          "description": "The tutor scaffolded: gave support that makes the task more accessible to the student."
+        },
+        "rigor_present": {
+          "type": "boolean",
+          "description": "The tutor pushed for rigor: raised the conceptual challenge to build critical thinking, independence and deeper understanding."
+        },
+        "over_scaffolding_present": {
+          "type": "boolean",
+          "description": "The tutor over-scaffolded: gave too much support, replacing the student's thinking. An annotator's vote is true only where they answered `scaffolding_amount` as `over_scaffolding`; it is not inferred from the other labels."
+        }
+      }
+    },
+    "action_ties": {
+      "type": "array",
+      "uniqueItems": true,
+      "description": "The labels whose vote was tied and settled as true by the tie rule. Empty when no vote tied.",
+      "items": {
+        "type": "string",
+        "enum": [
+          "scaffolding_present",
+          "rigor_present",
+          "over_scaffolding_present"
+        ]
+      }
+    },
+    "n_votes": {
+      "type": "integer",
+      "minimum": 2,
+      "description": "How many annotators answered and so voted on the labels. An adjudicator who left the answer blank does not vote."
+    },
+    "annotators": {
+      "type": "array",
+      "minItems": 2,
+      "description": "Everyone who annotated the moment, with their role, in the order the annotation tool recorded them; where there are two adjudicators, the one who saved first is listed first. The order does not affect the labels or the boundaries. Save times are on the matching entries in `annotations/<source>.jsonl`.",
+      "items": {
+        "type": "object",
+        "additionalProperties": false,
+        "required": [
+          "annotator",
+          "role"
+        ],
+        "properties": {
+          "annotator": {
+            "type": "string",
+            "pattern": "^A[0-9]{2}$",
+            "description": "The annotator's ID. One label per person, the same in every provider's file."
+          },
+          "role": {
+            "type": "string",
+            "enum": [
+              "selector",
+              "reannotator",
+              "adjudicator"
+            ],
+            "description": "The annotator's role on this moment."
+          }
+        }
+      }
+    }
+  },
+  "$defs": {
+    "Boundaries": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "start_turn",
+        "end_turn",
+        "cut_turn"
+      ],
+      "properties": {
+        "start_turn": {
+          "type": "integer",
+          "minimum": 1
+        },
+        "end_turn": {
+          "type": "integer",
+          "minimum": 1
+        },
+        "cut_turn": {
+          "type": "integer",
+          "minimum": 1
+        }
+      }
+    }
+  }
+}
