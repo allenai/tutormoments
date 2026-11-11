@@ -1,0 +1,477 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "moments.schema.json",
+  "title": "benchmark/moments.jsonl",
+  "description": "The benchmark moments: one row per moment in `benchmark/dev.jsonl` and `benchmark/test.jsonl`, holding everything needed to replay it. A replay gives a tutor model the session up to the moment's cut, has a simulated student continue it, and judges the tutor's reply against what the annotators said the moment called for (`situation_type`). Each row carries the whole session, copied unchanged from `transcripts/<source>.jsonl`, so the code decides where to cut and how to render it. The human tutor's action labels are not here: they are the gold for developing classifiers and stay in `dev.jsonl` and `test.jsonl`, joined on `moment_id`. This file changes between releases as annotations and rules change. `manifest.json` gives its sha256; record it with any results.",
+  "type": "object",
+  "additionalProperties": false,
+  "required": [
+    "moment_id",
+    "source",
+    "transcript_id",
+    "split",
+    "start_turn",
+    "cut_turn",
+    "end_turn",
+    "boundaries_source",
+    "situation_type",
+    "situation_votes",
+    "transcript",
+    "problems",
+    "annotator_view"
+  ],
+  "properties": {
+    "moment_id": {
+      "type": "string",
+      "pattern": "^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$",
+      "description": "UUIDv5 surrogate for the moment. Joins to `benchmark/dev.jsonl` and `test.jsonl` `moment_id` and to `annotations/<source>.jsonl` `moment.moment_id`."
+    },
+    "source": {
+      "type": "string",
+      "pattern": "^tutoring_provider_[a-z]+$",
+      "description": "The provider the transcript came from."
+    },
+    "transcript_id": {
+      "type": "string",
+      "pattern": "^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$",
+      "description": "UUIDv5 surrogate for the transcript. Joins to `transcripts/<source>.jsonl` `transcript_id`."
+    },
+    "split": {
+      "type": "string",
+      "enum": [
+        "dev",
+        "test"
+      ],
+      "description": "Which labels file holds this moment's action labels. Every moment is replayed; the split matters only for classifier development, where `test` is held out."
+    },
+    "start_turn": {
+      "type": "integer",
+      "minimum": 1,
+      "description": "First turn of the moment: the start of the situation that leads to the tutor's decision. A `turn_number` in the transcript."
+    },
+    "cut_turn": {
+      "type": "integer",
+      "minimum": 1,
+      "description": "The last turn before the tutor's decision, between `start_turn` and `end_turn`. The benchmark gives a model the transcript up to and including this turn."
+    },
+    "end_turn": {
+      "type": "integer",
+      "minimum": 1,
+      "description": "Last turn of the moment. A moment ends after the tutor's first strategy decision following the cut and the student's response to it."
+    },
+    "boundaries_source": {
+      "type": "string",
+      "enum": [
+        "selector",
+        "reannotator",
+        "adjudicator"
+      ],
+      "description": "Whose boundaries these are. `selector`: as the moment was selected. `reannotator`: as the reannotator redrew them. `adjudicator`: as an adjudicator drew them. Where two adjudicators drew different spans, the span that ends earliest is used (on an equal end, the one that starts later), with the cut most annotators chose if it falls inside that span, and otherwise that adjudicator's own cut."
+    },
+    "situation_type": {
+      "type": "string",
+      "enum": [
+        "scaffold_only",
+        "scaffold_maj",
+        "fifty_fifty",
+        "rigor_maj",
+        "rigor_only"
+      ],
+      "description": "What the moment called for, from the annotators' situation answers (judged from the transcript up to the cut). An annotator can say both scaffolding and rigor would be appropriate, and counts on both sides. `scaffold_only`: every annotator said scaffolding and none said rigor. `scaffold_maj`: more said scaffolding than rigor. `fifty_fifty`: as many said each. `rigor_maj`: more said rigor than scaffolding. `rigor_only`: every annotator said rigor and none said scaffolding."
+    },
+    "situation_votes": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "scaffolding",
+        "rigor"
+      ],
+      "description": "How many annotators said each strategy would be appropriate. Each count is at most `n_votes`.",
+      "properties": {
+        "scaffolding": {
+          "type": "integer",
+          "minimum": 0,
+          "description": "Annotators who said scaffolding the student would be appropriate."
+        },
+        "rigor": {
+          "type": "integer",
+          "minimum": 0,
+          "description": "Annotators who said pushing the student for rigor would be appropriate."
+        }
+      }
+    },
+    "transcript": {
+      "type": "array",
+      "minItems": 1,
+      "description": "The whole session: every dialogue turn and screen event, each copied unchanged from `transcripts/<source>.jsonl` and held under `turn` or `enrichment`. Screen events (provider A only) are placed before the turn their `before_turn` names, in `enrichment_number` order; events with no `before_turn` come after the last turn. This is not always where the annotators saw them: see `annotator_view`."
+    },
+    "problems": {
+      "description": "The session's curriculum slides, copied unchanged from `transcripts/tutoring_provider_c.jsonl` `problems`. The annotators saw the slide images, which cannot be released; `problem_text` describes each slide, and `learning_objective.year` is the school year the annotators saw. Null for providers that record no problems."
+    },
+    "annotator_view": {
+      "description": "How the annotation tool showed the moment to the annotator whose boundaries it uses (`boundaries_source`), row by row from top to bottom. The tool showed some screen events as part of the turn before them instead of on a row of their own, and this varied between tool versions and annotators, so this is the only record of which side of the cut an annotator saw each event on. Annotators could also put the cut after a screen-event row; `cut_turn` is then the tool's conversion of that position to a turn number, which is sometimes the turn before the row and sometimes the turn after it. `in_situation` gives the cut as the annotator drew it. Null where the annotation export records no view (provider C, which has no screen events).",
+      "oneOf": [
+        {
+          "$ref": "#/$defs/AnnotatorView"
+        },
+        {
+          "type": "null"
+        }
+      ]
+    }
+  },
+  "allOf": [
+    {
+      "if": {
+        "properties": {
+          "source": {
+            "const": "tutoring_provider_a"
+          }
+        }
+      },
+      "then": {
+        "properties": {
+          "transcript": {
+            "items": {
+              "oneOf": [
+                {
+                  "type": "object",
+                  "additionalProperties": false,
+                  "required": [
+                    "turn"
+                  ],
+                  "properties": {
+                    "turn": {
+                      "$ref": "#/$defs/TurnProviderA"
+                    }
+                  }
+                },
+                {
+                  "type": "object",
+                  "additionalProperties": false,
+                  "required": [
+                    "enrichment"
+                  ],
+                  "properties": {
+                    "enrichment": {
+                      "$ref": "#/$defs/EnrichmentProviderA"
+                    }
+                  }
+                }
+              ]
+            }
+          },
+          "problems": {
+            "type": "null"
+          }
+        }
+      }
+    },
+    {
+      "if": {
+        "properties": {
+          "source": {
+            "const": "tutoring_provider_c"
+          }
+        }
+      },
+      "then": {
+        "properties": {
+          "transcript": {
+            "items": {
+              "oneOf": [
+                {
+                  "type": "object",
+                  "additionalProperties": false,
+                  "required": [
+                    "turn"
+                  ],
+                  "properties": {
+                    "turn": {
+                      "$ref": "#/$defs/TurnProviderC"
+                    }
+                  }
+                }
+              ]
+            }
+          },
+          "problems": {
+            "type": "array",
+            "minItems": 1,
+            "items": {
+              "$ref": "#/$defs/ProblemProviderC"
+            }
+          },
+          "annotator_view": {
+            "type": "null"
+          }
+        }
+      }
+    }
+  ],
+  "$defs": {
+    "TurnProviderA": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "turn_number",
+        "start_seconds",
+        "end_seconds",
+        "role",
+        "text"
+      ],
+      "properties": {
+        "turn_number": {
+          "type": "integer",
+          "minimum": 1,
+          "description": "1-indexed position in the transcript. Annotations refer to turns by this number."
+        },
+        "start_seconds": {
+          "type": "number",
+          "description": "Offset of the turn's start, in seconds. Measured from the start of the recording."
+        },
+        "end_seconds": {
+          "type": "number",
+          "description": "Offset of the turn's end, in seconds, from the start of the recording."
+        },
+        "role": {
+          "type": "string",
+          "enum": [
+            "Student",
+            "Tutor"
+          ],
+          "description": "The speaker. Provider A uses only `Tutor` and `Student`."
+        },
+        "text": {
+          "type": "string",
+          "description": "What the speaker said. De-identified with surrogate names; names that are part of problem content (e.g. a word problem) may be left unchanged."
+        }
+      },
+      "$comment": "Copied unchanged from `tutoring_provider_a.schema.json` `$defs.Turn`; the build checks the two stay identical."
+    },
+    "EnrichmentProviderA": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "enrichment_number",
+        "type",
+        "start_seconds",
+        "end_seconds",
+        "before_turn",
+        "label",
+        "content"
+      ],
+      "properties": {
+        "enrichment_number": {
+          "type": "integer",
+          "minimum": 1,
+          "description": "1-based position in enrichments[], mirroring turn_number. The canonical handle for referencing an enrichment: (transcript_id, enrichment_number). Positional (raw line order), not timestamp-derived — enrichments may share identical start_seconds/end_seconds."
+        },
+        "type": {
+          "type": "string",
+          "enum": [
+            "pause",
+            "screen_update",
+            "screen_interaction",
+            "problem_change",
+            "other"
+          ]
+        },
+        "start_seconds": {
+          "type": "number"
+        },
+        "end_seconds": {
+          "type": "number"
+        },
+        "before_turn": {
+          "type": [
+            "integer",
+            "null"
+          ],
+          "description": "Turn number this enrichment precedes; null when after the final turn. May not be precise in all cases."
+        },
+        "label": {
+          "type": "string"
+        },
+        "content": {
+          "type": "string",
+          "description": "Description of what happened in the session video with PII surrogated. Generated by a Gemini-based pipeline. May be empty. Present only for the 2025-10-16 batch."
+        }
+      },
+      "$comment": "Copied unchanged from `tutoring_provider_a.schema.json` `$defs.Enrichment`; the build checks the two stay identical."
+    },
+    "TurnProviderC": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "turn_number",
+        "role",
+        "text",
+        "start_seconds"
+      ],
+      "properties": {
+        "turn_number": {
+          "type": "integer",
+          "minimum": 1,
+          "description": "1-indexed position in the transcript. Annotations refer to turns by this number."
+        },
+        "start_seconds": {
+          "type": "number",
+          "minimum": 0,
+          "description": "Offset of the turn's start, in seconds. Measured from the session's first turn. Provider C gives no end time."
+        },
+        "role": {
+          "type": "string",
+          "enum": [
+            "Tutor",
+            "Student",
+            "Unattributed"
+          ],
+          "description": "The speaker. `Unattributed` is speech the transcription assigned to neither participant."
+        },
+        "text": {
+          "type": "string",
+          "minLength": 1,
+          "description": "What the speaker said. De-identified with surrogate names; names that are part of problem content (e.g. a word problem) may be left unchanged to match the problem text."
+        }
+      },
+      "$comment": "Copied unchanged from `tutoring_provider_c.schema.json` `$defs.Turn`; the build checks the two stay identical."
+    },
+    "ProblemProviderC": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "slide_id",
+        "slide_position",
+        "learning_objective"
+      ],
+      "description": "Provider C shared slides of the curriculum the student and tutor were schedueld to work through during the tutoring session. The problem text is a written description of the math content on the slide..",
+      "properties": {
+        "slide_id": {
+          "type": [
+            "integer",
+            "null"
+          ],
+          "description": "Partner identifier for the slide.",
+          "examples": [
+            18199
+          ]
+        },
+        "slide_position": {
+          "type": "integer",
+          "minimum": 1,
+          "description": "1-indexed position of the slide within its objective's deck."
+        },
+        "learning_objective": {
+          "$ref": "#/$defs/LearningObjective",
+          "description": "The curriculum objective this slide belongs to. Repeated on every slide sharing an `id`."
+        },
+        "problem_text": {
+          "type": "string",
+          "minLength": 1,
+          "description": "Prose description of what the slide showed, generated from the slide image using gemini-3-flash-preview. Identical on every entry sharing a `slide_id`; absent, never empty, where there is no description."
+        }
+      },
+      "$comment": "Copied unchanged from `tutoring_provider_c.schema.json` `$defs.Problem`; the build checks the two stay identical."
+    },
+    "LearningObjective": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "id",
+        "title",
+        "year"
+      ],
+      "description": "A curriculum objective.",
+      "properties": {
+        "id": {
+          "type": "integer",
+          "description": "Partner identifier for the objective. Same ID space as `assessments/tutoring_provider_c.jsonl` `questions[].lesson_id`."
+        },
+        "title": {
+          "type": "string",
+          "minLength": 1,
+          "description": "The objective in words.",
+          "examples": [
+            "Adding money using the column method."
+          ]
+        },
+        "year": {
+          "type": "integer",
+          "minimum": 1,
+          "maximum": 10,
+          "description": "UK school year of the objective. Subtract one for the US grade (e.g. UK Year 2 = US Grade 1)."
+        }
+      },
+      "$comment": "Copied unchanged from `tutoring_provider_c.schema.json` `$defs.LearningObjective`; the build checks the two stay identical."
+    },
+    "AnnotatorView": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "annotator",
+        "role",
+        "interface_version",
+        "rows"
+      ],
+      "properties": {
+        "annotator": {
+          "type": "string",
+          "pattern": "^A[0-9]{2}$",
+          "description": "The annotator's ID, as in `annotations/<source>.jsonl`."
+        },
+        "role": {
+          "type": "string",
+          "enum": [
+            "selector",
+            "reannotator",
+            "adjudicator"
+          ],
+          "description": "The annotator's role on this moment."
+        },
+        "interface_version": {
+          "type": "string",
+          "description": "Version of the annotation tool they used. Versions before 2.10 never showed screen events as part of a turn."
+        },
+        "rows": {
+          "type": "array",
+          "minItems": 1,
+          "items": {
+            "$ref": "#/$defs/ViewRow"
+          }
+        }
+      }
+    },
+    "ViewRow": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "turn_number",
+        "enrichment_numbers",
+        "in_situation"
+      ],
+      "properties": {
+        "turn_number": {
+          "type": [
+            "integer",
+            "null"
+          ],
+          "minimum": 1,
+          "description": "The dialogue turn on this row. Null for a row of screen events only."
+        },
+        "enrichment_numbers": {
+          "type": "array",
+          "items": {
+            "type": "integer",
+            "minimum": 1
+          },
+          "description": "Screen events shown on this row, by `enrichment_number`. On a turn row they were shown as part of that turn. A screen event of the span on no row was not shown."
+        },
+        "in_situation": {
+          "type": "boolean",
+          "description": "True for rows up to and including the one the annotator put the cut after: what they judged the situation from. False for rows after it: the tutor's action. Where the moment's cut is not this annotator's own (two adjudicators drew different spans and the cut most annotators chose was used), the cut is placed after the last row holding `cut_turn`."
+        }
+      }
+    }
+  }
+}
