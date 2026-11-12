@@ -1,0 +1,200 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "tutoring_provider_c.schema.json",
+  "title": "transcripts/tutoring_provider_c.jsonl",
+  "description": "One de-identified Tutoring Provider C transcript per line, unique on `transcript_id`. Text-only transcription executed by the provider: no video, no audio, no screen recording. A session is the dialogue plus the text of the problem the tutor was to work through. Every row also satisfies `transcript_core.schema.json`.",
+  "type": "object",
+  "additionalProperties": false,
+  "required": [
+    "transcript_id",
+    "source",
+    "batch",
+    "has_video",
+    "turns",
+    "session",
+    "problems"
+  ],
+  "properties": {
+    "transcript_id": {
+      "type": "string",
+      "pattern": "^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$",
+      "description": "UUIDv5 surrogate for the transcript. Primary key; annotations and moments join on it.",
+      "examples": [
+        "52e4acb9-a059-5a41-ab59-5f475d5d644e"
+      ]
+    },
+    "source": {
+      "type": "string",
+      "const": "tutoring_provider_c",
+      "description": "The provider this transcript came from; matches the file name."
+    },
+    "batch": {
+      "type": "string",
+      "minLength": 1,
+      "description": "Partner delivery this transcript came from. Provider C delivered once, so this is always `\"2026-07-06\"`.",
+      "const": "2026-07-06"
+    },
+    "has_video": {
+      "type": "boolean",
+      "const": false,
+      "description": "Whether the partner provided a recording of the session. Recordings are not released. Provider C provided none."
+    },
+    "turns": {
+      "type": "array",
+      "minItems": 1,
+      "description": "Ordered dialogue turns. `turn_number` is the order authority.",
+      "items": {
+        "$ref": "#/$defs/Turn"
+      }
+    },
+    "session": {
+      "$ref": "#/$defs/Session",
+      "description": "Surrogate identifiers for the session and its participants. Also carries the student's program."
+    },
+    "problems": {
+      "type": "array",
+      "minItems": 1,
+      "description": "The slides the tutor was to work through, in presentation order.",
+      "items": {
+        "$ref": "#/$defs/Problem"
+      }
+    }
+  },
+  "$defs": {
+    "Turn": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "turn_number",
+        "role",
+        "text",
+        "start_seconds"
+      ],
+      "properties": {
+        "turn_number": {
+          "type": "integer",
+          "minimum": 1,
+          "description": "1-indexed position in the transcript. Annotations refer to turns by this number."
+        },
+        "start_seconds": {
+          "type": "number",
+          "minimum": 0,
+          "description": "Offset of the turn's start, in seconds. Measured from the session's first turn. Provider C gives no end time."
+        },
+        "role": {
+          "type": "string",
+          "enum": [
+            "Tutor",
+            "Student",
+            "Unattributed"
+          ],
+          "description": "The speaker. `Unattributed` is speech the transcription assigned to neither participant."
+        },
+        "text": {
+          "type": "string",
+          "minLength": 1,
+          "description": "What the speaker said. De-identified with surrogate names; names that are part of problem content (e.g. a word problem) may be left unchanged to match the problem text."
+        }
+      }
+    },
+    "Session": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "session_id",
+        "tutor_id",
+        "student_id",
+        "program_id"
+      ],
+      "description": "Surrogate identifiers for the session and its participants. Also carries the student's program.",
+      "properties": {
+        "session_id": {
+          "type": "string",
+          "pattern": "^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$",
+          "description": "UUIDv5 surrogate for the partner's session ID. Joins to `assessments/tutoring_provider_c.jsonl` `session_id`."
+        },
+        "tutor_id": {
+          "type": "string",
+          "pattern": "^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$",
+          "description": "UUIDv5 surrogate for the partner's tutor ID. Stable across this tutor's sessions."
+        },
+        "student_id": {
+          "type": "string",
+          "pattern": "^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$",
+          "description": "UUIDv5 surrogate for the partner's student ID. Stable across this student's sessions. Joins to `assessments/tutoring_provider_c.jsonl` `student_id`."
+        },
+        "program_id": {
+          "type": "string",
+          "pattern": "^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$",
+          "description": "UUIDv5 surrogate for the program: the block of sessions the student was enrolled in. Joins to `assessments/tutoring_provider_c.jsonl` `program_id`, where the pre- and post-program assessments for this program sit. Use it rather than `student_id` to pair sessions with those assessments: some students have more than one program."
+        }
+      }
+    },
+    "Problem": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "slide_id",
+        "slide_position",
+        "learning_objective"
+      ],
+      "description": "Provider C shared slides of the curriculum the student and tutor were schedueld to work through during the tutoring session. The problem text is a written description of the math content on the slide..",
+      "properties": {
+        "slide_id": {
+          "type": [
+            "integer",
+            "null"
+          ],
+          "description": "Partner identifier for the slide.",
+          "examples": [
+            18199
+          ]
+        },
+        "slide_position": {
+          "type": "integer",
+          "minimum": 1,
+          "description": "1-indexed position of the slide within its objective's deck."
+        },
+        "learning_objective": {
+          "$ref": "#/$defs/LearningObjective",
+          "description": "The curriculum objective this slide belongs to. Repeated on every slide sharing an `id`."
+        },
+        "problem_text": {
+          "type": "string",
+          "minLength": 1,
+          "description": "Prose description of what the slide showed, generated from the slide image using gemini-3-flash-preview. Identical on every entry sharing a `slide_id`; absent, never empty, where there is no description."
+        }
+      }
+    },
+    "LearningObjective": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "id",
+        "title",
+        "year"
+      ],
+      "description": "A curriculum objective.",
+      "properties": {
+        "id": {
+          "type": "integer",
+          "description": "Partner identifier for the objective. Same ID space as `assessments/tutoring_provider_c.jsonl` `questions[].lesson_id`."
+        },
+        "title": {
+          "type": "string",
+          "minLength": 1,
+          "description": "The objective in words.",
+          "examples": [
+            "Adding money using the column method."
+          ]
+        },
+        "year": {
+          "type": "integer",
+          "minimum": 1,
+          "maximum": 10,
+          "description": "UK school year of the objective. Subtract one for the US grade (e.g. UK Year 2 = US Grade 1)."
+        }
+      }
+    }
+  }
+}
