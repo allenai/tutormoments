@@ -1,7 +1,8 @@
 """Build a release from a frozen snapshot into ``<release>/builds/<build_id>/``.
 
-A build runs each writer in ``default_writers()``, checks every file it wrote
-(``checks.py``), and only then writes ``manifest.json``. A build folder without
+A build copies the packaged schemas and docs, runs each writer in
+``default_writers()``, checks every data file it wrote (``checks.py``), and only
+then writes ``manifest.json``. A build folder without
 a manifest failed or is incomplete and must not be published. A failed build
 leaves ``checks.json`` beside its files saying why.
 
@@ -35,6 +36,7 @@ logger = logging.getLogger("tutormoments_build.release.build")
 MANIFEST_FILE = "manifest.json"
 CHECKS_FILE = "checks.json"
 SCHEMA_DIR = "schemas/"
+DOCS_DIR = "docs/"
 MANIFEST_VERSION = "1"
 
 
@@ -72,9 +74,10 @@ Writer = Callable[[BuildContext], list[Output]]
 def default_writers() -> tuple[Writer, ...]:
     """Release writers, run in order. Each stage adds its writer once its schema
     is approved. Imported here because writers import this module."""
+    from tutormoments_build.release.annotations import write_annotations
     from tutormoments_build.release.transcripts import write_transcripts
 
-    return (write_transcripts,)
+    return (write_transcripts, write_annotations)
 
 
 def build_prefix(release: str, build_id: str) -> str:
@@ -105,6 +108,16 @@ def packaged_schemas() -> dict[str, bytes]:
     }
 
 
+def packaged_docs() -> dict[str, bytes]:
+    """The release-owned docs (e.g. the annotation guide), shipped under ``docs/``."""
+    folder = resources.files("tutormoments_build.release") / "docs"
+    return {
+        entry.name: entry.read_bytes()
+        for entry in folder.iterdir()
+        if entry.name.endswith(".md")
+    }
+
+
 def run_build(
     store: Store,
     snapshot_id: str,
@@ -132,6 +145,8 @@ def run_build(
         writers = default_writers()
     for name, data in sorted(packaged_schemas().items()):
         store.write_bytes(prefix + SCHEMA_DIR + name, data)
+    for name, data in sorted(packaged_docs().items()):
+        store.write_bytes(prefix + DOCS_DIR + name, data)
 
     with tempfile.TemporaryDirectory(prefix="tutormoments-release-") as tmp:
         ctx = BuildContext(
