@@ -1,0 +1,34 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "eedi_subjects.schema.json",
+  "title": "reference/eedi_subjects.jsonl",
+  "description": "One subject per line in Eedi's curriculum taxonomy. Public Eedi data, shipped unchanged. See the dataset card for its sources and licences.",
+  "type": "object",
+  "additionalProperties": false,
+  "required": [
+    "subject_id",
+    "name",
+    "parent_id",
+    "level"
+  ],
+  "properties": {
+    "subject_id": {
+      "type": "string"
+    },
+    "name": {
+      "type": "string"
+    },
+    "parent_id": {
+      "type": [
+        "string",
+        "null"
+      ],
+      "description": "The parent subject's `subject_id`. Null only for the root (`\"Maths\"`)."
+    },
+    "level": {
+      "type": "integer",
+      "minimum": 0,
+      "description": "Depth in the taxonomy (0 = root)."
+    }
+  }
+}
