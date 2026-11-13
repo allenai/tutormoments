@@ -76,9 +76,10 @@ def default_writers() -> tuple[Writer, ...]:
     is approved. Imported here because writers import this module."""
     from tutormoments_build.release.annotations import write_annotations
     from tutormoments_build.release.benchmark import write_benchmark_labels
+    from tutormoments_build.release.moments import write_moments
     from tutormoments_build.release.transcripts import write_transcripts
 
-    return (write_transcripts, write_annotations, write_benchmark_labels)
+    return (write_transcripts, write_annotations, write_benchmark_labels, write_moments)
 
 
 def build_prefix(release: str, build_id: str) -> str:
