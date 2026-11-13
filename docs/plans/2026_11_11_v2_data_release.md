@@ -1,6 +1,6 @@
 # v2 data release: implementation status
 
-Status as of 2026-11-12. The release layout and principles live in the internal
+Status as of 2026-11-13. The release layout and principles live in the internal
 release plan doc; this file tracks implementation. Code: `tutormoments_build/release/`,
 CLI `tutormoments-build release snapshot|build|verify`.
 
@@ -28,7 +28,7 @@ CLI `tutormoments-build release snapshot|build|verify`.
 | 4 | `benchmark/moments.jsonl` | Schema approved 2026-11-11; schema and writer merged into `v2` (#100) | Open research questions (persona, continuation length) are runtime choices; the runtime needs a v2 loader and a wait-time tool |
 | 5 | `assessments/<provider>.jsonl`, `reference/eedi_*.jsonl` | Schemas approved 2026-11-12; schemas and writer in PR #102, checked on a local build (below) | Asked Eedi: feedback text on unpublished questions, and the reference tables' licence. Duplicated provider A answers: being checked upstream |
 | 6 | `screenshots/<transcript_id>/` | Waiting on the de-identified set | Layout, transcript `seconds`/`path` fields, OCR text |
-| 7 | `manifest.json` schema, README dataset card | Not started (builds already write a manifest) | Card carries A's two dropped fields, the surrogate-name caveat, and stage 5's notes (Eedi attribution, what the quiz data can't be joined to) |
+| 7 | `manifest.json` schema, README dataset card | Not started (builds already write a manifest) | Needs the Hugging Face repo name and the dataset's licence (which depends on Eedi's answer if the reference tables ship). Card carries A's two dropped fields, the surrogate-name caveat, and stage 5's notes (Eedi attribution, what the quiz data can't be joined to) |
 | — | Publish | Not started | HF repo, full build, verify, dry-run push |
 
 ## Decisions so far
@@ -138,11 +138,23 @@ All in the de-identified bucket, under `release-v2/`.
 
 ## Next
 
-1. Finish `verify` of build `20261111T1640Z-a12705f` (from inside AWS).
-2. Review #102 (stage 5: assessments and Eedi reference schemas and writer).
-3. #101: revisit how the cut is placed for classifier excerpts so it matches what annotators saw (some `cut_turn` values sit one turn from the drawn cut; see "Benchmark moments" above).
-4. Stage 5 follow-ups: Eedi's answers on feedback text and the reference-table licence; the upstream check of provider A's duplicated answers. Each is a small writer change at most.
-5. Apply the pending data-quality decision in the annotations writer, then one new snapshot and build: corrected annotations plus the first benchmark labels and moments.
-6. Make the first release and bring the research path into sync with it; then every experiment run logs the release (build) ID it used. Decide the release workflow (open decision above) before the second release.
-7. Runtime (separate from the release): a v2 moments loader, a wait-time tool for the replay tutor, runs recording the build ID and the moments file's sha256. Scorer: the over-scaffolding prompt is gated on the human tutor's gold scaffolding label, which a replay lacks.
-8. Before publishing: update `build_ground_truth.py` to read the released annotations and write the release shape, once the team's work on it allows.
+Decisions, in the order they unblock work:
+
+1. **The pending annotations data-quality decision (internal).** It blocks the most: it changes provider C's annotations, labels and moments, and the next snapshot and bucket build wait on it. That build is the first with benchmark labels and moments, and the one that would become the release. Once made: apply it in the annotations writer and record it here, then one new snapshot and build.
+2. **Stage 7:** the Hugging Face repo name, and the dataset's licence. If the Eedi reference tables ship, their terms (CC BY-NC-ND 4.0 for the NeurIPS 2020 data) carry through, so the licence waits on Eedi's answer.
+3. **#101:** whether classifier excerpts cut where annotators drew the cut (some `cut_turn` values sit one turn from it; see "Benchmark moments" above). The team's call, for the research path.
+4. **Release workflow and provenance** (open decision above): needed before the second release, not the first.
+
+Waiting on others:
+
+- Eedi: whether feedback text (`explanation`) can ship on unpublished questions, and the reference tables' licence. Each answer is a small writer change on #102 or a follow-up (null `explanation` on unlinked questions; drop the reference tables and point the card to Eedi's downloads).
+- Upstream check of provider A's duplicated answers: fixed upstream means a re-snapshot; otherwise they ship with a documented caveat.
+- Review of #102 (stage 5).
+- Stage 6: the de-identified screenshot set.
+
+Other work:
+
+- Finish `verify` of build `20261111T1640Z-a12705f` (from inside AWS).
+- Make the first release and bring the research path into sync with it; then every experiment run logs the release (build) ID it used.
+- Runtime (separate from the release): a v2 moments loader, a wait-time tool for the replay tutor, runs recording the build ID and the moments file's sha256. Scorer: the over-scaffolding prompt is gated on the human tutor's gold scaffolding label, which a replay lacks.
+- Before publishing: update `build_ground_truth.py` to read the released annotations and write the release shape, once the team's work on it allows.
