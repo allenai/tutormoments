@@ -22,8 +22,8 @@ CLI `tutormoments-build release snapshot|build|verify`.
 | 0 | Plumbing: snapshot, build, checks, manifest, verify | Done (`f9f4aac`); PR #97 into `v2` | Review + merge #97. `verify` needs retries on long S3 reads if it times out again |
 | 1 | `transcripts/<provider>.jsonl` | Schemas approved 2026-11-04; writer done; first real build 2026-11-11 (below) | Screenshot fields wait on stage 6 |
 | 2 | `annotations/<provider>.jsonl` | Schema, writer and guide in PR #98 (stacked on #97); first real build 2026-11-11 (below) | Review of #98 and the build by the annotation manager and Albert; one data-quality decision pending (internal). The `transcript_selection` change (2026-11-11) is not in that build |
-| 3 | `benchmark/dev.jsonl`, `test.jsonl` | Not started | Schema draft from `ground_truth_v2` output |
-| 4 | `benchmark/moments.jsonl` | Not started | Builder rules (benchmark-defining: needs sign-off), student persona, context format, runtime loader |
+| 3 | `benchmark/dev.jsonl`, `test.jsonl` | Schema approved 2026-11-11; schema and writer in PR #99 (stacked on #98) | The stage 2 data-quality decision changes provider C's labels, so no C build is reviewed before it |
+| 4 | `benchmark/moments.jsonl` | Not started | Builder rules (benchmark-defining: needs sign-off), student persona, context format, runtime loader. Whether `student_state.jsonl` (model-generated facets used by the scorer prompts) ships |
 | 5 | `assessments/`, `reference/eedi_*` | Not started | Full release vs annotated students only; C's third-party LaTeX renderer links |
 | 6 | `screenshots/<transcript_id>/` | Waiting on the de-identified set | Layout, transcript `seconds`/`path` fields, OCR text |
 | 7 | `manifest.json` schema, README dataset card | Not started (builds already write a manifest) | Card carries A's two dropped fields and the surrogate-name caveat |
@@ -56,12 +56,27 @@ CLI `tutormoments-build release snapshot|build|verify`.
   - No summary fields (outcome, agreement): resolved labels belong in `benchmark/`.
   - Field descriptions follow the annotators' guiding sheet.
 - **Annotation guide** ships as `docs/annotation_guide.md` (`release/docs/annotation_guide.md`): the annotators' guiding sheet with its comments, feedback tab, images (crossed out in the source), internal notes and author line removed; the guidance text is otherwise word for word.
+- **Benchmark labels** (`benchmark/dev.jsonl`, `test.jsonl`) ship as one schema for both files (`release/schemas/benchmark_labels.schema.json`): the `build_ground_truth.py` records, one row per moment. Approved 2026-11-11:
+  - `iteration` is renamed `dev` (file name and `split` value). Hugging Face reads `dev` as the validation split and doesn't know `iteration`: with `datasets` 5.1, loading a folder holding `iteration.jsonl` and `test.jsonl` silently returns only `test`. `dev`/`test` is also the usual vocabulary for researchers.
+  - Labels are rebuilt from the snapshot's annotation exports, not copied from `synthetic/ground_truth_v2/`. Checked on snapshot `20261111T1636Z`: the rebuild, and a rebuild from the release-format annotations, both reproduce the bucket's files byte for byte, so the released annotations hold everything the labels depend on (see the writer section for what the script still needs before researchers can rerun it on them).
+  - `splits.json` (transcript -> dev/test assignment, append-only) stays in the repo and is read from the code, pinned by the commit in each build's manifest; it is not snapshotted or shipped (decided 2026-11-11).
+  - `annotators` and `annotator_roles` (parallel arrays) become one array of `{annotator, role}`, so a consumer can't separate a role from its annotator. Order is the tool's (two adjudicators: first to save first); it affects neither labels nor boundaries (checked on all 363 two-adjudicator moments).
+  - Dropped: `moment_status` (always `adjudicated`) and `moment_created_at` (on the annotations row). `original_boundaries` is on every row, null where the selector's boundaries stand.
+  - Known: 4 provider A moments have no turn after the cut (`cut_turn == end_turn`). They pass the current rules and ship unless a rule changes (benchmark-defining: needs sign-off).
 
 ## Annotations writer (stage 2)
 
 `release/annotations.py` builds `annotations/<provider>.jsonl` from the frozen `v2_annotations/source/<provider>_annotations.jsonl` (the nightly export) and `annotator_labels.json`. It fails on an annotator with no label and on any export field it does not list as kept or dropped, so upstream additions are reviewed before they ship. Builds also copy the packaged docs (`release/docs/`) to `docs/`.
 
 Open: the pending data-quality decision may change which entries ship; it will be applied in the writer and recorded here.
+
+## Benchmark labels writer (stage 3)
+
+`release/benchmark.py` builds `benchmark/dev.jsonl` and `test.jsonl` by running `v2/build_ground_truth.py` (unchanged) on the snapshot's annotation exports with the committed `splits.json`, and writes them in the release shape (`release_record`, in the writer). Nothing is copied from `synthetic/ground_truth_v2/`. It then rebuilds them from the `annotations/` files the annotations writer just wrote, reshaped back to the export's form, and fails the build unless both runs give the same bytes, so it runs after `write_annotations`.
+
+`build_ground_truth.py` is not changed for the release while the team's work on it is in progress (decided 2026-11-11): finish the data release first, then update the code. Before publishing, the code has to catch up with the schema's description, which says running the script on the released annotation files reproduces these files. Today it doesn't read the release format or write the release shape.
+
+Checked 2026-11-11 without writing to the bucket: the annotations and benchmark writers run on a local copy of snapshot `20261111T1636Z`'s annotation inputs (sha256-checked against the snapshot), with #99's writer code (re-run on `b0ebd3e`, after the rebase onto the `transcript_selection` change), pass every build check and give dev 640 (A 401, C 239) and test 631 (A 396, C 235), with the same labels, boundaries and annotators as the working ground truth. No bucket build has benchmark files yet; the first will be the one after the pending data-quality decision.
 
 ## Builds
 
@@ -73,6 +88,8 @@ All in the de-identified bucket, under `release-v2/`.
 
 ## Next
 
-1. Review #97, then #98 and build `20261111T1640Z-a12705f`.
-2. Apply the pending data-quality decision in the annotations writer, then snapshot and build again.
-3. Stage 3: draft the `benchmark/dev.jsonl` / `test.jsonl` schema from the `ground_truth_v2` output.
+1. Review #97, then #98 and build `20261111T1640Z-a12705f` (finish its `verify`).
+2. Review #99 (benchmark labels schema and writer).
+3. Apply the pending data-quality decision in the annotations writer, then one new snapshot and build: corrected annotations plus the first benchmark labels.
+4. Stage 4: `benchmark/moments.jsonl` (builder rules need sign-off; decide on `student_state.jsonl`).
+5. Before publishing: update `build_ground_truth.py` to read the released annotations and write the release shape, once the team's work on it allows.

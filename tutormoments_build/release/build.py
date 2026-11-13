@@ -75,9 +75,10 @@ def default_writers() -> tuple[Writer, ...]:
     """Release writers, run in order. Each stage adds its writer once its schema
     is approved. Imported here because writers import this module."""
     from tutormoments_build.release.annotations import write_annotations
+    from tutormoments_build.release.benchmark import write_benchmark_labels
     from tutormoments_build.release.transcripts import write_transcripts
 
-    return (write_transcripts, write_annotations)
+    return (write_transcripts, write_annotations, write_benchmark_labels)
 
 
 def build_prefix(release: str, build_id: str) -> str:
