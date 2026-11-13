@@ -1,0 +1,21 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "eedi_misconceptions.schema.json",
+  "title": "reference/eedi_misconceptions.jsonl",
+  "description": "One named Eedi misconception per line, from the Eedi Mining Misconceptions data. Public Eedi data, shipped unchanged. See the dataset card for its sources and licences.",
+  "type": "object",
+  "additionalProperties": false,
+  "required": [
+    "misconception_id",
+    "misconception_name"
+  ],
+  "properties": {
+    "misconception_id": {
+      "type": "string"
+    },
+    "misconception_name": {
+      "type": "string",
+      "description": "Description of the misconception."
+    }
+  }
+}
