@@ -15,18 +15,18 @@ CLI `tutormoments-build release snapshot|build|verify`.
   `TUTORMOMENTS_RELEASE_ROOT` and never written in code or docs.
 - Publish target: a new Hugging Face dataset repo (name TBD), screenshots included.
 - Bucket builds run only when asked: one build per real change. Writers are checked first with a local build (`LocalStore`) on the snapshot's inputs, sha256-checked against the snapshot.
-- PRs are stacked: #97 (plumbing, into `v2`) ← #98 (annotations) ← #99 (benchmark labels) ← #100 (moments). Each stage branches from the one before; a change lower in the stack is pushed there and the branches above are rebased.
+- PRs: stages 0–4 were a stack (#97 ← #98 ← #99 ← #100), merged into `v2` 2026-11-12/13. Later stages branch from `v2` and PR into it (stage 5: #102).
 
 ## Stages
 
 | # | Stage | Status | Open |
 |---|---|---|---|
-| 0 | Plumbing: snapshot, build, checks, manifest, verify | Done (`f9f4aac`); PR #97 into `v2` | Review + merge #97. `verify` needs retries on long S3 reads if it times out again |
+| 0 | Plumbing: snapshot, build, checks, manifest, verify | Done; merged into `v2` (#97) | `verify` needs retries on long S3 reads if it times out again |
 | 1 | `transcripts/<provider>.jsonl` | Schemas approved 2026-11-04; writer done; first real build 2026-11-11 (below) | Screenshot fields wait on stage 6 |
-| 2 | `annotations/<provider>.jsonl` | Schema, writer and guide in PR #98 (stacked on #97); first real build 2026-11-11 (below) | Review of #98 and the build by the annotation manager and Albert; one data-quality decision pending (internal). The `transcript_selection` change (2026-11-11) is not in that build |
-| 3 | `benchmark/dev.jsonl`, `test.jsonl` | Schema approved 2026-11-11; schema and writer in PR #99 (stacked on #98) | The stage 2 data-quality decision changes provider C's labels, so no C build is reviewed before it |
-| 4 | `benchmark/moments.jsonl` | Schema approved 2026-11-11; schema and writer in PR #100 (stacked on #99) | Open research questions (persona, continuation length) are runtime choices; the runtime needs a v2 loader and a wait-time tool |
-| 5 | `assessments/<provider>.jsonl`, `reference/eedi_*.jsonl` | Schemas approved 2026-11-12; writer done and checked on a local build (below) | Asked Eedi: feedback text on unpublished questions, and the reference tables' licence. Duplicated provider A answers: being checked upstream |
+| 2 | `annotations/<provider>.jsonl` | Schema, writer and guide merged into `v2` (#98); first real build 2026-11-11 (below) | Review of the build by the annotation team; one data-quality decision pending (internal). The `transcript_selection` change (2026-11-11) is not in that build |
+| 3 | `benchmark/dev.jsonl`, `test.jsonl` | Schema approved 2026-11-11; schema and writer merged into `v2` (#99) | The stage 2 data-quality decision changes provider C's labels, so no C build is reviewed before it |
+| 4 | `benchmark/moments.jsonl` | Schema approved 2026-11-11; schema and writer merged into `v2` (#100) | Open research questions (persona, continuation length) are runtime choices; the runtime needs a v2 loader and a wait-time tool |
+| 5 | `assessments/<provider>.jsonl`, `reference/eedi_*.jsonl` | Schemas approved 2026-11-12; schemas and writer in PR #102, checked on a local build (below) | Asked Eedi: feedback text on unpublished questions, and the reference tables' licence. Duplicated provider A answers: being checked upstream |
 | 6 | `screenshots/<transcript_id>/` | Waiting on the de-identified set | Layout, transcript `seconds`/`path` fields, OCR text |
 | 7 | `manifest.json` schema, README dataset card | Not started (builds already write a manifest) | Card carries A's two dropped fields, the surrogate-name caveat, and stage 5's notes (Eedi attribution, what the quiz data can't be joined to) |
 | — | Publish | Not started | HF repo, full build, verify, dry-run push |
@@ -138,9 +138,9 @@ All in the de-identified bucket, under `release-v2/`.
 
 ## Next
 
-1. Review #97, then #98 and build `20261111T1640Z-a12705f` (finish its `verify`).
-2. Review #99 (benchmark labels schema and writer).
-3. Review #100 (benchmark moments schema and writer). Separately, #101: revisit how the cut is placed for classifier excerpts so it matches what annotators saw (some `cut_turn` values sit one turn from the drawn cut; see "Benchmark moments" above).
+1. Finish `verify` of build `20261111T1640Z-a12705f` (from inside AWS).
+2. Review #102 (stage 5: assessments and Eedi reference schemas and writer).
+3. #101: revisit how the cut is placed for classifier excerpts so it matches what annotators saw (some `cut_turn` values sit one turn from the drawn cut; see "Benchmark moments" above).
 4. Stage 5 follow-ups: Eedi's answers on feedback text and the reference-table licence; the upstream check of provider A's duplicated answers. Each is a small writer change at most.
 5. Apply the pending data-quality decision in the annotations writer, then one new snapshot and build: corrected annotations plus the first benchmark labels and moments.
 6. Make the first release and bring the research path into sync with it; then every experiment run logs the release (build) ID it used. Decide the release workflow (open decision above) before the second release.
