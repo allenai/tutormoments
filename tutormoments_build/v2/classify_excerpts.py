@@ -205,8 +205,10 @@ def prompt_paths(version: str) -> dict[str, str]:
     }
 
 
-def available_prompt_versions() -> list[str]:
-    """Version directories present under PROMPT_ROOT, numerically where possible.
+def available_prompt_versions(root: str = PROMPT_ROOT) -> list[str]:
+    """Version directories present under ``root``, numerically where possible.
+
+    ``root`` defaults to this module's prompt set; ``taxonomy`` passes its own.
 
     Used to pick the default version and to make a bad --prompt-version say what
     the alternatives are, so a missing prompt root is an empty list rather than
@@ -214,15 +216,16 @@ def available_prompt_versions() -> list[str]:
     failure and should not be derailed by a second one.
     """
     try:
-        root = resource_path(PROMPT_ROOT)
-        names = [entry.name for entry in root.iterdir() if entry.is_dir()]
+        names = [
+            entry.name for entry in resource_path(root).iterdir() if entry.is_dir()
+        ]
     except (FileNotFoundError, NotADirectoryError):
         return []
     return sorted(names, key=lambda n: (not n.isdigit(), int(n) if n.isdigit() else n))
 
 
-def latest_prompt_version() -> str:
-    """The newest numbered prompt version present under PROMPT_ROOT.
+def latest_prompt_version(root: str = PROMPT_ROOT) -> str:
+    """The newest numbered prompt version present under ``root``.
 
     This is what a bare run classifies with. A prompt revision is written to be
     run, and a default pinned to a number would leave a bare run quietly
@@ -236,7 +239,7 @@ def latest_prompt_version() -> str:
     FALLBACK_PROMPT_VERSION when there is nothing to read, leaving the failure to
     ``load_prompt_set``, which reports it with the versions that do exist.
     """
-    numbered = [name for name in available_prompt_versions() if name.isdigit()]
+    numbered = [name for name in available_prompt_versions(root) if name.isdigit()]
     return numbered[-1] if numbered else FALLBACK_PROMPT_VERSION
 
 

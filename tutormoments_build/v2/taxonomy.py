@@ -1,7 +1,9 @@
 """Label the fine-grained tutor actions after the cut in human-human moment excerpts.
 
-Runs ``prompts/v2_helper/classify_action.md`` over the excerpts ``excerpts.py``
-builds. The prompt lists scaffolding and rigor action types and asks which ones
+Runs ``prompts/v2_helper/classify_action/<version>/classify_action.md`` over the
+excerpts ``excerpts.py`` builds. ``--prompt-version`` defaults to the newest
+numbered version directory present, and each record names the version, path and
+hash of the prompt it was made with. The prompt lists scaffolding and rigor action types and asks which ones
 the tutor uses after the cut, as a JSON array of
 ``{"evidence": <turn numbers>, "category": <action type>}``.
 
@@ -25,7 +27,9 @@ The excerpt and model setup are shared with ``classify_excerpts``: by default
 (``--context-turns full`` for the whole transcript), and ``--model`` resolved
 the same way (``v2`` block, ``v2.models``, or a ``benchmark_models`` arm).
 
-Predictions go to ``<out-dir>/<model>/<width>/<split>.jsonl``. Existing files are
+Predictions go to ``<out-dir>/<model>/<prompt-version>/<width>/<split>.jsonl``:
+a prompt edit changes what the labels mean, so rounds made with different
+versions never share a file. Existing files are
 only replaced with ``--overwrite``. Only the ``iteration`` split runs by default.
 
 Usage::
@@ -38,6 +42,7 @@ Usage::
     python -m tutormoments_build.v2.taxonomy --splits test
     python -m tutormoments_build.v2.taxonomy --model claude-opus-5
     python -m tutormoments_build.v2.taxonomy --context-turns full
+    python -m tutormoments_build.v2.taxonomy --prompt-version 1
     python -m tutormoments_build.v2.taxonomy --batch-id msgbatch_01ABC...
 """
 
@@ -49,6 +54,7 @@ import os
 import re
 import sys
 from collections import Counter
+from dataclasses import dataclass
 
 from tutormoments.logging_setup import logging_args_parent, setup_logging
 from tutormoments_build.resources import resource_text
@@ -61,11 +67,13 @@ from tutormoments_build.v2.classify_excerpts import (
     ZERO_USAGE,
     V2Spec,
     _sum_usage,
+    available_prompt_versions,
     check_writable,
     context_width,
     excerpt_at,
     fill,
     has_post_cut_content,
+    latest_prompt_version,
     load_excerpts,
     phase_config,
     pick_moment,
@@ -75,7 +83,10 @@ from tutormoments_build.v2.classify_excerpts import (
 
 logger = logging.getLogger("tutormoments_build.v2.taxonomy")
 
-PROMPT_PATH = "prompts/v2_helper/classify_action.md"
+# Numbered version directories, each holding PROMPT_FILE. A bare run uses the
+# newest one present (latest_prompt_version).
+PROMPT_ROOT = "prompts/v2_helper/classify_action"
+PROMPT_FILE = "classify_action.md"
 
 DEFAULT_OUT_DIR = "outputs/v2_taxonomy"
 
@@ -106,15 +117,50 @@ _CATEGORY_LINE = re.compile(r"^`([a-z_]+)`\s*:")
 # ===========================================================================
 
 
-def load_template() -> str:
-    return resource_text(PROMPT_PATH)
+@dataclass(frozen=True)
+class ActionPrompt:
+    """One numbered version of the classify_action prompt, loaded from disk."""
+
+    version: str
+    path: str
+    template: str
+
+
+def default_prompt_version() -> str:
+    """The newest numbered version under PROMPT_ROOT."""
+    return latest_prompt_version(PROMPT_ROOT)
+
+
+def prompt_path(version: str) -> str:
+    """Package-relative path to one version's template."""
+    return f"{PROMPT_ROOT}/{version}/{PROMPT_FILE}"
+
+
+def load_prompt(version: str | None = None) -> ActionPrompt:
+    """Load one prompt version (default: the newest), naming the others if missing."""
+    version = version or default_prompt_version()
+    path = prompt_path(version)
+    try:
+        template = resource_text(path)
+    except (FileNotFoundError, NotADirectoryError) as exc:
+        available = available_prompt_versions(PROMPT_ROOT)
+        raise FileNotFoundError(
+            f"no classify_action prompt at {path}; prompt versions available: "
+            f"{', '.join(available) or '(none)'}"
+        ) from exc
+    return ActionPrompt(version=version, path=path, template=template)
+
+
+def load_template(version: str | None = None) -> str:
+    """The template text of one prompt version (default: the newest)."""
+    return load_prompt(version).template
 
 
 def prompt_sha256(template: str) -> str:
     """Hash of the template, recorded on every prediction.
 
-    The prompt is not versioned by directory, so the hash is what tells two
-    rounds made with different revisions of it apart.
+    Recorded beside the version, so an edit made inside a version directory
+    after a round ran still shows up as a different prompt.
     """
     return hashlib.sha256(template.encode("utf-8")).hexdigest()
 
@@ -143,8 +189,7 @@ def parse_categories(template: str) -> dict[str, str]:
     missing = [f for f in FAMILY_HEADINGS.values() if f not in out.values()]
     if missing:
         raise ValueError(
-            f"{PROMPT_PATH}: no action types found under "
-            f"{', '.join(missing)} heading(s)"
+            f"prompt: no action types found under {', '.join(missing)} heading(s)"
         )
     return out
 
@@ -273,7 +318,7 @@ def build_record(
     excerpt_record: dict,
     raw_entries: dict,
     cfg: V2Spec,
-    template: str,
+    prompt: ActionPrompt,
     categories: dict[str, str],
     width: str = EXCERPT_WIDTH,
 ) -> dict:
@@ -302,13 +347,16 @@ def build_record(
         "model": cfg.model,
         "provider": cfg.provider,
         "thinking": dict(cfg.thinking),
-        "prompt": PROMPT_PATH,
-        "prompt_sha256": prompt_sha256(template),
+        "prompt": prompt.path,
+        "prompt_version": prompt.version,
+        "prompt_sha256": prompt_sha256(prompt.template),
         "context_turns": width,
         # The gold-filled {action} the model was told; None if not asked.
         "action": action_slot(excerpt_record) if reason is None else None,
         "situation_type": excerpt_record.get("situation_type"),
         "post_cut_rows": excerpt_record.get("post_cut_rows"),
+        # Dialogue turns only; evaluate_taxonomy's short-moment block reads it.
+        "post_cut_dialogue_rows": excerpt_record.get("post_cut_dialogue_rows"),
         "asked": reason is None,
         "skipped": reason,
         "taxonomy": taxonomy,
@@ -320,15 +368,15 @@ def build_record(
 def classify(
     excerpts: dict[str, list[dict]],
     cfg: V2Spec,
-    template: str,
+    prompt: ActionPrompt,
     *,
     batch_id: str | None = None,
     width: str = EXCERPT_WIDTH,
 ) -> tuple[dict[str, list[dict]], Counter]:
     """Classify every split in one pooled batch. Returns (records by split, counts)."""
-    categories = parse_categories(template)
+    categories = parse_categories(prompt.template)
     flat = [record for records in excerpts.values() for record in records]
-    entries, counts = build_entries(flat, template, width)
+    entries, counts = build_entries(flat, prompt.template, width)
 
     raw_entries = (
         run_entries(entries, cfg, batch_id=batch_id, display_name="v2_taxonomy")
@@ -339,7 +387,7 @@ def classify(
     out: dict[str, list[dict]] = {}
     for stem, records in excerpts.items():
         built = [
-            build_record(record, raw_entries, cfg, template, categories, width)
+            build_record(record, raw_entries, cfg, prompt, categories, width)
             for record in records
         ]
         for record in built:
@@ -349,9 +397,11 @@ def classify(
     return out, counts
 
 
-def prediction_dir(out_dir: str, model: str, width: str = EXCERPT_WIDTH) -> str:
-    """``<out_dir>/<model>/<width>``, with any "/" in the model id flattened."""
-    return os.path.join(out_dir, model.replace("/", "_"), width)
+def prediction_dir(
+    out_dir: str, model: str, prompt_version: str, width: str = EXCERPT_WIDTH
+) -> str:
+    """``<out_dir>/<model>/<prompt_version>/<width>``, "/" in the model id flattened."""
+    return os.path.join(out_dir, model.replace("/", "_"), prompt_version, width)
 
 
 # ===========================================================================
@@ -366,6 +416,7 @@ def report(
     cfg: V2Spec | None = None,
     out_dir: str | None = None,
     width: str = EXCERPT_WIDTH,
+    prompt: ActionPrompt | None = None,
 ) -> str:
     lines = [
         "",
@@ -377,7 +428,9 @@ def report(
     if cfg:
         knobs = ", ".join(f"{k}: {v}" for k, v in sorted(cfg.thinking.items()))
         lines += [f"  model:   {cfg.model} ({knobs or 'no reasoning params sent'})"]
-    lines += [f"  prompt:  {PROMPT_PATH}", f"  excerpt: {width}"]
+    if prompt:
+        lines.append(f"  prompt:  {prompt.path} (version {prompt.version})")
+    lines.append(f"  excerpt: {width}")
     if out_dir:
         lines.append(f"  output:  {out_dir}/")
     lines.append("")
@@ -439,6 +492,14 @@ def build_parser() -> argparse.ArgumentParser:
         "(`v2.models` or a `benchmark_models` arm). Default: the config's v2 model.",
     )
     parser.add_argument(
+        "--prompt-version",
+        default=default_prompt_version(),
+        metavar="VERSION",
+        help=f"Which numbered prompt under tutormoments_build/{PROMPT_ROOT}/ to "
+        "classify with. Defaults to the newest one present. Predictions land in "
+        "<out-dir>/<model>/<version>/<width>/.",
+    )
+    parser.add_argument(
         "--context-turns",
         type=context_width,
         default=EXCERPT_WIDTH,
@@ -468,7 +529,7 @@ def build_parser() -> argparse.ArgumentParser:
     return parser
 
 
-def _print_prompt(excerpts, prefix, template, width) -> int:
+def _print_prompt(excerpts, prefix, prompt, width) -> int:
     record = pick_moment(excerpts, prefix)
     if record is None:
         print(
@@ -483,8 +544,8 @@ def _print_prompt(excerpts, prefix, template, width) -> int:
     if reason:
         print(f"not asked: {reason}")
         return 0
-    print(f"===== {PROMPT_PATH} (@{width} excerpt) =====\n")
-    print(fill_prompt(template, record, width))
+    print(f"===== {prompt.path} (@{width} excerpt) =====\n")
+    print(fill_prompt(prompt.template, record, width))
     return 0
 
 
@@ -496,20 +557,30 @@ def main(argv: list[str] | None = None) -> int:
     if args.limit is not None:
         excerpts = {stem: records[: args.limit] for stem, records in excerpts.items()}
 
-    template = load_template()
-    parse_categories(template)  # fail on a prompt this can't read, on every path
+    prompt = load_prompt(args.prompt_version)
+    parse_categories(prompt.template)  # fail on a prompt this can't read, on every path
     width = args.context_turns
 
     if args.print_moment:
-        return _print_prompt(excerpts, args.print_moment, template, width)
+        return _print_prompt(excerpts, args.print_moment, prompt, width)
 
     cfg = phase_config(model=args.model)
-    out_dir = prediction_dir(args.out_dir, cfg.model, width)
+    out_dir = prediction_dir(args.out_dir, cfg.model, prompt.version, width)
 
     if args.dry_run:
         flat = [record for records in excerpts.values() for record in records]
-        _, counts = build_entries(flat, template, width)
-        print(report({}, counts, dry_run=True, cfg=cfg, out_dir=out_dir, width=width))
+        _, counts = build_entries(flat, prompt.template, width)
+        print(
+            report(
+                {},
+                counts,
+                dry_run=True,
+                cfg=cfg,
+                out_dir=out_dir,
+                width=width,
+                prompt=prompt,
+            )
+        )
         return 0
 
     check_writable(out_dir, args.splits, args.overwrite)
@@ -521,7 +592,7 @@ def main(argv: list[str] | None = None) -> int:
         cfg.thinking,
         width,
     )
-    out, counts = classify(excerpts, cfg, template, batch_id=args.batch_id, width=width)
+    out, counts = classify(excerpts, cfg, prompt, batch_id=args.batch_id, width=width)
 
     for stem, records in out.items():
         logger.info(
@@ -529,7 +600,17 @@ def main(argv: list[str] | None = None) -> int:
             len(records),
             write_split(out_dir, stem, records),
         )
-    print(report(out, counts, dry_run=False, cfg=cfg, out_dir=out_dir, width=width))
+    print(
+        report(
+            out,
+            counts,
+            dry_run=False,
+            cfg=cfg,
+            out_dir=out_dir,
+            width=width,
+            prompt=prompt,
+        )
+    )
     return 0
 
 

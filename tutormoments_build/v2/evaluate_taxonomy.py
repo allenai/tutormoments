@@ -18,6 +18,13 @@ For the model, the compared families are the ones the gold
 ``scaffolding_present`` / ``rigor_present`` labels mark, the same ones the
 prompt was told.
 
+**Short moments.** The model's predictions are also scored over only the moments
+with ``--short-turns`` (5 by default) or fewer dialogue turns after the cut, as
+``evaluate_scorer`` does: a short post-cut span gives less to label from, so this
+checks whether errors cluster there. The count is the record's
+``post_cut_dialogue_rows`` (dialogue turns only, screen activity not counted); a
+record without it cannot be placed and is counted and left out of the block.
+
 Gold is read from the annotation exports (``DEFAULT_ANNOTATIONS_FILES``), using
 the adjudicators only. Each adjudicator's ``final.action`` carries
 ``scaffolding_strategies`` and ``rigor_strategies`` lists; a moment's gold set is
@@ -27,9 +34,12 @@ action section blank contributes nothing. A moment no adjudicator answered has
 no gold.
 
 Gold names are mapped onto the prompt's (``GOLD_ALIASES``): ``re_explain`` and
-``re_explain_procedure`` collapse into ``re_explain``, and
-``different_representation`` is the prompt's ``diff_rep``. Free-text "other"
-strategies have no category and are carried alongside, not compared.
+``re_explain_procedure`` collapse into ``re_explain``,
+``different_representation`` is the prompt's ``diff_rep``, and gold
+``simpler_language`` is scored as ``re_explain``. Only gold is remapped, so a
+predicted ``simpler_language`` never matches. Free-text "other" strategies have
+no category and are carried alongside, not compared. The history of these
+mappings is in ``prompts/v2_helper/classify_action/README.md``.
 
 A family's strategies count as gold only where the moment's gold label marks
 that family present (``FAMILY_LABELS``): scaffolding strategies when
@@ -55,6 +65,13 @@ Usage::
     python -m tutormoments_build.v2.evaluate_taxonomy --model claude-opus-5
     python -m tutormoments_build.v2.evaluate_taxonomy --splits iteration test
     python -m tutormoments_build.v2.evaluate_taxonomy --json scores.json
+    python -m tutormoments_build.v2.evaluate_taxonomy --prompt-version 1
+    python -m tutormoments_build.v2.evaluate_taxonomy --short-turns 3
+
+Predictions are read from ``<pred-dir>/<model>/<prompt-version>/<width>/``, and
+each version directory is scored with that version's own label vocabulary. By
+default every version present is scored, side by side; ``--prompt-version``
+picks one. The first/second pass comparison uses the newest prompt's vocabulary.
 """
 
 import argparse
@@ -78,11 +95,18 @@ from tutormoments_build.v2.build_ground_truth import (
     read_rows,
 )
 from tutormoments_build.v2.classify_excerpts import DEFAULT_SPLITS
-from tutormoments_build.v2.evaluate_scorer import find_widths, read_ground_truth
+from tutormoments_build.v2.evaluate_scorer import (
+    SHORT_POST_CUT_TURNS,
+    find_prompt_versions,
+    find_widths,
+    read_ground_truth,
+    short_records,
+)
 from tutormoments_build.v2.splits import DEFAULT_ANNOTATIONS_FILES
 from tutormoments_build.v2.taxonomy import (
     ACTION_WORDING,
     DEFAULT_OUT_DIR,
+    PROMPT_ROOT,
     load_template,
     parse_categories,
 )
@@ -91,10 +115,13 @@ logger = logging.getLogger("tutormoments_build.v2.evaluate_taxonomy")
 
 DEFAULT_GROUND_TRUTH_DIR = "data/ground_truth"
 
-# Gold strategy name -> the prompt's category name.
+# Gold strategy name -> the prompt's category name. Gold only: predictions are
+# not remapped. Keep prompts/v2_helper/classify_action/README.md in sync.
 GOLD_ALIASES = {
     "re_explain_procedure": "re_explain",
     "different_representation": "diff_rep",
+    # Annotators file "simpler alternative" moves under re_explain.
+    "simpler_language": "re_explain",
 }
 
 # (gold list key, free-text key, family) in an adjudicator's final.action.
@@ -621,7 +648,8 @@ def _block(
 
 def report_model(result: dict, vocabulary: list[str]) -> str:
     title = (
-        f"  {result['model']}  --  @{result['context_turns']} excerpt  --  "
+        f"  {result['model']}  --  prompt v{result['prompt_version']}  --  "
+        f"@{result['context_turns']} excerpt  --  "
         f"{result['split']}  --  model vs adjudicator gold"
     )
     lines = _block(
@@ -642,6 +670,21 @@ def report_model(result: dict, vocabulary: list[str]) -> str:
         lines.append(
             "  labels not in the prompt, left out:  "
             + ",  ".join(f"{k} {n}" for k, n in result["unknown_labels"].items())
+        )
+
+    short = result["short"]
+    lines += ["", f"  {short['turns']} or fewer turns after the cut", ""]
+    lines += _metrics_table(short["groups"], "gold", "model")
+    if short["dropped"]:
+        lines.append(f"  not compared:  {_dropped_line(Counter(short['dropped']))}")
+    lines.append(
+        f"  {short['moments']} of {short['of_moments']} moment(s); turns are "
+        "dialogue turns after the cut, screen activity not counted"
+    )
+    if short["unknown"]:
+        lines.append(
+            f"  {short['unknown']} moment(s) have no post-cut turn count "
+            "and are left out of this block"
         )
     lines.append("")
     return "\n".join(lines)
@@ -670,11 +713,24 @@ def report_passes(result: dict, vocabulary: list[str]) -> str:
 
 
 def evaluate_predictions(
-    gold: dict[str, dict], predictions: dict[str, dict], categories: dict[str, str]
+    gold: dict[str, dict],
+    predictions: dict[str, dict],
+    categories: dict[str, str],
+    short_turns: int = SHORT_POST_CUT_TURNS,
 ) -> dict:
     pairs, dropped = pair(gold, predictions)
     unknown = Counter(label for p in pairs for label in p["pred_unknown"])
+    short, short_unknown = short_records(list(predictions.values()), short_turns)
+    short_pairs, short_dropped = pair(gold, {r["moment_id"]: r for r in short})
     return {
+        "short": {
+            "turns": short_turns,
+            "moments": len(short),
+            "of_moments": len(predictions) - short_unknown,
+            "unknown": short_unknown,
+            "groups": grouped_metrics(short_pairs, "gold", "pred", categories),
+            "dropped": dict(short_dropped),
+        },
         "groups": grouped_metrics(pairs, "gold", "pred", categories),
         "dropped": dict(dropped),
         "off_family_labels": dict(
@@ -746,7 +802,22 @@ def build_parser() -> argparse.ArgumentParser:
         help="Excerpt width to score (`full` or a turn count). Default: every "
         "width found.",
     )
+    parser.add_argument(
+        "--prompt-version",
+        default=None,
+        metavar="VERSION",
+        help="Prompt version whose predictions to score, each against its own "
+        f"prompt under tutormoments_build/{PROMPT_ROOT}/. Default: every version "
+        "present.",
+    )
     parser.add_argument("--splits", nargs="+", default=list(DEFAULT_SPLITS))
+    parser.add_argument(
+        "--short-turns",
+        type=int,
+        default=SHORT_POST_CUT_TURNS,
+        metavar="N",
+        help="Also score the moments with N or fewer dialogue turns after the cut",
+    )
     parser.add_argument(
         "--json",
         dest="json_out",
@@ -761,8 +832,8 @@ def main(argv: list[str] | None = None) -> int:
     args = build_parser().parse_args(argv)
     setup_logging(level=args.log_level, log_file=args.log_file)
 
-    categories = parse_categories(load_template())
-    vocabulary = list(categories)
+    # The passes have no prompt version; score them in the newest one's terms.
+    pass_categories = parse_categories(load_template())
     annotations = load_annotations(args.annotations)
     gold = gold_by_moment(annotations, load_annotator_labels(DEFAULT_ANNOTATOR_LABELS))
 
@@ -774,28 +845,36 @@ def main(argv: list[str] | None = None) -> int:
                 "kind": "passes",
                 "split": split,
                 **evaluate_passes(
-                    annotations, [r["moment_id"] for r in ground_truth], categories
+                    annotations,
+                    [r["moment_id"] for r in ground_truth],
+                    pass_categories,
                 ),
             }
             results.append(passes)
-            print(report_passes(passes, vocabulary))
+            print(report_passes(passes, list(pass_categories)))
 
         for model in find_models(args.pred_dir, args.model):
             model_dir = os.path.join(args.pred_dir, model)
-            for width in find_widths(model_dir, args.context_turns):
-                path = os.path.join(model_dir, width, f"{split}.jsonl")
-                if not os.path.exists(path):
-                    logger.warning("no predictions at %s; skipping", path)
-                    continue
-                result = {
-                    "kind": "model",
-                    "model": model,
-                    "context_turns": width,
-                    "split": split,
-                    **evaluate_predictions(gold, load_predictions(path), categories),
-                }
-                results.append(result)
-                print(report_model(result, vocabulary))
+            for version in find_prompt_versions(model_dir, args.prompt_version):
+                version_dir = os.path.join(model_dir, version)
+                categories = parse_categories(load_template(version))
+                for width in find_widths(version_dir, args.context_turns):
+                    path = os.path.join(version_dir, width, f"{split}.jsonl")
+                    if not os.path.exists(path):
+                        logger.warning("no predictions at %s; skipping", path)
+                        continue
+                    result = {
+                        "kind": "model",
+                        "model": model,
+                        "prompt_version": version,
+                        "context_turns": width,
+                        "split": split,
+                        **evaluate_predictions(
+                            gold, load_predictions(path), categories, args.short_turns
+                        ),
+                    }
+                    results.append(result)
+                    print(report_model(result, list(categories)))
 
     if not any(r["kind"] == "model" for r in results):
         logger.error(

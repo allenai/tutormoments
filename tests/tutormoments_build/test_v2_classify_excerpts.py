@@ -910,7 +910,9 @@ def test_the_default_prompt_version_is_the_newest_one_present(monkeypatch):
     file predictions under the old version and the comparison the edit was made
     to settle would never be made.
     """
-    monkeypatch.setattr(C, "available_prompt_versions", lambda: ["1", "2", "3"])
+    monkeypatch.setattr(
+        C, "available_prompt_versions", lambda root=C.PROMPT_ROOT: ["1", "2", "3"]
+    )
 
     assert C.latest_prompt_version() == "3"
     assert C.build_parser().parse_args([]).prompt_version == "3"
@@ -919,7 +921,9 @@ def test_the_default_prompt_version_is_the_newest_one_present(monkeypatch):
 def test_the_newest_prompt_version_is_numeric_not_alphabetical(monkeypatch):
     """v10 is newer than v9, and a scratch directory is not a version at all."""
     monkeypatch.setattr(
-        C, "available_prompt_versions", lambda: ["1", "9", "10", "scratch"]
+        C,
+        "available_prompt_versions",
+        lambda root=C.PROMPT_ROOT: ["1", "9", "10", "scratch"],
     )
 
     assert C.latest_prompt_version() == "10"
@@ -927,7 +931,7 @@ def test_the_newest_prompt_version_is_numeric_not_alphabetical(monkeypatch):
 
 def test_an_unreadable_prompt_root_falls_back_to_a_version(monkeypatch):
     """With nothing to read, load_prompt_set reports the failure, not this."""
-    monkeypatch.setattr(C, "available_prompt_versions", list)
+    monkeypatch.setattr(C, "available_prompt_versions", lambda root=C.PROMPT_ROOT: [])
 
     assert C.latest_prompt_version() == C.FALLBACK_PROMPT_VERSION
 

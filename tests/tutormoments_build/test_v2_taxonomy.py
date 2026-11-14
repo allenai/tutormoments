@@ -2,6 +2,7 @@
 
 import pytest
 
+from tutormoments_build.resources import resource_path
 from tutormoments_build.v2 import taxonomy as T
 from tutormoments_build.v2.classify_excerpts import V2Spec
 
@@ -14,6 +15,7 @@ def _excerpt(moment_id, *, scaffolding, rigor, post_cut_rows=2, split="iteration
         "transcript_id": f"t-{moment_id}",
         "split": split,
         "post_cut_rows": post_cut_rows,
+        "post_cut_dialogue_rows": post_cut_rows - 1,
         "excerpts": {
             "20": {"excerpt": f"wide ({moment_id})"},
             "full": {"excerpt": f"whole ({moment_id})"},
@@ -24,8 +26,26 @@ def _excerpt(moment_id, *, scaffolding, rigor, post_cut_rows=2, split="iteration
 
 
 @pytest.fixture(scope="module")
-def template():
-    return T.load_template()
+def prompt():
+    return T.load_prompt()
+
+
+@pytest.fixture(scope="module")
+def template(prompt):
+    return prompt.template
+
+
+def test_default_prompt_is_the_newest_numbered_version():
+    root = resource_path(T.PROMPT_ROOT)
+    numbered = [e.name for e in root.iterdir() if e.is_dir() and e.name.isdigit()]
+    newest = max(numbered, key=int)
+    assert T.default_prompt_version() == newest
+    assert T.load_prompt().path == f"{T.PROMPT_ROOT}/{newest}/{T.PROMPT_FILE}"
+
+
+def test_unknown_prompt_version_names_the_available_ones():
+    with pytest.raises(FileNotFoundError, match="prompt versions available: .*1"):
+        T.load_prompt("999")
 
 
 def test_categories_are_read_from_the_prompt_with_their_family(template):
@@ -113,7 +133,7 @@ def test_parse_actions_flags_unknown_labels_and_failures():
     assert not err and fields["actions"] == []
 
 
-def test_classify_writes_every_moment_and_records_provenance(monkeypatch, template):
+def test_classify_writes_every_moment_and_records_provenance(monkeypatch, prompt):
     excerpts = {
         "iteration": [
             _excerpt("a", scaffolding=True, rigor=False),
@@ -127,13 +147,16 @@ def test_classify_writes_every_moment_and_records_provenance(monkeypatch, templa
         }
     }
     monkeypatch.setattr(T, "run_entries", lambda entries, cfg, **kw: raw)
-    out, counts = T.classify(excerpts, CFG, template)
+    out, counts = T.classify(excerpts, CFG, prompt)
     a, b = out["iteration"]
 
     assert a["asked"] and a["action"] == "scaffold"
     assert a["taxonomy"]["actions"][0]["category"] == "hint"
     assert a["usage"]["total_tokens"] == 7
-    assert a["prompt_sha256"] == T.prompt_sha256(template)
+    assert a["prompt_sha256"] == T.prompt_sha256(prompt.template)
+    assert a["prompt"] == prompt.path
+    assert a["prompt_version"] == prompt.version
+    assert a["post_cut_dialogue_rows"] == 1
 
     assert not b["asked"] and b["skipped"] == T.NO_GOLD_ACTION
     assert b["taxonomy"] is None and b["action"] is None
@@ -141,4 +164,10 @@ def test_classify_writes_every_moment_and_records_provenance(monkeypatch, templa
 
 
 def test_prediction_dir_flattens_vendor_prefix():
-    assert T.prediction_dir("out", "org/Model", "20") == "out/org_Model/20"
+    assert T.prediction_dir("out", "org/Model", "2", "20") == "out/org_Model/2/20"
+
+
+def test_prompt_versions_never_share_a_prediction_file():
+    assert T.prediction_dir("out", "m", "1", "20") != T.prediction_dir(
+        "out", "m", "2", "20"
+    )

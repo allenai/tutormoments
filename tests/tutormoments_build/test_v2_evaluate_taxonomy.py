@@ -42,9 +42,25 @@ def _selector(annotator_id):
 def test_gold_aliases_collapse_onto_prompt_names():
     annotation = _adjudicator(
         "a",
-        scaffolding=["re_explain_procedure", "re_explain", "different_representation"],
+        scaffolding=[
+            "re_explain_procedure",
+            "re_explain",
+            "different_representation",
+            "simpler_language",
+        ],
     )
     assert E.annotation_actions(annotation)["actions"] == {"re_explain", "diff_rep"}
+
+
+def test_predicted_simpler_language_is_not_remapped():
+    record = {
+        "taxonomy": {
+            "actions": [
+                {"category": "simpler_language", "family": "scaffolding"},
+            ]
+        }
+    }
+    assert E.prediction_actions(record)["actions"] == {"simpler_language"}
 
 
 def test_gold_is_the_union_of_adjudicators_only():
@@ -201,7 +217,9 @@ def test_mapped_gold_vocabulary_is_the_prompts():
         "define_term",
         "find_fix_errors",
     }
-    assert {E.gold_label(n) for n in gold_names} == prompt
+    # Gold simpler_language is scored as re_explain, so the prompt's
+    # simpler_language has no gold counterpart.
+    assert {E.gold_label(n) for n in gold_names} == prompt - {"simpler_language"}
 
 
 def test_jaccard_counts_two_empty_sets_as_agreement():
@@ -316,3 +334,77 @@ def test_groups_are_all_then_each_family_cut_to_its_own_labels():
         "define_term": {"define_term": 1},
     }
     assert E.off_family_labels(pairs, "pred", CATEGORIES) == {"define_term": 1}
+
+
+_TEMPLATES = {
+    "1": "### Scaffolding\n`hint`: a\n`simpler_language`: b\n### Rigor\n`define_term`: c\n",
+    "2": "### Scaffolding\n`hint`: a\n### Rigor\n`define_term`: c\n",
+}
+
+
+def _run_versions(tmp_path, monkeypatch, *extra):
+    annotations = tmp_path / "tutoring_provider_a_annotations.jsonl"
+    row = {
+        "source": "tutoring_provider_a",
+        "moment": {"moment_id": "m1"},
+        "annotations": [_adjudicator("a", scaffolding=["hint"])],
+    }
+    annotations.write_text(json.dumps(row))
+    record = _pred(
+        "m1",
+        [
+            {"category": "hint", "family": "scaffolding"},
+            {"category": "simpler_language", "family": "scaffolding"},
+        ],
+        labels={"scaffolding_present": True, "rigor_present": False},
+    )
+    for version in _TEMPLATES:
+        width_dir = tmp_path / "preds" / "m" / version / "20"
+        width_dir.mkdir(parents=True)
+        (width_dir / "iteration.jsonl").write_text(json.dumps(record) + "\n")
+    monkeypatch.setattr(E, "load_template", lambda v=None: _TEMPLATES[v or "2"])
+    out = tmp_path / "scores.json"
+    argv = [
+        "--pred-dir", str(tmp_path / "preds"),
+        "--annotations", str(annotations),
+        "--ground-truth-dir", str(tmp_path / "no_gt"),
+        "--splits", "iteration",
+        "--json", str(out),
+        *extra,
+    ]  # fmt: skip
+    assert E.main(argv) == 0
+    return {r["prompt_version"]: r for r in json.loads(out.read_text())}
+
+
+def test_each_prompt_version_is_scored_with_its_own_vocabulary(tmp_path, monkeypatch):
+    results = _run_versions(tmp_path, monkeypatch)
+    assert sorted(results) == ["1", "2"]
+    # v1 lists simpler_language, so it is a scaffolding false positive there;
+    # v2 does not, so the same label falls outside every family.
+    assert results["1"]["off_family_labels"] == {}
+    assert results["2"]["off_family_labels"] == {"simpler_language": 1}
+
+
+def test_prompt_version_flag_scores_only_that_version(tmp_path, monkeypatch):
+    assert sorted(_run_versions(tmp_path, monkeypatch, "--prompt-version", "1")) == [
+        "1"
+    ]
+
+
+def test_short_block_keeps_only_moments_at_or_under_the_turn_count():
+    hint = {"category": "hint", "family": "scaffolding", "evidence": "2"}
+    predictions = {}
+    for moment_id, turns in (("short", 3), ("edge", 5), ("long", 9), ("old", None)):
+        record = _pred(moment_id, [hint])
+        if turns is not None:
+            record["post_cut_dialogue_rows"] = turns
+        predictions[moment_id] = record
+    gold = {m: _gold(scaffolding=["hint"]) for m in predictions}
+    cats = {"hint": "scaffolding", "define_term": "rigor"}
+
+    result = E.evaluate_predictions(gold, predictions, cats, short_turns=5)
+
+    short = result["short"]
+    assert (short["moments"], short["of_moments"], short["unknown"]) == (2, 3, 1)
+    assert short["groups"]["all"]["n"] == 2
+    assert result["groups"]["all"]["n"] == 4

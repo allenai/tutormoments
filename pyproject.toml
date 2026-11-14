@@ -70,6 +70,8 @@ tutormoments_build = [
     "prompts/trait_generator/dimensions/*.txt",
     "prompts/v2/*/*.md",
     "prompts/v2_helper/*.md",
+    "prompts/v2_helper/classify_action/*.md",
+    "prompts/v2_helper/classify_action/*/*.md",
 ]
 
 [tool.pytest.ini_options]
