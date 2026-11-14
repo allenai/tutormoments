@@ -660,12 +660,6 @@ def report_model(result: dict, vocabulary: list[str]) -> str:
         "gold",
         "model",
     )
-    if result["off_family_labels"]:
-        lines.append(
-            "  labels from a family the gold marks absent (in the all row "
-            "only):  "
-            + ",  ".join(f"{k} {n}" for k, n in result["off_family_labels"].items())
-        )
     if result["unknown_labels"]:
         lines.append(
             "  labels not in the prompt, left out:  "
