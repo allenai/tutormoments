@@ -19,6 +19,7 @@ from google.genai import types
 from tutormoments.models import (
     WireThinking,
     explicit_prompt_cache,
+    gemini_api_version,
     infer_provider,
     max_output_cap,
     resolve_thinking,
@@ -226,10 +227,15 @@ class ModelClient:
         if self.provider == "gemini":
             from google import genai
 
+            # The API version comes from models.yaml, never the SDK default
+            # (google-genai 3.x switched its default from v1beta to v1).
+            api_version = gemini_api_version(self.model)
             api_key = os.getenv("GEMINI_API_KEY")
             if not api_key:
                 raise RuntimeError("GEMINI_API_KEY not found in environment")
-            return genai.Client(api_key=api_key)
+            return genai.Client(
+                api_key=api_key, http_options={"api_version": api_version}
+            )
 
         elif self.provider == "openai":
             from openai import OpenAI

@@ -264,6 +264,17 @@ def _spec_json(spec) -> dict | None:
     return asdict(spec)
 
 
+def _gemini_api_versions(models: list) -> dict[str, str]:
+    """``{model: api_version}`` for the Gemini models among ``models``."""
+    from tutormoments.models import gemini_api_version, infer_provider
+
+    versions = {}
+    for model in models:
+        if isinstance(model, str) and infer_provider(model) == "gemini":
+            versions[model] = gemini_api_version(model)
+    return versions
+
+
 def _package_version() -> str | None:
     try:
         return version("tutormoments")
@@ -552,6 +563,16 @@ def run_cell(
                             "trials": cfg.trials,
                         },
                     }
+                ),
+                # Which Gemini API version each Gemini model in this run is
+                # called on (from models.yaml). Recorded, not hashed: the
+                # version is a registry fact, not part of the run config.
+                "gemini_api_versions": _gemini_api_versions(
+                    [
+                        arm_spec.model if arm_spec is not None else None,
+                        getattr(cfg.student, "model", None),
+                        getattr(cfg.scorer, "model", None),
+                    ]
                 ),
                 "prompt_hashes": _resource_hashes("prompts"),
                 "dataset_manifest": dataset_manifest,

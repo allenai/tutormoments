@@ -48,6 +48,12 @@ _PROVIDER_PREFIXES = [
 
 _KNOWN_PROVIDERS = {"anthropic", "gemini", "meta", "openai", "together"}
 
+# Gemini Developer API versions a registry entry may state. google-genai 3.x
+# calls v1 when no version is given; some models reject features there
+# (gemini-2.5-pro rejects thinking on v1), so every Gemini entry states its
+# version and the client never relies on the SDK default.
+_GEMINI_API_VERSIONS = {"v1", "v1beta"}
+
 # The provider-native thinking keys config may state, per provider. These
 # mirror exactly the knobs the client knows how to send; an unknown key is a
 # config error, not a passthrough.
@@ -155,6 +161,18 @@ def _validate_registry(raw: dict) -> dict:
                 f"models.yaml model '{model_key}': explicit_prompt_cache must "
                 f"be a boolean on an openai model, got {explicit_cache!r} on "
                 f"provider {provider!r}"
+            )
+        api_version = entry.get("api_version")
+        if provider == "gemini" and api_version not in _GEMINI_API_VERSIONS:
+            raise ValueError(
+                f"models.yaml model '{model_key}': gemini models must state "
+                f"api_version as one of {sorted(_GEMINI_API_VERSIONS)}, got "
+                f"{api_version!r}"
+            )
+        if provider != "gemini" and "api_version" in entry:
+            raise ValueError(
+                f"models.yaml model '{model_key}': api_version is only "
+                f"meaningful on gemini models, not provider {provider!r}"
             )
         pricing = entry.get("pricing")
         if pricing is not None and not isinstance(pricing, dict):
@@ -279,6 +297,24 @@ def explicit_prompt_cache(model: str) -> bool:
     if found is None:
         return False
     return bool(found[1].get("explicit_prompt_cache", False))
+
+
+def gemini_api_version(model: str) -> str:
+    """The Gemini API version (``v1`` or ``v1beta``) a model is called on.
+
+    Fails closed: an unregistered Gemini model has no stated version, and
+    falling back to the SDK default would let a dependency bump silently move
+    requests to a different endpoint.
+    """
+    if infer_provider(model) != "gemini":
+        raise ValueError(f"'{model}' is not a gemini model; no api_version applies")
+    found = _find_model_entry(model)
+    if found is None:
+        raise ValueError(
+            f"Gemini model '{model}' is not registered in models.yaml; add an "
+            "entry stating its api_version before calling it"
+        )
+    return found[1]["api_version"]
 
 
 def get_pricing(model: str) -> dict:

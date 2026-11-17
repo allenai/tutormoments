@@ -906,7 +906,7 @@ def test_run_batch_gemini_parses_results(monkeypatch):
         )
         client_obj.files.download.return_value = lines.encode("utf-8")
         MockGenai.return_value = client_obj
-        c = ModelClient("gemini-3.1-pro-preview")
+        c = ModelClient("gemini-3.5-flash")
         out = run_batch(
             c,
             [build_batch_entry("kA", "pA"), build_batch_entry("kB", "pB")],
@@ -980,6 +980,27 @@ def _assert_gemini_vector(usage, endpoint):
     assert usage["endpoint"] == endpoint
 
 
+@pytest.mark.parametrize(
+    "model,version", [("gemini-2.5-pro", "v1beta"), ("gemini-4-argon", "v1beta")]
+)
+def test_gemini_client_states_registry_api_version(monkeypatch, model, version):
+    # google-genai 3.x defaults to v1, where gemini-2.5-pro rejects thinking.
+    # The version must come from models.yaml, never the SDK default.
+    monkeypatch.setenv("GEMINI_API_KEY", "k")
+    with patch("google.genai.Client") as MockGenai:
+        ModelClient(model)
+    assert MockGenai.call_args.kwargs["http_options"] == {"api_version": version}
+
+
+def test_gemini_client_refuses_unregistered_model(monkeypatch):
+    # Checked before the key, so the registry error surfaces even keyless.
+    monkeypatch.delenv("GEMINI_API_KEY", raising=False)
+    with patch("google.genai.Client") as MockGenai:
+        with pytest.raises(ValueError, match="models.yaml"):
+            ModelClient("gemini-9-unlisted")
+    MockGenai.assert_not_called()
+
+
 def test_gemini_sync_captures_cache_read_and_reasoning(monkeypatch):
     monkeypatch.setenv("GEMINI_API_KEY", "k")
     with patch("google.genai.Client") as MockGenai:
@@ -988,7 +1009,7 @@ def test_gemini_sync_captures_cache_read_and_reasoning(monkeypatch):
             text="hi", usage_metadata=_gemini_usage_meta()
         )
         MockGenai.return_value = client_obj
-        resp = ModelClient("gemini-3.1-pro-preview").generate("Q", json_mode=False)
+        resp = ModelClient("gemini-3.5-flash").generate("Q", json_mode=False)
     _assert_gemini_vector(resp.usage, "sync")
 
 
@@ -1008,7 +1029,7 @@ def test_gemini_stream_captures_cache_read_and_reasoning(monkeypatch):
         client_obj = MagicMock()
         client_obj.models.generate_content_stream.return_value = iter([chunk])
         MockGenai.return_value = client_obj
-        resp = ModelClient("gemini-3.1-pro-preview").generate(
+        resp = ModelClient("gemini-3.5-flash").generate(
             "Q", json_mode=False, stream=True
         )
     _assert_gemini_vector(resp.usage, "stream")
@@ -1603,7 +1624,7 @@ def test_run_batch_gemini_captures_cache_read_and_reasoning(monkeypatch):
         )
         client_obj.files.download.return_value = line.encode("utf-8")
         MockGenai.return_value = client_obj
-        c = ModelClient("gemini-3.1-pro-preview")
+        c = ModelClient("gemini-3.5-flash")
         out = run_batch(c, [build_batch_entry("kA", "pA")], poll_interval=0)
     _assert_gemini_vector(out["kA"]["usage"], "batch")
 

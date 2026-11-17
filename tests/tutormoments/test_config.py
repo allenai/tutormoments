@@ -415,6 +415,18 @@ def test_malformed_scorer_thinking_fails_at_load(tmp_path):
         cfgmod.load_config(config_path)
 
 
+def test_unregistered_gemini_arm_fails_at_load(tmp_path):
+    # A Gemini model with no models.yaml entry has no stated api_version;
+    # the run must die at config load, before any tokens are spent.
+    config_path = _with_roster(
+        tmp_path,
+        "benchmark_models:\n"
+        "  g-new: { model: gemini-9-unlisted, thinking_level: high, condition: high }",
+    )
+    with pytest.raises(ThinkingConfigError, match="api_version"):
+        cfgmod.load_config(config_path)
+
+
 def test_provider_mismatched_taxonomy_keys_fail_at_load(tmp_path):
     config_path = _write_config(
         tmp_path,

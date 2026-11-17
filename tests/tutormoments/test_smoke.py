@@ -266,6 +266,35 @@ def test_gemini_thinking_level_without_evidence(level, expected):
     assert report.results[0].status == expected
 
 
+def test_gemini_wire_column_states_api_version():
+    # The wire column must show the API version the request went to, so a
+    # smoke run proves it alongside the thinking knobs.
+    check = _sync_check("gemini-2.5-pro", {"thinking_budget": -1})
+    client = _FakeClient(
+        "gemini-2.5-pro",
+        response=SimpleNamespace(
+            text="answer", usage=_usage(provider="gemini", reasoning=10)
+        ),
+    )
+    report = run_smoke(
+        _plan(sync=[check]), client_factory=_factory({"gemini-2.5-pro": client})
+    )
+    assert "api_version=v1beta" in report.results[0].wire
+    assert "thinking_budget" in report.results[0].wire
+
+
+def test_non_gemini_wire_column_has_no_api_version():
+    client = _FakeClient(
+        "claude-opus-4-8",
+        response=SimpleNamespace(text="answer", usage=_usage(reasoning=10)),
+    )
+    report = run_smoke(
+        _plan(sync=[_sync_check()]),
+        client_factory=_factory({"claude-opus-4-8": client}),
+    )
+    assert "api_version" not in report.results[0].wire
+
+
 def test_openai_reasoning_tokens_are_evidence():
     # OpenAI reports thinking as usage.completion_tokens_details.reasoning_tokens,
     # surfaced by the client as the informational reasoning_tokens key (the
