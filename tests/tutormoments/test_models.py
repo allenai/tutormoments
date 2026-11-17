@@ -12,6 +12,7 @@ from tutormoments.models import (
     ThinkingConfigError,
     _validate_registry,
     explicit_prompt_cache,
+    gemini_api_version,
     get_pricing,
     infer_provider,
     max_output_cap,
@@ -284,6 +285,49 @@ def test_explicit_prompt_cache_flags_only_message_end_cachers():
     assert explicit_prompt_cache("not-registered") is False
 
 
+# Every registered Gemini model and the API version it is called on. Written
+# out literally: the version decides which endpoint receives the request, and
+# moving a model to v1 changes what was run (gemini-2.5-pro rejects thinking
+# on v1 outright). google-genai 3.x defaults to v1 when none is stated.
+GEMINI_API_VERSIONS = {
+    "gemini-2.5-pro": "v1beta",
+    "gemini-2.5-flash": "v1beta",
+    "gemini-3.5-flash": "v1beta",
+    "gemini-3.6-flash": "v1beta",
+    "gemini-3.8-flash": "v1beta",
+    "gemini-4-argon": "v1beta",
+}
+
+
+def test_every_registered_gemini_model_pins_its_api_version():
+    from tutormoments.models import _load_registry
+
+    registered = {
+        key
+        for key, entry in _load_registry()["models"].items()
+        if entry["provider"] == "gemini"
+    }
+    assert registered == set(GEMINI_API_VERSIONS)
+    for model, expected in GEMINI_API_VERSIONS.items():
+        assert gemini_api_version(model) == expected
+
+
+def test_gemini_api_version_resolves_dated_variants_by_prefix():
+    assert gemini_api_version("gemini-2.5-pro-preview-0613") == "v1beta"
+
+
+def test_gemini_api_version_fails_closed_for_unregistered_model():
+    # No silent fallback to the SDK default: an unlisted Gemini model must be
+    # registered (with its api_version) before it can be called.
+    with pytest.raises(ValueError, match="models.yaml"):
+        gemini_api_version("gemini-9-unlisted")
+
+
+def test_gemini_api_version_rejects_non_gemini_model():
+    with pytest.raises(ValueError, match="not a gemini model"):
+        gemini_api_version("claude-opus-4-8")
+
+
 def test_get_pricing_shape():
     # Populated entries carry the full rate grid plus lookup provenance;
     # empty means "not priced yet", never "free".
@@ -366,6 +410,33 @@ def test_validate_registry_rejects_bad_explicit_prompt_cache(provider, value):
     bad["models"]["claude-x"]["provider"] = provider
     bad["models"]["claude-x"]["explicit_prompt_cache"] = value
     with pytest.raises(ValueError, match="explicit_prompt_cache"):
+        _validate_registry(bad)
+
+
+def _gemini_registry(**fields):
+    return {"models": {"gemini-x": {"provider": "gemini", "pricing": {}, **fields}}}
+
+
+def test_validate_registry_accepts_gemini_api_versions():
+    assert _validate_registry(_gemini_registry(api_version="v1beta"))
+    assert _validate_registry(_gemini_registry(api_version="v1"))
+
+
+def test_validate_registry_requires_gemini_api_version():
+    with pytest.raises(ValueError, match="api_version"):
+        _validate_registry(_gemini_registry())
+
+
+@pytest.mark.parametrize("value", ["v2", "beta", "", 1, None])
+def test_validate_registry_rejects_bad_gemini_api_version(value):
+    with pytest.raises(ValueError, match="api_version"):
+        _validate_registry(_gemini_registry(api_version=value))
+
+
+def test_validate_registry_rejects_api_version_off_gemini():
+    bad = _minimal_registry()
+    bad["models"]["claude-x"]["api_version"] = "v1"
+    with pytest.raises(ValueError, match="api_version"):
         _validate_registry(bad)
 
 

@@ -1213,6 +1213,44 @@ def test_config_json_records_student_cap_outside_config_hash(tmp_path):
     )
 
 
+def test_config_json_records_gemini_api_versions(tmp_path):
+    """Gemini models in the run record their endpoint version, outside the hash."""
+    from tutormoments.cli import run_cell
+
+    scenarios = list(FIXTURE_SCENARIOS)
+    cfg_mock = _make_run_config_trials(n_trials=1, sample=len(scenarios))
+    cfg_mock.tutors = ["gemini-2.5-pro"]
+    cfg_mock.resolved_tutors = {
+        "gemini-2.5-pro": ArmSpec(
+            name="gemini-2.5-pro",
+            model="gemini-2.5-pro",
+            provider="gemini",
+            thinking={"thinking_budget": -1},
+        )
+    }
+    with (
+        patch(_CFG_PATCH, return_value=cfg_mock),
+        patch(_LOAD_PATCH, return_value=_load_result(scenarios)),
+        patch(_CONV_PATCH, side_effect=lambda s, **kw: _make_transcript(s.id)),
+        patch(
+            _SCORE_PATCH,
+            side_effect=_score_batch_from([_make_annotation(s.id) for s in scenarios]),
+        ),
+        patch(_TAX_PATCH, return_value=_TAX_RESULT),
+    ):
+        run_id = run_cell(
+            tutor="gemini-2.5-pro",
+            mode="plain",
+            run_cfg=None,
+            date="20261117",
+            results_root=str(tmp_path),
+        )
+    config = json.loads((tmp_path / run_id / "config.json").read_text("utf-8"))
+    assert config["reproducibility"]["gemini_api_versions"] == {
+        "gemini-2.5-pro": "v1beta"
+    }
+
+
 def test_trials_summary_has_mean_and_spread(tmp_path):
     """trials=3: summary.json has mean and spread keys for numeric metrics."""
     from tutormoments.cli import run_cell

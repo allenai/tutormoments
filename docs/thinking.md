@@ -148,6 +148,8 @@ longest prefix, case-insensitively, so a dated point release resolves to its
 base entry. Then verify the arm with `tutormoments smoke` before
 benchmarking.
 
+Gemini entries must also state `api_version` (`v1` or `v1beta`): the Gemini Developer API version the client calls. google-genai 3.x calls `v1` unless told otherwise, and models differ in what `v1` accepts (`gemini-2.5-pro` rejects thinking there), so the version is a stated per-model fact rather than an SDK default. An unregistered Gemini model fails at config load for this reason. Every model benchmarked so far runs on `v1beta`; a new model can start on `v1`, but moving an existing model changes what its runs send, so re-run it. Smoke prints the version in its wire column, and each run's `config.json` records it under `reproducibility.gemini_api_versions`.
+
 ## Verifying a new or changed condition
 
 1. Add the arm to a scratch config (or use `--arms`).

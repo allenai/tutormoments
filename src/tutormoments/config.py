@@ -27,6 +27,7 @@ import yaml
 from tutormoments.models import (
     NATIVE_THINKING_KEYS,
     ThinkingConfigError,
+    gemini_api_version,
     infer_provider,
     resolve_thinking,
 )
@@ -169,7 +170,12 @@ def _reset_config_cache() -> None:
 
 def _block_provider(block_name: str, model: str) -> str:
     try:
-        return infer_provider(model)
+        provider = infer_provider(model)
+        if provider == "gemini":
+            # Fail at load, not at first call: an unregistered Gemini model
+            # has no stated api_version (see models.yaml).
+            gemini_api_version(model)
+        return provider
     except ValueError as e:
         raise ThinkingConfigError(f"config {block_name}: {e}") from None
 

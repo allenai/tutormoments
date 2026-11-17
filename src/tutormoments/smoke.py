@@ -23,7 +23,12 @@ import json
 import logging
 from dataclasses import dataclass, field
 
-from tutormoments.models import explicit_prompt_cache, resolve_thinking
+from tutormoments.models import (
+    explicit_prompt_cache,
+    gemini_api_version,
+    infer_provider,
+    resolve_thinking,
+)
 from tutormoments.resources import resource_text
 
 logger = logging.getLogger(__name__)
@@ -163,8 +168,6 @@ def build_smoke_plan(
         raise ValueError("--arms requires the tutor role in --roles")
 
     def _role_check(role: str, model: str, thinking, json_mode: bool):
-        from tutormoments.models import infer_provider
-
         provider = infer_provider(model)
         if _selected(provider):
             sync_checks.append(
@@ -345,7 +348,7 @@ def run_smoke(
             label=check.label,
             model=check.model,
             provider=check.provider,
-            wire=wire.describe(),
+            wire=_describe_wire(check.model, wire),
             status=PASS,
         )
         try:
@@ -390,7 +393,7 @@ def run_smoke(
             label=f"batch:{check.provider}",
             model=check.model,
             provider=check.provider,
-            wire=wire.describe(),
+            wire=_describe_wire(check.model, wire),
             status=PASS,
         )
         try:
@@ -440,6 +443,14 @@ def run_smoke(
     return report
 
 
+def _describe_wire(model: str, wire) -> str:
+    """The wire knobs a check sends, plus the API version for Gemini models."""
+    described = wire.describe()
+    if infer_provider(model) == "gemini":
+        described = f"{described} api_version={gemini_api_version(model)}"
+    return described
+
+
 def _run_cache_check(
     check: CacheCheck, client_factory, cache_head: str, ping: str, max_tokens: int
 ) -> CheckResult:
@@ -456,7 +467,7 @@ def _run_cache_check(
         label=check.label,
         model=check.model,
         provider=check.provider,
-        wire=wire.describe(),
+        wire=_describe_wire(check.model, wire),
         status=PASS,
     )
     try:
