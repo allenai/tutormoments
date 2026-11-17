@@ -989,12 +989,12 @@ def test_gemini_client_states_registry_api_version(monkeypatch, model, version):
     monkeypatch.setenv("GEMINI_API_KEY", "k")
     with patch("google.genai.Client") as MockGenai:
         ModelClient(model)
-    http_options = MockGenai.call_args.kwargs["http_options"]
-    assert http_options.api_version == version
+    assert MockGenai.call_args.kwargs["http_options"] == {"api_version": version}
 
 
 def test_gemini_client_refuses_unregistered_model(monkeypatch):
-    monkeypatch.setenv("GEMINI_API_KEY", "k")
+    # Checked before the key, so the registry error surfaces even keyless.
+    monkeypatch.delenv("GEMINI_API_KEY", raising=False)
     with patch("google.genai.Client") as MockGenai:
         with pytest.raises(ValueError, match="models.yaml"):
             ModelClient("gemini-9-unlisted")
