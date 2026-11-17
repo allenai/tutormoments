@@ -1,0 +1,196 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "assessments_tutoring_provider_c.schema.json",
+  "title": "assessments/tutoring_provider_c.jsonl",
+  "description": "One Tutoring Provider C assessment per line: a student's attempt at a set of multiple-choice questions, taken before or after a program or at the end of one session. Unique on (`assessment_type`, `program_id`, `session_id`), with `session_id` absent on program assessments.",
+  "type": "object",
+  "additionalProperties": false,
+  "required": [
+    "source",
+    "batch",
+    "assessment_type",
+    "student_id",
+    "program_id",
+    "questions"
+  ],
+  "properties": {
+    "source": {
+      "type": "string",
+      "const": "tutoring_provider_c",
+      "description": "The provider this assessment came from; matches the file name."
+    },
+    "batch": {
+      "type": "string",
+      "const": "2026-07-06",
+      "description": "Partner delivery this assessment came from. Provider C delivered once, so this is always `\"2026-07-06\"`."
+    },
+    "assessment_type": {
+      "type": "string",
+      "enum": [
+        "pre_program",
+        "post_session",
+        "post_program"
+      ],
+      "description": "When the assessment was taken: before the program (`pre_program`), at the end of one session (`post_session`), or after the program (`post_program`)."
+    },
+    "student_id": {
+      "type": "string",
+      "format": "uuid",
+      "description": "UUIDv5 surrogate for the partner's student ID. Joins to `transcripts/tutoring_provider_c.jsonl` `session.student_id`.",
+      "pattern": "^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$"
+    },
+    "program_id": {
+      "type": "string",
+      "format": "uuid",
+      "description": "UUIDv5 surrogate for the program this assessment belongs to. Joins to `transcripts/tutoring_provider_c.jsonl` `session.program_id`. Pair assessments with sessions on this, not `student_id`: some students have more than one program, each with its own pre- and post-program assessment. Every program here has at least one transcript; assessments of programs whose sessions were all excluded from the transcripts do not ship.",
+      "pattern": "^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$"
+    },
+    "session_id": {
+      "type": "string",
+      "format": "uuid",
+      "description": "UUIDv5 surrogate for the session this assessment followed. Joins to `transcripts/tutoring_provider_c.jsonl` `session.session_id`. Present on `post_session` rows only. Every one names a session in the transcripts; exit cards of sessions excluded from the transcripts do not ship.",
+      "pattern": "^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$"
+    },
+    "questions": {
+      "type": "array",
+      "description": "The questions in this assessment. Empty means not attempted, not scored zero.",
+      "items": {
+        "$ref": "#/$defs/Question"
+      }
+    }
+  },
+  "$defs": {
+    "Question": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "question_id",
+        "question_text",
+        "answers",
+        "answer_id",
+        "is_correct",
+        "difficulty_level",
+        "lesson_id",
+        "assignment_date"
+      ],
+      "properties": {
+        "question_id": {
+          "type": "integer",
+          "description": "Partner identifier for the question.",
+          "examples": [
+            15024
+          ]
+        },
+        "question_text": {
+          "type": "string",
+          "minLength": 1,
+          "description": "The question as authored, in HTML with MathML. Provider image URLs are replaced by `${TUTORING_PROVIDER_C_ASSETS_BASE_URL}` or `${TUTORING_PROVIDER_C_APP_BASE_URL}` placeholders; the images are not released. Some maths is an image from the third-party LaTeX renderer `latex.codecogs.com`, so rendering the HTML requests it there; each such image's `alt` attribute holds its LaTeX."
+        },
+        "answers": {
+          "type": "array",
+          "minItems": 1,
+          "description": "The answer options offered for this question.",
+          "items": {
+            "$ref": "#/$defs/AnswerOption"
+          }
+        },
+        "answer_id": {
+          "type": [
+            "integer",
+            "null"
+          ],
+          "description": "Partner identifier of the option the student chose, matching an `answers[].id`. Null where the question was not answered."
+        },
+        "is_correct": {
+          "type": "boolean",
+          "description": "The partner's scoring of the student's choice. False on every unanswered question: use `answer_id` to tell wrong from unanswered."
+        },
+        "difficulty_level": {
+          "type": "integer",
+          "enum": [
+            1,
+            2
+          ],
+          "description": "Partner-assigned difficulty."
+        },
+        "lesson_id": {
+          "type": "integer",
+          "description": "Partner identifier for the learning objective the question assesses. Same ID space as `transcripts/tutoring_provider_c.jsonl` `session.lesson_plan[].learning_objective.id`.",
+          "examples": [
+            1779
+          ]
+        },
+        "assignment_date": {
+          "type": "string",
+          "format": "date",
+          "pattern": "^\\d{4}-\\d{2}-\\d{2}$",
+          "description": "Jittered date the assessment was assigned. The offset is constant per student, so intervals within a student are preserved; absolute dates and differences across students are not.",
+          "examples": [
+            "2024-12-16"
+          ]
+        }
+      }
+    },
+    "AnswerOption": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "id",
+        "answer",
+        "given_answer",
+        "correct_answer"
+      ],
+      "description": "One multiple-choice option.",
+      "properties": {
+        "id": {
+          "type": "integer",
+          "description": "Partner identifier for the option."
+        },
+        "answer": {
+          "type": "string",
+          "description": "The option as authored, in HTML.",
+          "examples": [
+            "<p>B</p>\r\n"
+          ]
+        },
+        "given_answer": {
+          "type": [
+            "boolean",
+            "null"
+          ],
+          "description": "Whether the student chose this option. Null on every option of an unanswered question."
+        },
+        "correct_answer": {
+          "type": "integer",
+          "enum": [
+            0,
+            1
+          ],
+          "description": "Whether this option is the correct one."
+        }
+      }
+    }
+  },
+  "if": {
+    "properties": {
+      "assessment_type": {
+        "const": "post_session"
+      }
+    },
+    "required": [
+      "assessment_type"
+    ]
+  },
+  "then": {
+    "required": [
+      "session_id"
+    ]
+  },
+  "else": {
+    "not": {
+      "required": [
+        "session_id"
+      ]
+    }
+  }
+}

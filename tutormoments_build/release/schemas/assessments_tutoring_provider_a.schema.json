@@ -1,0 +1,161 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "assessments_tutoring_provider_a.schema.json",
+  "title": "assessments/tutoring_provider_a.jsonl",
+  "description": "One Eedi quiz session per line, attempted by a Tutoring Provider A student, unique on `quiz_session_id`. Provider A's students practise on Eedi, an online maths platform; a transcript lists the quiz sessions worked on in it (`eedi_content_link`).",
+  "type": "object",
+  "additionalProperties": false,
+  "required": [
+    "source",
+    "batch",
+    "student_id",
+    "quiz_session_id",
+    "quiz_name",
+    "type",
+    "date_started",
+    "date_completed",
+    "lesson_length",
+    "lesson_type",
+    "predicted_score",
+    "actual_score",
+    "questions"
+  ],
+  "properties": {
+    "source": {
+      "type": "string",
+      "const": "tutoring_provider_a",
+      "description": "The provider this quiz session came from; matches the file name."
+    },
+    "batch": {
+      "type": "string",
+      "description": "Partner delivery this quiz session first arrived in. The partner re-sent overlapping quiz histories in later deliveries; repeats are collapsed into one row."
+    },
+    "student_id": {
+      "type": "string",
+      "format": "uuid",
+      "description": "UUIDv5 surrogate for the partner's student ID. Joins to `transcripts/tutoring_provider_a.jsonl` `session.student_id`."
+    },
+    "quiz_session_id": {
+      "type": "string",
+      "format": "uuid",
+      "description": "UUIDv5 surrogate for the Eedi quiz session. Joins to `transcripts/tutoring_provider_a.jsonl` `eedi_content_link[].quiz_session_id`."
+    },
+    "quiz_name": {
+      "type": "string",
+      "description": "Eedi's name for the quiz."
+    },
+    "type": {
+      "type": "string",
+      "description": "Quiz mode: `\"Independent\"` or, rarely, `\"Assignment\"`."
+    },
+    "date_started": {
+      "type": "string",
+      "format": "date",
+      "description": "Jittered date the quiz was started. The offset is constant per student, so intervals within a student are preserved; absolute dates and differences across students are not."
+    },
+    "date_completed": {
+      "type": [
+        "string",
+        "null"
+      ],
+      "format": "date",
+      "description": "Jittered date the quiz was completed, with the same offset as `date_started`. Null where Eedi records no completion."
+    },
+    "lesson_length": {
+      "type": [
+        "string",
+        "null"
+      ],
+      "description": "Time spent, `HH:MM:SS`, as Eedi records it. `\"-\"` where Eedi has no value; null where the export carries none."
+    },
+    "lesson_type": {
+      "type": [
+        "string",
+        "null"
+      ],
+      "description": "Eedi activity type (e.g. `\"TopicPathwayQuiz\"`, `\"QuestionOfTheDay\"`). Null on rows from an export without it; `predicted_score`, `actual_score` and `lesson_length` are null on exactly the same rows."
+    },
+    "predicted_score": {
+      "type": [
+        "string",
+        "null"
+      ],
+      "description": "Eedi's predicted score (e.g. `\"56%\"`). `\"-\"` where Eedi has no value; null as for `lesson_type`."
+    },
+    "actual_score": {
+      "type": [
+        "string",
+        "null"
+      ],
+      "description": "Eedi's final score (e.g. `\"50%\"`). `\"-\"` where Eedi has no value; null as for `lesson_type`."
+    },
+    "questions": {
+      "type": "array",
+      "items": {
+        "$ref": "#/$defs/Question"
+      },
+      "description": "Every answer the student gave in this quiz, in order. Empty where the quiz was opened but nothing was answered."
+    }
+  },
+  "$defs": {
+    "Question": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "question_sequence",
+        "answer_sequence",
+        "parent_question_id",
+        "answer_type",
+        "predicted_correctness",
+        "actual_correctness",
+        "answer",
+        "explanation",
+        "question_url"
+      ],
+      "properties": {
+        "question_sequence": {
+          "type": "integer",
+          "minimum": 1,
+          "description": "The question's number in the quiz, from 1. Repeats when the student answers the same question again (a retry or check-out)."
+        },
+        "answer_sequence": {
+          "type": "integer",
+          "minimum": 0,
+          "description": "Running count of the student's answers in this quiz, from 1."
+        },
+        "parent_question_id": {
+          "type": "string",
+          "description": "Eedi question ID. Joins to `reference/eedi_diagnostic_questions.jsonl` `parent_question_id`, which holds only the questions in Eedi's public datasets: most IDs here have no row there. One ID can have several versions there (different names or numbers), and this row doesn't say which version the student saw."
+        },
+        "answer_type": {
+          "type": "string",
+          "description": "Eedi's attempt kind: `\"Check-in\"`, `\"Check-in retry\"`, `\"Check-out\"` or `\"Check-out retry\"`. Empty where no answer was given."
+        },
+        "predicted_correctness": {
+          "type": "string",
+          "description": "Eedi's prediction: `\"Correct\"`, `\"Incorrect\"` or `\"-\"` (none)."
+        },
+        "actual_correctness": {
+          "type": "string",
+          "description": "`\"Correct\"` or `\"Incorrect\"`. An unanswered question is `\"Incorrect\"`; `answer` is then empty."
+        },
+        "answer": {
+          "type": "string",
+          "description": "The option the student chose (`A`–`D`). Empty where no answer was given."
+        },
+        "explanation": {
+          "type": "string",
+          "description": "Eedi's feedback shown to the student for this answer. Written by Eedi, not the student. Empty where no answer was given."
+        },
+        "question_url": {
+          "type": [
+            "string",
+            "null"
+          ],
+          "format": "uri",
+          "description": "Eedi's public image of the question, with its answer options. Null unless the question is in `reference/eedi_diagnostic_questions.jsonl`, so the release links only questions Eedi has published, and null where no answer was given."
+        }
+      }
+    }
+  }
+}

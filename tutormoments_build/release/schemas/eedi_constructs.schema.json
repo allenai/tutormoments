@@ -1,0 +1,38 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "eedi_constructs.schema.json",
+  "title": "reference/eedi_constructs.jsonl",
+  "description": "One Eedi construct per line: a fine-grained learning objective, with its prerequisites. Public Eedi data, shipped unchanged. See the dataset card for its sources and licences.",
+  "type": "object",
+  "additionalProperties": false,
+  "required": [
+    "construct_id",
+    "construct_name",
+    "subject_id",
+    "prerequisite_construct_ids"
+  ],
+  "properties": {
+    "construct_id": {
+      "type": "string",
+      "description": "Eedi construct ID. Referenced by `reference/eedi_diagnostic_questions.jsonl` `construct_id` and by `prerequisite_construct_ids`."
+    },
+    "construct_name": {
+      "type": [
+        "string",
+        "null"
+      ],
+      "description": "The construct's name, where the Eedi Mining Misconceptions data names it (751 of 3,277); null otherwise."
+    },
+    "subject_id": {
+      "type": "string",
+      "description": "Joins to `reference/eedi_subjects.jsonl` `subject_id`."
+    },
+    "prerequisite_construct_ids": {
+      "type": "array",
+      "description": "`construct_id`s of this construct's prerequisites, sorted. May be empty.",
+      "items": {
+        "type": "string"
+      }
+    }
+  }
+}

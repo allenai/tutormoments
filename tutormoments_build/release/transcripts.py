@@ -74,18 +74,35 @@ def schema_rules(schema):
     return schema
 
 
-def check_schema_drift(
-    bucket_schema: dict, release_schema: dict, provider: str
+def check_declared_changes(
+    bucket_schema: dict,
+    release_schema: dict,
+    schema_changes: Callable[[dict], None],
+    label: str,
+    module: str,
 ) -> None:
     """Fail unless bucket rules + declared changes == release rules."""
     expected = copy.deepcopy(schema_rules(bucket_schema))
-    PROVIDERS[provider].schema_changes(expected)
+    schema_changes(expected)
     if expected != schema_rules(release_schema):
         raise SystemExit(
-            f"{provider}: the bucket schema's rules no longer match the reviewed release "
+            f"{label}: the bucket schema's rules no longer match the reviewed release "
             "schema. Review the upstream change, then update the release schema "
-            "(or the declared changes in transcripts.py)."
+            f"(or the declared changes in {module})."
         )
+
+
+def check_schema_drift(
+    bucket_schema: dict, release_schema: dict, provider: str
+) -> None:
+    """Fail unless the provider's bucket rules + declared changes == release rules."""
+    check_declared_changes(
+        bucket_schema,
+        release_schema,
+        PROVIDERS[provider].schema_changes,
+        provider,
+        "transcripts.py",
+    )
 
 
 def write_transcripts(ctx: BuildContext) -> list[Output]:
