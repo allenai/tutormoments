@@ -669,11 +669,11 @@ def test_run_entries_asks_for_the_models_full_output(
 def test_phase_config_reads_the_v2_block():
     cfg = C.phase_config()
 
-    assert cfg.model == "claude-opus-5"
+    assert cfg.model == "claude-opus-5-5"
     assert cfg.provider == "anthropic"
     # Effort is pinned, not left at the API default, so the baseline is
-    # effort-matched to the xhigh comparison models and reproducible.
-    assert cfg.thinking == {"thinking": {"type": "adaptive"}, "effort": "xhigh"}
+    # reproducible: every claude-opus-5-5 prediction was made at high.
+    assert cfg.thinking == {"thinking": {"type": "adaptive"}, "effort": "high"}
     assert cfg.poll_interval == 60
 
 
@@ -736,7 +736,15 @@ def test_an_override_does_not_inherit_the_baselines_parameters():
 def test_the_v2_model_needs_no_roster_entry():
     """It is fully specified by the v2 block; naming it explicitly must work
     even though it is not on the tutor roster."""
-    assert C.phase_config(model="claude-opus-5").model == "claude-opus-5"
+    assert C.phase_config(model="claude-opus-5-5").model == "claude-opus-5-5"
+
+
+def test_the_previous_v2_default_still_runs_at_its_own_parameters():
+    """claude-opus-5's existing predictions were made at xhigh; naming it with
+    --model must reproduce that, not inherit the new default's high."""
+    cfg = C.phase_config(model="claude-opus-5")
+
+    assert cfg.thinking == {"thinking": {"type": "adaptive"}, "effort": "xhigh"}
 
 
 def test_the_openai_comparison_model_resolves_and_can_be_batched():
@@ -760,6 +768,7 @@ def test_the_openai_comparison_model_resolves_and_can_be_batched():
 # model -> (anthropic thinking, anthropic effort, gemini thinking_config,
 #           openai reasoning_effort)
 EXPECTED_V2_WIRE = {
+    "claude-opus-5-5": ({"type": "adaptive"}, "high", None, None),
     "claude-opus-5": ({"type": "adaptive"}, "xhigh", None, None),
     "gemini-3.5-flash": (
         None,
@@ -1103,7 +1112,7 @@ def test_the_default_model_gets_its_own_directory_too(tmp_path, monkeypatch):
         ]
     )
 
-    assert (out_dir / "claude-opus-5" / "1" / "20" / "iteration.jsonl").exists()
+    assert (out_dir / "claude-opus-5-5" / "1" / "20" / "iteration.jsonl").exists()
 
 
 def test_the_chosen_model_reaches_the_batch(tmp_path, monkeypatch):
@@ -1437,14 +1446,14 @@ def test_a_second_round_refuses_to_replace_the_first(tmp_path, monkeypatch):
     ]
 
     assert C.main(argv) == 0
-    written = (out_dir / "claude-opus-5" / "1" / "20" / "iteration.jsonl").read_text(
+    written = (out_dir / "claude-opus-5-5" / "1" / "20" / "iteration.jsonl").read_text(
         encoding="utf-8"
     )
 
     with pytest.raises(FileExistsError, match="--overwrite"):
         C.main(argv)
 
-    assert (out_dir / "claude-opus-5" / "1" / "20" / "iteration.jsonl").read_text(
+    assert (out_dir / "claude-opus-5-5" / "1" / "20" / "iteration.jsonl").read_text(
         encoding="utf-8"
     ) == written
 
@@ -1480,7 +1489,7 @@ def test_overwrite_replaces_the_earlier_round(tmp_path, monkeypatch):
 
     assert C.main(argv) == 0
     assert C.main(argv + ["--overwrite"]) == 0
-    assert (out_dir / "claude-opus-5" / "1" / "20" / "iteration.jsonl").exists()
+    assert (out_dir / "claude-opus-5-5" / "1" / "20" / "iteration.jsonl").exists()
 
 
 def test_a_new_prompt_version_is_not_an_overwrite(tmp_path, monkeypatch):
@@ -1500,8 +1509,8 @@ def test_a_new_prompt_version_is_not_an_overwrite(tmp_path, monkeypatch):
     assert C.main(argv + ["--prompt-version", "1"]) == 0
     assert C.main(argv + ["--prompt-version", "2"]) == 0
 
-    assert (out_dir / "claude-opus-5" / "1" / "20" / "iteration.jsonl").exists()
-    assert (out_dir / "claude-opus-5" / "2" / "20" / "iteration.jsonl").exists()
+    assert (out_dir / "claude-opus-5-5" / "1" / "20" / "iteration.jsonl").exists()
+    assert (out_dir / "claude-opus-5-5" / "2" / "20" / "iteration.jsonl").exists()
 
 
 # ===========================================================================
