@@ -122,6 +122,23 @@ v2:
     # outputs/v2_predictions/claude-opus-5/ records were made at.
     claude-opus-5: { thinking: { type: adaptive }, effort: xhigh }
 
+# v2 replays (dev-only `python -m tutormoments_build.v2.replays` and
+# `...v2.traits` / `...v2.classify_replays`). The tutor is a `benchmark_models`
+# arm at that arm's own parameters; these blocks are the other roles.
+#   student -- the simulated student. Argon has no thinking-off level; low is
+#              its lowest.
+#   scorer  -- classifies the tutor's post-cut action. Identical to every
+#              earlier classify_excerpts Argon run, so replay and human labels
+#              are made at the same settings.
+#   traits  -- generates the frozen per-moment student personas.
+# include_thoughts is stated explicitly (it is Gemini's default whenever
+# thinking_level is set) so the config shows exactly what was sent.
+v2_replay:
+  poll_interval: 60
+  student: { model: gemini-4-argon, include_thoughts: true, thinking_level: low }
+  scorer:  { model: gemini-4-argon, include_thoughts: true, thinking_level: high }
+  traits:  { model: gemini-4-argon, include_thoughts: true, thinking_level: high }
+
 # Ground-truth build phase (dev-only `tutormoments dataset build-ground-truth`).
 # The paper's ground truth was built on opus-4-8 with adaptive (model-paced)
 # thinking; keep this pinned for reproducibility.

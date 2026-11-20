@@ -69,6 +69,8 @@ tutormoments_build = [
     "prompts/trait_generator/*.txt",
     "prompts/trait_generator/dimensions/*.txt",
     "prompts/v2/v2_scorer/*/*.md",
+    "prompts/v2/tutor/*/*.md",
+    "prompts/v2/student/*/*.md",
     "prompts/v2/*.md",
     "prompts/v2/classify_action/*.md",
     "prompts/v2/classify_action/*/*.md",

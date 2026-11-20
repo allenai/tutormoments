@@ -514,8 +514,18 @@ def uses_gold_slots(template: str) -> bool:
     return any("{" + name + "}" in template for name in GOLD_SLOTS)
 
 
-def gold_slots(record: dict) -> dict[str, str]:
+def gold_presence(record: dict) -> tuple[bool, bool]:
+    """The gold ``(scaffolding_present, rigor_present)`` for one moment."""
+    labels = record.get("labels") or {}
+    return bool(labels.get("scaffolding_present")), bool(labels.get("rigor_present"))
+
+
+def gold_slots(record: dict, presence=gold_presence) -> dict[str, str]:
     """The gold-filled slot values for one moment.
+
+    ``presence(record) -> (scaffolding, rigor)`` is where ``{action}`` comes
+    from: the gold labels by default; replay classification passes the
+    stage-1 prediction instead (``classify_replays``).
 
     Raises instead of guessing when the moment lacks data a slot needs, since a
     wrong value would misreport the condition the label was made under.
@@ -526,11 +536,10 @@ def gold_slots(record: dict) -> dict[str, str]:
             f"moment {record.get('moment_id')} has no situation_type; rebuild "
             "the excerpts with `python -m tutormoments_build.v2.excerpts`"
         )
-    labels = record.get("labels") or {}
-    key = (bool(labels.get("scaffolding_present")), bool(labels.get("rigor_present")))
+    key = presence(record)
     if key not in ACTION_WORDING:
         raise ValueError(
-            f"moment {record.get('moment_id')}: gold marks neither scaffolding "
+            f"moment {record.get('moment_id')}: {key} marks neither scaffolding "
             "nor rigor, so there is no {action} to state"
         )
     if situation not in APPROPRIATE_FOR_WORDING:
@@ -562,15 +571,17 @@ def description_slot(record: dict) -> str:
     return "\n" + "\n".join(bullets)
 
 
-def over_scaffolding_slots(template: str, record: dict) -> dict[str, str] | None:
+def over_scaffolding_slots(
+    template: str, record: dict, presence=gold_presence
+) -> dict[str, str] | None:
     """Gold slots for the over-scaffolding prompt, or None if it takes none.
 
     Returns only the slots the template uses, so the record shows exactly what
-    the model was told.
+    the model was told. ``presence`` as in ``gold_slots``.
     """
     if not uses_gold_slots(template):
         return None
-    values = gold_slots(record)
+    values = gold_slots(record, presence)
     if "{" + DESCRIPTIONS_SLOT + "}" in template:
         values[DESCRIPTIONS_SLOT] = description_slot(record)
     return {
@@ -631,12 +642,22 @@ def has_post_cut_content(record: dict) -> bool:
 
 
 def build_entries(
-    records: list[dict], prompts: PromptSet, passes=PASSES, width: str = EXCERPT_WIDTH
+    records: list[dict],
+    prompts: PromptSet,
+    passes=PASSES,
+    width: str = EXCERPT_WIDTH,
+    *,
+    gate=wants_over_scaffolding,
+    presence=gold_presence,
 ) -> tuple[list[dict], Counter]:
     """Build the batch entries for one round. Returns (entries, per-pass counts).
 
     Only the ``passes`` named get entries, each filled from the ``width``
     rendering of its excerpt.
+
+    ``gate(record)`` decides who is asked the over-scaffolding prompt and
+    ``presence`` fills its ``{action}``; both default to the gold labels (the
+    human round). Replay classification passes the stage-1 prediction.
     """
     from tutormoments.client import build_batch_entry
 
@@ -667,14 +688,14 @@ def build_entries(
 
         if "over_scaffolding" not in passes:
             continue
-        if wants_over_scaffolding(record):
+        if gate(record):
             entries.append(
                 build_batch_entry(
                     f"{OVER_SCAFFOLDING_PREFIX}__{moment_id}",
                     fill(
                         over_template,
                         excerpt_at(record, width),
-                        over_scaffolding_slots(over_template, record),
+                        over_scaffolding_slots(over_template, record, presence),
                     ),
                     json_mode=True,
                 )

@@ -1,0 +1,1768 @@
+{
+ "hashes": {
+  "1": "70ccaab165d35a7bfdcfda83035577abb9259a790686b1884ac258a4bc871f22",
+  "2": "5e40de18b4bf3ac3a2edfbf5ee25cb9a6cc14e495d8ec24553d0cd4023fe1285",
+  "3": "89df55cb94c9a94e4b3df2097f2e20f879068c3708a410bef7cade61cfce080c",
+  "4": "28bce9db47c65f02da38178f844442af968d6d485acc16375a7e31450b904120",
+  "5": "3cfc176a5e9c23561dee4ef7239923e460a3b36bc1d863dd160a4f83f843d5ed",
+  "6": "c0d0f7ce31ac59362ac3a0ad63558d86c9df064c058c323abf71037e6c32d2ce",
+  "7": "246bf30963fe535acb93e79ca1c3d627466846549f4c3c628256571cd69fd0fb",
+  "8": "dc987f2ee49e8c65c3a149ff88ecdeab59b14e73a53af1a9f07beceabd6b8caf",
+  "9": "6f5e2144c558f0ca122ebd8f47e8a1a9c832f9c77efdd84a78505670a9a8fc32"
+ },
+ "latest": {
+  "action_direction+over_scaffolding@20": {
+   "counts": {
+    "action_direction": 4,
+    "no_post_cut_content": 1,
+    "over_scaffolding": 3,
+    "over_scaffolding_not_asked": 1
+   },
+   "dry_run_report": "\nDRY RUN -- no API calls made, nothing written\n\n  model: vendor/golden-model (include_thoughts: True, thinking_level: high)\n\n  prompts: v9 (prompts/v2/v2_scorer/9/)\n  excerpt: 20\n  output:  out/\n\n  1 moment(s) not classified: nothing after the cut point\n\n  requests that would be sent:\n    action_direction                4\n    over_scaffolding                3\n    (over-scaffolding not asked)    1  gold says no scaffolding here\n",
+   "entries": [
+    {
+     "key": "action__aaa",
+     "request": {
+      "contents": [
+       {
+        "parts": [
+         {
+          "text": "You will be given a tutoring transcript that contains a cut point. Your job is to determine what pedagogical strategy a tutor decides to employ after the cut point, and whether that strategy relates to scaffolding, a push for rigor, both, or neither. \n\n## Scaffolding\n\nScaffolding is support that helps a student accomplish a task. Scaffolding makes content more accessible to a student. \n\nCommon scaffolding strategies:\n- The tutor asks guiding questions to lead the student towards the solution.\n- The tutor breaks down a problem into steps for the student.\n- The tutor re-explains a concept, e.g. using a different example, metaphor, or phrasing.\n- The tutor re-explains a procedure, e.g. using a different example, metaphor, or phrasing.\n- The tutor models an example solution.\n- The tutor co-solves or fills in some of the steps for the student. \n- The tutor rephrases the problem using simpler language or provides a simpler alternative.\n- The tutor draws a diagram\n- The tutor provides a different representation of the problem (e.g. a different form or a real-world analogy) for the student.\n- The tutor reduces answer options to simplify the problem.\n- The tutor gives the student a hint by providing a starting point.\n- The tutor reminds the student of a similar prior problem\n- The tutor highlights parts of the problem text.\n- The tutor gives away the answer.\n- The tutor fixes an error for the student.\n\n## Rigor\nPushing for rigor means increasing the level of conceptual challenge for the student to foster critical thinking, independence, and deeper understanding. Tutors may encourage higher-order thinking and increase the cognitive demand of tasks.\n\nCommon strategies that push for rigor:\n- The tutor asks the student to justify or explain an answer, solution, or process, including why an answer may be wrong, and holds this demand open for the student.\n- The tutor withdraws support and the student works on problems independently and/or struggles productively.\n- The tutor increases problem complexity or difficulty, e.g. whole numbers to decimals, one-step to two-step equations.\n- The tutor asks the student to define and/or use a key mathematical term.\n- The tutor asks the student to find and fix their own errors.\n\n**How to differentiate guiding questions (scaffolding) from rigor-pushing questions?**\n- Guiding questions usually narrow the problem space: break a problem into pieces or draw attention to specific content that makes a problem accessible. Example: \u201cWhat do we multiply first?\u201d \u2192 scaffolding\n- Justify & explain reasoning questions require higher cognitive demand and critical thinking. These questions ask students to make arguments, engage with higher-level concepts, consider why and how, or generalize their thinking. Example: \u201cWhy do we multiply before we add here?\u201d \u2192 push for rigor\n- Other rigor-pushing questions may ask the student to complete a problem or key step independently.\n\n## Your Task\n\nNow, examine the following tutoring moment. Respond with valid JSON only:\n{\n  \"description\": \"Summarize, in one sentence or two, the tutor's pedagogical decision at a level of abstraction similar to the bullet points above.\",\n  \"scaffolding\": \"yes or no\",\n  \"rigor\": \"yes or no\"\n}\n\nThe following excerpt contains a tutoring moment. There, >>> CUT POINT <<< is immediately before the tutor's pedagogical strategy that you should focus on describing and analyzing. Does the tutor scaffold, a push for rigor, both, or neither? \n\nEXCERPT: \n20 excerpt of aaa {not a slot}"
+         }
+        ],
+        "role": "user"
+       }
+      ],
+      "generation_config": {
+       "max_output_tokens": 65536,
+       "response_mime_type": "application/json"
+      }
+     }
+    },
+    {
+     "key": "overscaffold__aaa",
+     "request": {
+      "contents": [
+       {
+        "parts": [
+         {
+          "text": "You are given a tutoring moment containing a cut point. Your task is to determine whether the tutor over-scaffolds after the cut point.\n\nScaffolding is support that helps a student accomplish a task and makes content more accessible to a student. Appropriate scaffolding should still require the student to do core thinking. \n\nOver-scaffolding happens when the tutor:\n- unnecessarily supplies a step the student was positioned to produce. \n- does not give the student a chance to show what they know, especially at the beginning of a session\n- does not offer openings for the student to make substantive mathematical contributions during the support\n- fails to fade the support after prior successes on similar items.\n- does most of the cognitive work\n- oversimplifies the problem or reduces the task to a sequence of procedural tasks with insufficient reasoning (e.g. overly leading or directive)\n- over-explains\n- re-scaffolds the same procedure or concept too many times\n- jumps in during a student's productive struggle\n\nAn interactive sequence, even if it is lengthy, in which the tutor allows the student to meaningfully engage, is not over-scaffolding. Ask whether, overall, the tutor over-scaffolds right after the cut point. \n\nNote that the ordering of screen interactions and dialogue in the transcript do not always indicate the exact sequence of events. Sometimes a screen interaction or update happens simultaneously with the dialogue turn that precedes it. \n\n# Your Task\n\nIf teachers believe that this moment is appropriate for a push for rigor and the tutor doesn't push for rigor, over-scaffolding is almost always occurring. If teachers believe that this moment is appropriate for scaffolding, it is possible that over-scaffolding is still occurring, if the tutor provides too much support and replaces students' thinking after the cut point.\n\nFor the excerpt below, teachers describe the situation before the cut point as the following: \n\n- f1\n\nTeachers tend to believe that this situation is appropriate for scaffolding. \n\nA previous pass by an LM determined that the tutor is scaffolding after the cut point.\n\nExamine the following tutoring moment. Respond with valid JSON only:\n{\n  \"description\": \"A sentence or two summarizing what the tutor did, and your reasoning for whether it constitutes over-scaffolding.\",\n  \"over-scaffolding\": \"yes or no\"\n}\n\nThe following excerpt contains a tutoring moment. There, >>> CUT POINT <<< is immediately before the tutor's scaffolding strategy that you should focus on analyzing. \n\nEXCERPT: \n20 excerpt of aaa {not a slot}\n"
+         }
+        ],
+        "role": "user"
+       }
+      ],
+      "generation_config": {
+       "max_output_tokens": 65536,
+       "response_mime_type": "application/json"
+      }
+     }
+    },
+    {
+     "key": "action__bbb",
+     "request": {
+      "contents": [
+       {
+        "parts": [
+         {
+          "text": "You will be given a tutoring transcript that contains a cut point. Your job is to determine what pedagogical strategy a tutor decides to employ after the cut point, and whether that strategy relates to scaffolding, a push for rigor, both, or neither. \n\n## Scaffolding\n\nScaffolding is support that helps a student accomplish a task. Scaffolding makes content more accessible to a student. \n\nCommon scaffolding strategies:\n- The tutor asks guiding questions to lead the student towards the solution.\n- The tutor breaks down a problem into steps for the student.\n- The tutor re-explains a concept, e.g. using a different example, metaphor, or phrasing.\n- The tutor re-explains a procedure, e.g. using a different example, metaphor, or phrasing.\n- The tutor models an example solution.\n- The tutor co-solves or fills in some of the steps for the student. \n- The tutor rephrases the problem using simpler language or provides a simpler alternative.\n- The tutor draws a diagram\n- The tutor provides a different representation of the problem (e.g. a different form or a real-world analogy) for the student.\n- The tutor reduces answer options to simplify the problem.\n- The tutor gives the student a hint by providing a starting point.\n- The tutor reminds the student of a similar prior problem\n- The tutor highlights parts of the problem text.\n- The tutor gives away the answer.\n- The tutor fixes an error for the student.\n\n## Rigor\nPushing for rigor means increasing the level of conceptual challenge for the student to foster critical thinking, independence, and deeper understanding. Tutors may encourage higher-order thinking and increase the cognitive demand of tasks.\n\nCommon strategies that push for rigor:\n- The tutor asks the student to justify or explain an answer, solution, or process, including why an answer may be wrong, and holds this demand open for the student.\n- The tutor withdraws support and the student works on problems independently and/or struggles productively.\n- The tutor increases problem complexity or difficulty, e.g. whole numbers to decimals, one-step to two-step equations.\n- The tutor asks the student to define and/or use a key mathematical term.\n- The tutor asks the student to find and fix their own errors.\n\n**How to differentiate guiding questions (scaffolding) from rigor-pushing questions?**\n- Guiding questions usually narrow the problem space: break a problem into pieces or draw attention to specific content that makes a problem accessible. Example: \u201cWhat do we multiply first?\u201d \u2192 scaffolding\n- Justify & explain reasoning questions require higher cognitive demand and critical thinking. These questions ask students to make arguments, engage with higher-level concepts, consider why and how, or generalize their thinking. Example: \u201cWhy do we multiply before we add here?\u201d \u2192 push for rigor\n- Other rigor-pushing questions may ask the student to complete a problem or key step independently.\n\n## Your Task\n\nNow, examine the following tutoring moment. Respond with valid JSON only:\n{\n  \"description\": \"Summarize, in one sentence or two, the tutor's pedagogical decision at a level of abstraction similar to the bullet points above.\",\n  \"scaffolding\": \"yes or no\",\n  \"rigor\": \"yes or no\"\n}\n\nThe following excerpt contains a tutoring moment. There, >>> CUT POINT <<< is immediately before the tutor's pedagogical strategy that you should focus on describing and analyzing. Does the tutor scaffold, a push for rigor, both, or neither? \n\nEXCERPT: \n20 excerpt of bbb {not a slot}"
+         }
+        ],
+        "role": "user"
+       }
+      ],
+      "generation_config": {
+       "max_output_tokens": 65536,
+       "response_mime_type": "application/json"
+      }
+     }
+    },
+    {
+     "key": "action__ccc",
+     "request": {
+      "contents": [
+       {
+        "parts": [
+         {
+          "text": "You will be given a tutoring transcript that contains a cut point. Your job is to determine what pedagogical strategy a tutor decides to employ after the cut point, and whether that strategy relates to scaffolding, a push for rigor, both, or neither. \n\n## Scaffolding\n\nScaffolding is support that helps a student accomplish a task. Scaffolding makes content more accessible to a student. \n\nCommon scaffolding strategies:\n- The tutor asks guiding questions to lead the student towards the solution.\n- The tutor breaks down a problem into steps for the student.\n- The tutor re-explains a concept, e.g. using a different example, metaphor, or phrasing.\n- The tutor re-explains a procedure, e.g. using a different example, metaphor, or phrasing.\n- The tutor models an example solution.\n- The tutor co-solves or fills in some of the steps for the student. \n- The tutor rephrases the problem using simpler language or provides a simpler alternative.\n- The tutor draws a diagram\n- The tutor provides a different representation of the problem (e.g. a different form or a real-world analogy) for the student.\n- The tutor reduces answer options to simplify the problem.\n- The tutor gives the student a hint by providing a starting point.\n- The tutor reminds the student of a similar prior problem\n- The tutor highlights parts of the problem text.\n- The tutor gives away the answer.\n- The tutor fixes an error for the student.\n\n## Rigor\nPushing for rigor means increasing the level of conceptual challenge for the student to foster critical thinking, independence, and deeper understanding. Tutors may encourage higher-order thinking and increase the cognitive demand of tasks.\n\nCommon strategies that push for rigor:\n- The tutor asks the student to justify or explain an answer, solution, or process, including why an answer may be wrong, and holds this demand open for the student.\n- The tutor withdraws support and the student works on problems independently and/or struggles productively.\n- The tutor increases problem complexity or difficulty, e.g. whole numbers to decimals, one-step to two-step equations.\n- The tutor asks the student to define and/or use a key mathematical term.\n- The tutor asks the student to find and fix their own errors.\n\n**How to differentiate guiding questions (scaffolding) from rigor-pushing questions?**\n- Guiding questions usually narrow the problem space: break a problem into pieces or draw attention to specific content that makes a problem accessible. Example: \u201cWhat do we multiply first?\u201d \u2192 scaffolding\n- Justify & explain reasoning questions require higher cognitive demand and critical thinking. These questions ask students to make arguments, engage with higher-level concepts, consider why and how, or generalize their thinking. Example: \u201cWhy do we multiply before we add here?\u201d \u2192 push for rigor\n- Other rigor-pushing questions may ask the student to complete a problem or key step independently.\n\n## Your Task\n\nNow, examine the following tutoring moment. Respond with valid JSON only:\n{\n  \"description\": \"Summarize, in one sentence or two, the tutor's pedagogical decision at a level of abstraction similar to the bullet points above.\",\n  \"scaffolding\": \"yes or no\",\n  \"rigor\": \"yes or no\"\n}\n\nThe following excerpt contains a tutoring moment. There, >>> CUT POINT <<< is immediately before the tutor's pedagogical strategy that you should focus on describing and analyzing. Does the tutor scaffold, a push for rigor, both, or neither? \n\nEXCERPT: \n20 excerpt of ccc {not a slot}"
+         }
+        ],
+        "role": "user"
+       }
+      ],
+      "generation_config": {
+       "max_output_tokens": 65536,
+       "response_mime_type": "application/json"
+      }
+     }
+    },
+    {
+     "key": "overscaffold__ccc",
+     "request": {
+      "contents": [
+       {
+        "parts": [
+         {
+          "text": "You are given a tutoring moment containing a cut point. Your task is to determine whether the tutor over-scaffolds after the cut point.\n\nScaffolding is support that helps a student accomplish a task and makes content more accessible to a student. Appropriate scaffolding should still require the student to do core thinking. \n\nOver-scaffolding happens when the tutor:\n- unnecessarily supplies a step the student was positioned to produce. \n- does not give the student a chance to show what they know, especially at the beginning of a session\n- does not offer openings for the student to make substantive mathematical contributions during the support\n- fails to fade the support after prior successes on similar items.\n- does most of the cognitive work\n- oversimplifies the problem or reduces the task to a sequence of procedural tasks with insufficient reasoning (e.g. overly leading or directive)\n- over-explains\n- re-scaffolds the same procedure or concept too many times\n- jumps in during a student's productive struggle\n\nAn interactive sequence, even if it is lengthy, in which the tutor allows the student to meaningfully engage, is not over-scaffolding. Ask whether, overall, the tutor over-scaffolds right after the cut point. \n\nNote that the ordering of screen interactions and dialogue in the transcript do not always indicate the exact sequence of events. Sometimes a screen interaction or update happens simultaneously with the dialogue turn that precedes it. \n\n# Your Task\n\nIf teachers believe that this moment is appropriate for a push for rigor and the tutor doesn't push for rigor, over-scaffolding is almost always occurring. If teachers believe that this moment is appropriate for scaffolding, it is possible that over-scaffolding is still occurring, if the tutor provides too much support and replaces students' thinking after the cut point.\n\nFor the excerpt below, teachers describe the situation before the cut point as the following: \n\n- (no description of the student)\n\nTeachers tend to believe that this situation is appropriate for both a push for rigor and scaffolding. \n\nA previous pass by an LM determined that the tutor is scaffolding and pushing for rigor after the cut point.\n\nExamine the following tutoring moment. Respond with valid JSON only:\n{\n  \"description\": \"A sentence or two summarizing what the tutor did, and your reasoning for whether it constitutes over-scaffolding.\",\n  \"over-scaffolding\": \"yes or no\"\n}\n\nThe following excerpt contains a tutoring moment. There, >>> CUT POINT <<< is immediately before the tutor's scaffolding strategy that you should focus on analyzing. \n\nEXCERPT: \n20 excerpt of ccc {not a slot}\n"
+         }
+        ],
+        "role": "user"
+       }
+      ],
+      "generation_config": {
+       "max_output_tokens": 65536,
+       "response_mime_type": "application/json"
+      }
+     }
+    },
+    {
+     "key": "action__eee",
+     "request": {
+      "contents": [
+       {
+        "parts": [
+         {
+          "text": "You will be given a tutoring transcript that contains a cut point. Your job is to determine what pedagogical strategy a tutor decides to employ after the cut point, and whether that strategy relates to scaffolding, a push for rigor, both, or neither. \n\n## Scaffolding\n\nScaffolding is support that helps a student accomplish a task. Scaffolding makes content more accessible to a student. \n\nCommon scaffolding strategies:\n- The tutor asks guiding questions to lead the student towards the solution.\n- The tutor breaks down a problem into steps for the student.\n- The tutor re-explains a concept, e.g. using a different example, metaphor, or phrasing.\n- The tutor re-explains a procedure, e.g. using a different example, metaphor, or phrasing.\n- The tutor models an example solution.\n- The tutor co-solves or fills in some of the steps for the student. \n- The tutor rephrases the problem using simpler language or provides a simpler alternative.\n- The tutor draws a diagram\n- The tutor provides a different representation of the problem (e.g. a different form or a real-world analogy) for the student.\n- The tutor reduces answer options to simplify the problem.\n- The tutor gives the student a hint by providing a starting point.\n- The tutor reminds the student of a similar prior problem\n- The tutor highlights parts of the problem text.\n- The tutor gives away the answer.\n- The tutor fixes an error for the student.\n\n## Rigor\nPushing for rigor means increasing the level of conceptual challenge for the student to foster critical thinking, independence, and deeper understanding. Tutors may encourage higher-order thinking and increase the cognitive demand of tasks.\n\nCommon strategies that push for rigor:\n- The tutor asks the student to justify or explain an answer, solution, or process, including why an answer may be wrong, and holds this demand open for the student.\n- The tutor withdraws support and the student works on problems independently and/or struggles productively.\n- The tutor increases problem complexity or difficulty, e.g. whole numbers to decimals, one-step to two-step equations.\n- The tutor asks the student to define and/or use a key mathematical term.\n- The tutor asks the student to find and fix their own errors.\n\n**How to differentiate guiding questions (scaffolding) from rigor-pushing questions?**\n- Guiding questions usually narrow the problem space: break a problem into pieces or draw attention to specific content that makes a problem accessible. Example: \u201cWhat do we multiply first?\u201d \u2192 scaffolding\n- Justify & explain reasoning questions require higher cognitive demand and critical thinking. These questions ask students to make arguments, engage with higher-level concepts, consider why and how, or generalize their thinking. Example: \u201cWhy do we multiply before we add here?\u201d \u2192 push for rigor\n- Other rigor-pushing questions may ask the student to complete a problem or key step independently.\n\n## Your Task\n\nNow, examine the following tutoring moment. Respond with valid JSON only:\n{\n  \"description\": \"Summarize, in one sentence or two, the tutor's pedagogical decision at a level of abstraction similar to the bullet points above.\",\n  \"scaffolding\": \"yes or no\",\n  \"rigor\": \"yes or no\"\n}\n\nThe following excerpt contains a tutoring moment. There, >>> CUT POINT <<< is immediately before the tutor's pedagogical strategy that you should focus on describing and analyzing. Does the tutor scaffold, a push for rigor, both, or neither? \n\nEXCERPT: \n20 excerpt of eee {not a slot}"
+         }
+        ],
+        "role": "user"
+       }
+      ],
+      "generation_config": {
+       "max_output_tokens": 65536,
+       "response_mime_type": "application/json"
+      }
+     }
+    },
+    {
+     "key": "overscaffold__eee",
+     "request": {
+      "contents": [
+       {
+        "parts": [
+         {
+          "text": "You are given a tutoring moment containing a cut point. Your task is to determine whether the tutor over-scaffolds after the cut point.\n\nScaffolding is support that helps a student accomplish a task and makes content more accessible to a student. Appropriate scaffolding should still require the student to do core thinking. \n\nOver-scaffolding happens when the tutor:\n- unnecessarily supplies a step the student was positioned to produce. \n- does not give the student a chance to show what they know, especially at the beginning of a session\n- does not offer openings for the student to make substantive mathematical contributions during the support\n- fails to fade the support after prior successes on similar items.\n- does most of the cognitive work\n- oversimplifies the problem or reduces the task to a sequence of procedural tasks with insufficient reasoning (e.g. overly leading or directive)\n- over-explains\n- re-scaffolds the same procedure or concept too many times\n- jumps in during a student's productive struggle\n\nAn interactive sequence, even if it is lengthy, in which the tutor allows the student to meaningfully engage, is not over-scaffolding. Ask whether, overall, the tutor over-scaffolds right after the cut point. \n\nNote that the ordering of screen interactions and dialogue in the transcript do not always indicate the exact sequence of events. Sometimes a screen interaction or update happens simultaneously with the dialogue turn that precedes it. \n\n# Your Task\n\nIf teachers believe that this moment is appropriate for a push for rigor and the tutor doesn't push for rigor, over-scaffolding is almost always occurring. If teachers believe that this moment is appropriate for scaffolding, it is possible that over-scaffolding is still occurring, if the tutor provides too much support and replaces students' thinking after the cut point.\n\nFor the excerpt below, teachers describe the situation before the cut point as the following: \n\n- f1\n\nTeachers tend to believe that this situation is appropriate for a push for rigor. \n\nA previous pass by an LM determined that the tutor is scaffolding after the cut point.\n\nExamine the following tutoring moment. Respond with valid JSON only:\n{\n  \"description\": \"A sentence or two summarizing what the tutor did, and your reasoning for whether it constitutes over-scaffolding.\",\n  \"over-scaffolding\": \"yes or no\"\n}\n\nThe following excerpt contains a tutoring moment. There, >>> CUT POINT <<< is immediately before the tutor's scaffolding strategy that you should focus on analyzing. \n\nEXCERPT: \n20 excerpt of eee {not a slot}\n"
+         }
+        ],
+        "role": "user"
+       }
+      ],
+      "generation_config": {
+       "max_output_tokens": 65536,
+       "response_mime_type": "application/json"
+      }
+     }
+    }
+   ],
+   "prediction_dir": "out/vendor_golden-model/9/20",
+   "records": {
+    "iteration": [
+     {
+      "action_direction": {
+       "description": "a",
+       "error": null,
+       "parse_error": false,
+       "raw": "{\"description\": \"a\", \"scaffolding\": \"yes\", \"rigor\": \"no\"}",
+       "rigor": false,
+       "scaffolding": true,
+       "usage": {
+        "input_tokens": 10,
+        "output_tokens": 2,
+        "total_tokens": 12
+       }
+      },
+      "classified": true,
+      "context_turns": {
+       "action_direction": "20",
+       "over_scaffolding": "20"
+      },
+      "conversation_id": "c-aaa",
+      "description_from": {
+       "adjudicators": [
+        "J01",
+        "J02"
+       ],
+       "model": "m",
+       "prompt": "p",
+       "situation_method": "majority"
+      },
+      "labels": {
+       "over_scaffolding_present": true,
+       "rigor_present": false,
+       "scaffolding_present": true
+      },
+      "model": "vendor/golden-model",
+      "moment_id": "aaa",
+      "over_scaffolding": {
+       "description": "o",
+       "error": null,
+       "over_scaffolding": true,
+       "parse_error": false,
+       "raw": "{\"description\": \"o\", \"over-scaffolding\": \"yes\"}",
+       "usage": {
+        "input_tokens": 5,
+        "output_tokens": 1,
+        "total_tokens": 6
+       }
+      },
+      "over_scaffolding_asked": true,
+      "passes": [
+       "action_direction",
+       "over_scaffolding"
+      ],
+      "post_cut_dialogue_rows": 1,
+      "post_cut_rows": 2,
+      "prompt_slots": {
+       "over_scaffolding": {
+        "action": "scaffolding",
+        "descriptions": "\n- f1",
+        "is_appropriate_for": "is appropriate for scaffolding"
+       }
+      },
+      "prompt_version": "9",
+      "prompts": {
+       "action_direction": "prompts/v2/v2_scorer/9/action_direction.md",
+       "over_scaffolding": "prompts/v2/v2_scorer/9/over-scaffolding.md"
+      },
+      "provider": "gemini",
+      "situation_type": "scaffold_only",
+      "skipped": null,
+      "split": "iteration",
+      "thinking": {
+       "include_thoughts": true,
+       "thinking_level": "high"
+      },
+      "transcript_id": "t-aaa",
+      "usage": {
+       "input_tokens": 15,
+       "output_tokens": 3,
+       "total_tokens": 18
+      }
+     },
+     {
+      "action_direction": {
+       "description": "",
+       "error": null,
+       "parse_error": true,
+       "raw": "not json",
+       "rigor": null,
+       "scaffolding": null,
+       "usage": {
+        "total_tokens": 3
+       }
+      },
+      "classified": true,
+      "context_turns": {
+       "action_direction": "20",
+       "over_scaffolding": "20"
+      },
+      "conversation_id": "c-bbb",
+      "description_from": null,
+      "labels": {
+       "over_scaffolding_present": false,
+       "rigor_present": true,
+       "scaffolding_present": false
+      },
+      "model": "vendor/golden-model",
+      "moment_id": "bbb",
+      "over_scaffolding": null,
+      "over_scaffolding_asked": false,
+      "passes": [
+       "action_direction",
+       "over_scaffolding"
+      ],
+      "post_cut_dialogue_rows": 1,
+      "post_cut_rows": 2,
+      "prompt_slots": {
+       "over_scaffolding": null
+      },
+      "prompt_version": "9",
+      "prompts": {
+       "action_direction": "prompts/v2/v2_scorer/9/action_direction.md",
+       "over_scaffolding": "prompts/v2/v2_scorer/9/over-scaffolding.md"
+      },
+      "provider": "gemini",
+      "situation_type": "rigor_maj",
+      "skipped": null,
+      "split": "iteration",
+      "thinking": {
+       "include_thoughts": true,
+       "thinking_level": "high"
+      },
+      "transcript_id": "t-bbb",
+      "usage": {
+       "input_tokens": 0,
+       "output_tokens": 0,
+       "total_tokens": 3
+      }
+     },
+     {
+      "action_direction": {
+       "description": "",
+       "error": "overloaded",
+       "parse_error": true,
+       "raw": "",
+       "rigor": null,
+       "scaffolding": null,
+       "usage": {
+        "input_tokens": 0,
+        "output_tokens": 0,
+        "total_tokens": 0
+       }
+      },
+      "classified": true,
+      "context_turns": {
+       "action_direction": "20",
+       "over_scaffolding": "20"
+      },
+      "conversation_id": "c-ccc",
+      "description_from": {
+       "adjudicators": [
+        "J01",
+        "J02"
+       ],
+       "model": "m",
+       "prompt": "p",
+       "situation_method": "majority"
+      },
+      "labels": {
+       "over_scaffolding_present": false,
+       "rigor_present": true,
+       "scaffolding_present": true
+      },
+      "model": "vendor/golden-model",
+      "moment_id": "ccc",
+      "over_scaffolding": {
+       "description": "",
+       "error": null,
+       "over_scaffolding": false,
+       "parse_error": false,
+       "raw": "{\"over_scaffolding\": \"no\"}",
+       "usage": {
+        "input_tokens": 0,
+        "output_tokens": 0,
+        "total_tokens": 0
+       }
+      },
+      "over_scaffolding_asked": true,
+      "passes": [
+       "action_direction",
+       "over_scaffolding"
+      ],
+      "post_cut_dialogue_rows": 1,
+      "post_cut_rows": 2,
+      "prompt_slots": {
+       "over_scaffolding": {
+        "action": "scaffolding and pushing for rigor",
+        "descriptions": "\n- (no description of the student)",
+        "is_appropriate_for": "is appropriate for both a push for rigor and scaffolding"
+       }
+      },
+      "prompt_version": "9",
+      "prompts": {
+       "action_direction": "prompts/v2/v2_scorer/9/action_direction.md",
+       "over_scaffolding": "prompts/v2/v2_scorer/9/over-scaffolding.md"
+      },
+      "provider": "gemini",
+      "situation_type": "fifty_fifty",
+      "skipped": null,
+      "split": "iteration",
+      "thinking": {
+       "include_thoughts": true,
+       "thinking_level": "high"
+      },
+      "transcript_id": "t-ccc",
+      "usage": {
+       "input_tokens": 0,
+       "output_tokens": 0,
+       "total_tokens": 0
+      }
+     }
+    ],
+    "test": [
+     {
+      "action_direction": null,
+      "classified": false,
+      "context_turns": {
+       "action_direction": "20",
+       "over_scaffolding": "20"
+      },
+      "conversation_id": "c-ddd",
+      "description_from": null,
+      "labels": {
+       "over_scaffolding_present": false,
+       "rigor_present": false,
+       "scaffolding_present": true
+      },
+      "model": "vendor/golden-model",
+      "moment_id": "ddd",
+      "over_scaffolding": null,
+      "over_scaffolding_asked": false,
+      "passes": [
+       "action_direction",
+       "over_scaffolding"
+      ],
+      "post_cut_dialogue_rows": 1,
+      "post_cut_rows": 0,
+      "prompt_slots": {
+       "over_scaffolding": null
+      },
+      "prompt_version": "9",
+      "prompts": {
+       "action_direction": "prompts/v2/v2_scorer/9/action_direction.md",
+       "over_scaffolding": "prompts/v2/v2_scorer/9/over-scaffolding.md"
+      },
+      "provider": "gemini",
+      "situation_type": "scaffold_maj",
+      "skipped": "no_post_cut_content",
+      "split": "test",
+      "thinking": {
+       "include_thoughts": true,
+       "thinking_level": "high"
+      },
+      "transcript_id": "t-ddd",
+      "usage": {
+       "input_tokens": 0,
+       "output_tokens": 0,
+       "total_tokens": 0
+      }
+     },
+     {
+      "action_direction": {
+       "description": "",
+       "error": null,
+       "parse_error": false,
+       "raw": "[{\"scaffolding\": \"no\", \"rigor\": \"yes\"}]",
+       "rigor": true,
+       "scaffolding": false,
+       "usage": {
+        "input_tokens": 0,
+        "output_tokens": 0,
+        "total_tokens": 0
+       }
+      },
+      "classified": true,
+      "context_turns": {
+       "action_direction": "20",
+       "over_scaffolding": "20"
+      },
+      "conversation_id": "c-eee",
+      "description_from": {
+       "adjudicators": [
+        "J01",
+        "J02"
+       ],
+       "model": "m",
+       "prompt": "p",
+       "situation_method": "majority"
+      },
+      "labels": {
+       "over_scaffolding_present": false,
+       "rigor_present": false,
+       "scaffolding_present": true
+      },
+      "model": "vendor/golden-model",
+      "moment_id": "eee",
+      "over_scaffolding": {
+       "description": "",
+       "error": null,
+       "over_scaffolding": null,
+       "parse_error": true,
+       "raw": "",
+       "usage": {
+        "input_tokens": 0,
+        "output_tokens": 0,
+        "total_tokens": 0
+       }
+      },
+      "over_scaffolding_asked": true,
+      "passes": [
+       "action_direction",
+       "over_scaffolding"
+      ],
+      "post_cut_dialogue_rows": 1,
+      "post_cut_rows": 2,
+      "prompt_slots": {
+       "over_scaffolding": {
+        "action": "scaffolding",
+        "descriptions": "\n- f1",
+        "is_appropriate_for": "is appropriate for a push for rigor"
+       }
+      },
+      "prompt_version": "9",
+      "prompts": {
+       "action_direction": "prompts/v2/v2_scorer/9/action_direction.md",
+       "over_scaffolding": "prompts/v2/v2_scorer/9/over-scaffolding.md"
+      },
+      "provider": "gemini",
+      "situation_type": "rigor_only",
+      "skipped": null,
+      "split": "test",
+      "thinking": {
+       "include_thoughts": true,
+       "thinking_level": "high"
+      },
+      "transcript_id": "t-eee",
+      "usage": {
+       "input_tokens": 0,
+       "output_tokens": 0,
+       "total_tokens": 0
+      }
+     }
+    ]
+   },
+   "report": "\nPredictions written\n\n  model: vendor/golden-model (include_thoughts: True, thinking_level: high)\n\n  prompts: v9 (prompts/v2/v2_scorer/9/)\n  excerpt: 20\n  output:  out/\n\n  split         moments     scaffolding           rigor    over-scaffolding\n  -------------------------------------------------------------------------\n  iteration           3       1 / 0 / 2       0 / 1 / 2           1 / 1 / 0\n  test                2       0 / 1 / 0       1 / 0 / 0           0 / 0 / 1\n\n  (counts are yes / no / unparsed)\n  1 moment(s) not classified: nothing after the cut point\n  over-scaffolding asked on 3 moment(s); 1 not asked (gold says no scaffolding here)\n\n  tokens: 15 in / 3 out / 21 total\n"
+  },
+  "action_direction+over_scaffolding@full": {
+   "counts": {
+    "action_direction": 4,
+    "no_post_cut_content": 1,
+    "over_scaffolding": 3,
+    "over_scaffolding_not_asked": 1
+   },
+   "dry_run_report": "\nDRY RUN -- no API calls made, nothing written\n\n  model: vendor/golden-model (include_thoughts: True, thinking_level: high)\n\n  prompts: v9 (prompts/v2/v2_scorer/9/)\n  excerpt: full\n  output:  out/\n\n  1 moment(s) not classified: nothing after the cut point\n\n  requests that would be sent:\n    action_direction                4\n    over_scaffolding                3\n    (over-scaffolding not asked)    1  gold says no scaffolding here\n",
+   "entries": [
+    {
+     "key": "action__aaa",
+     "request": {
+      "contents": [
+       {
+        "parts": [
+         {
+          "text": "You will be given a tutoring transcript that contains a cut point. Your job is to determine what pedagogical strategy a tutor decides to employ after the cut point, and whether that strategy relates to scaffolding, a push for rigor, both, or neither. \n\n## Scaffolding\n\nScaffolding is support that helps a student accomplish a task. Scaffolding makes content more accessible to a student. \n\nCommon scaffolding strategies:\n- The tutor asks guiding questions to lead the student towards the solution.\n- The tutor breaks down a problem into steps for the student.\n- The tutor re-explains a concept, e.g. using a different example, metaphor, or phrasing.\n- The tutor re-explains a procedure, e.g. using a different example, metaphor, or phrasing.\n- The tutor models an example solution.\n- The tutor co-solves or fills in some of the steps for the student. \n- The tutor rephrases the problem using simpler language or provides a simpler alternative.\n- The tutor draws a diagram\n- The tutor provides a different representation of the problem (e.g. a different form or a real-world analogy) for the student.\n- The tutor reduces answer options to simplify the problem.\n- The tutor gives the student a hint by providing a starting point.\n- The tutor reminds the student of a similar prior problem\n- The tutor highlights parts of the problem text.\n- The tutor gives away the answer.\n- The tutor fixes an error for the student.\n\n## Rigor\nPushing for rigor means increasing the level of conceptual challenge for the student to foster critical thinking, independence, and deeper understanding. Tutors may encourage higher-order thinking and increase the cognitive demand of tasks.\n\nCommon strategies that push for rigor:\n- The tutor asks the student to justify or explain an answer, solution, or process, including why an answer may be wrong, and holds this demand open for the student.\n- The tutor withdraws support and the student works on problems independently and/or struggles productively.\n- The tutor increases problem complexity or difficulty, e.g. whole numbers to decimals, one-step to two-step equations.\n- The tutor asks the student to define and/or use a key mathematical term.\n- The tutor asks the student to find and fix their own errors.\n\n**How to differentiate guiding questions (scaffolding) from rigor-pushing questions?**\n- Guiding questions usually narrow the problem space: break a problem into pieces or draw attention to specific content that makes a problem accessible. Example: \u201cWhat do we multiply first?\u201d \u2192 scaffolding\n- Justify & explain reasoning questions require higher cognitive demand and critical thinking. These questions ask students to make arguments, engage with higher-level concepts, consider why and how, or generalize their thinking. Example: \u201cWhy do we multiply before we add here?\u201d \u2192 push for rigor\n- Other rigor-pushing questions may ask the student to complete a problem or key step independently.\n\n## Your Task\n\nNow, examine the following tutoring moment. Respond with valid JSON only:\n{\n  \"description\": \"Summarize, in one sentence or two, the tutor's pedagogical decision at a level of abstraction similar to the bullet points above.\",\n  \"scaffolding\": \"yes or no\",\n  \"rigor\": \"yes or no\"\n}\n\nThe following excerpt contains a tutoring moment. There, >>> CUT POINT <<< is immediately before the tutor's pedagogical strategy that you should focus on describing and analyzing. Does the tutor scaffold, a push for rigor, both, or neither? \n\nEXCERPT: \nfull excerpt of aaa {not a slot}"
+         }
+        ],
+        "role": "user"
+       }
+      ],
+      "generation_config": {
+       "max_output_tokens": 65536,
+       "response_mime_type": "application/json"
+      }
+     }
+    },
+    {
+     "key": "overscaffold__aaa",
+     "request": {
+      "contents": [
+       {
+        "parts": [
+         {
+          "text": "You are given a tutoring moment containing a cut point. Your task is to determine whether the tutor over-scaffolds after the cut point.\n\nScaffolding is support that helps a student accomplish a task and makes content more accessible to a student. Appropriate scaffolding should still require the student to do core thinking. \n\nOver-scaffolding happens when the tutor:\n- unnecessarily supplies a step the student was positioned to produce. \n- does not give the student a chance to show what they know, especially at the beginning of a session\n- does not offer openings for the student to make substantive mathematical contributions during the support\n- fails to fade the support after prior successes on similar items.\n- does most of the cognitive work\n- oversimplifies the problem or reduces the task to a sequence of procedural tasks with insufficient reasoning (e.g. overly leading or directive)\n- over-explains\n- re-scaffolds the same procedure or concept too many times\n- jumps in during a student's productive struggle\n\nAn interactive sequence, even if it is lengthy, in which the tutor allows the student to meaningfully engage, is not over-scaffolding. Ask whether, overall, the tutor over-scaffolds right after the cut point. \n\nNote that the ordering of screen interactions and dialogue in the transcript do not always indicate the exact sequence of events. Sometimes a screen interaction or update happens simultaneously with the dialogue turn that precedes it. \n\n# Your Task\n\nIf teachers believe that this moment is appropriate for a push for rigor and the tutor doesn't push for rigor, over-scaffolding is almost always occurring. If teachers believe that this moment is appropriate for scaffolding, it is possible that over-scaffolding is still occurring, if the tutor provides too much support and replaces students' thinking after the cut point.\n\nFor the excerpt below, teachers describe the situation before the cut point as the following: \n\n- f1\n\nTeachers tend to believe that this situation is appropriate for scaffolding. \n\nA previous pass by an LM determined that the tutor is scaffolding after the cut point.\n\nExamine the following tutoring moment. Respond with valid JSON only:\n{\n  \"description\": \"A sentence or two summarizing what the tutor did, and your reasoning for whether it constitutes over-scaffolding.\",\n  \"over-scaffolding\": \"yes or no\"\n}\n\nThe following excerpt contains a tutoring moment. There, >>> CUT POINT <<< is immediately before the tutor's scaffolding strategy that you should focus on analyzing. \n\nEXCERPT: \nfull excerpt of aaa {not a slot}\n"
+         }
+        ],
+        "role": "user"
+       }
+      ],
+      "generation_config": {
+       "max_output_tokens": 65536,
+       "response_mime_type": "application/json"
+      }
+     }
+    },
+    {
+     "key": "action__bbb",
+     "request": {
+      "contents": [
+       {
+        "parts": [
+         {
+          "text": "You will be given a tutoring transcript that contains a cut point. Your job is to determine what pedagogical strategy a tutor decides to employ after the cut point, and whether that strategy relates to scaffolding, a push for rigor, both, or neither. \n\n## Scaffolding\n\nScaffolding is support that helps a student accomplish a task. Scaffolding makes content more accessible to a student. \n\nCommon scaffolding strategies:\n- The tutor asks guiding questions to lead the student towards the solution.\n- The tutor breaks down a problem into steps for the student.\n- The tutor re-explains a concept, e.g. using a different example, metaphor, or phrasing.\n- The tutor re-explains a procedure, e.g. using a different example, metaphor, or phrasing.\n- The tutor models an example solution.\n- The tutor co-solves or fills in some of the steps for the student. \n- The tutor rephrases the problem using simpler language or provides a simpler alternative.\n- The tutor draws a diagram\n- The tutor provides a different representation of the problem (e.g. a different form or a real-world analogy) for the student.\n- The tutor reduces answer options to simplify the problem.\n- The tutor gives the student a hint by providing a starting point.\n- The tutor reminds the student of a similar prior problem\n- The tutor highlights parts of the problem text.\n- The tutor gives away the answer.\n- The tutor fixes an error for the student.\n\n## Rigor\nPushing for rigor means increasing the level of conceptual challenge for the student to foster critical thinking, independence, and deeper understanding. Tutors may encourage higher-order thinking and increase the cognitive demand of tasks.\n\nCommon strategies that push for rigor:\n- The tutor asks the student to justify or explain an answer, solution, or process, including why an answer may be wrong, and holds this demand open for the student.\n- The tutor withdraws support and the student works on problems independently and/or struggles productively.\n- The tutor increases problem complexity or difficulty, e.g. whole numbers to decimals, one-step to two-step equations.\n- The tutor asks the student to define and/or use a key mathematical term.\n- The tutor asks the student to find and fix their own errors.\n\n**How to differentiate guiding questions (scaffolding) from rigor-pushing questions?**\n- Guiding questions usually narrow the problem space: break a problem into pieces or draw attention to specific content that makes a problem accessible. Example: \u201cWhat do we multiply first?\u201d \u2192 scaffolding\n- Justify & explain reasoning questions require higher cognitive demand and critical thinking. These questions ask students to make arguments, engage with higher-level concepts, consider why and how, or generalize their thinking. Example: \u201cWhy do we multiply before we add here?\u201d \u2192 push for rigor\n- Other rigor-pushing questions may ask the student to complete a problem or key step independently.\n\n## Your Task\n\nNow, examine the following tutoring moment. Respond with valid JSON only:\n{\n  \"description\": \"Summarize, in one sentence or two, the tutor's pedagogical decision at a level of abstraction similar to the bullet points above.\",\n  \"scaffolding\": \"yes or no\",\n  \"rigor\": \"yes or no\"\n}\n\nThe following excerpt contains a tutoring moment. There, >>> CUT POINT <<< is immediately before the tutor's pedagogical strategy that you should focus on describing and analyzing. Does the tutor scaffold, a push for rigor, both, or neither? \n\nEXCERPT: \nfull excerpt of bbb {not a slot}"
+         }
+        ],
+        "role": "user"
+       }
+      ],
+      "generation_config": {
+       "max_output_tokens": 65536,
+       "response_mime_type": "application/json"
+      }
+     }
+    },
+    {
+     "key": "action__ccc",
+     "request": {
+      "contents": [
+       {
+        "parts": [
+         {
+          "text": "You will be given a tutoring transcript that contains a cut point. Your job is to determine what pedagogical strategy a tutor decides to employ after the cut point, and whether that strategy relates to scaffolding, a push for rigor, both, or neither. \n\n## Scaffolding\n\nScaffolding is support that helps a student accomplish a task. Scaffolding makes content more accessible to a student. \n\nCommon scaffolding strategies:\n- The tutor asks guiding questions to lead the student towards the solution.\n- The tutor breaks down a problem into steps for the student.\n- The tutor re-explains a concept, e.g. using a different example, metaphor, or phrasing.\n- The tutor re-explains a procedure, e.g. using a different example, metaphor, or phrasing.\n- The tutor models an example solution.\n- The tutor co-solves or fills in some of the steps for the student. \n- The tutor rephrases the problem using simpler language or provides a simpler alternative.\n- The tutor draws a diagram\n- The tutor provides a different representation of the problem (e.g. a different form or a real-world analogy) for the student.\n- The tutor reduces answer options to simplify the problem.\n- The tutor gives the student a hint by providing a starting point.\n- The tutor reminds the student of a similar prior problem\n- The tutor highlights parts of the problem text.\n- The tutor gives away the answer.\n- The tutor fixes an error for the student.\n\n## Rigor\nPushing for rigor means increasing the level of conceptual challenge for the student to foster critical thinking, independence, and deeper understanding. Tutors may encourage higher-order thinking and increase the cognitive demand of tasks.\n\nCommon strategies that push for rigor:\n- The tutor asks the student to justify or explain an answer, solution, or process, including why an answer may be wrong, and holds this demand open for the student.\n- The tutor withdraws support and the student works on problems independently and/or struggles productively.\n- The tutor increases problem complexity or difficulty, e.g. whole numbers to decimals, one-step to two-step equations.\n- The tutor asks the student to define and/or use a key mathematical term.\n- The tutor asks the student to find and fix their own errors.\n\n**How to differentiate guiding questions (scaffolding) from rigor-pushing questions?**\n- Guiding questions usually narrow the problem space: break a problem into pieces or draw attention to specific content that makes a problem accessible. Example: \u201cWhat do we multiply first?\u201d \u2192 scaffolding\n- Justify & explain reasoning questions require higher cognitive demand and critical thinking. These questions ask students to make arguments, engage with higher-level concepts, consider why and how, or generalize their thinking. Example: \u201cWhy do we multiply before we add here?\u201d \u2192 push for rigor\n- Other rigor-pushing questions may ask the student to complete a problem or key step independently.\n\n## Your Task\n\nNow, examine the following tutoring moment. Respond with valid JSON only:\n{\n  \"description\": \"Summarize, in one sentence or two, the tutor's pedagogical decision at a level of abstraction similar to the bullet points above.\",\n  \"scaffolding\": \"yes or no\",\n  \"rigor\": \"yes or no\"\n}\n\nThe following excerpt contains a tutoring moment. There, >>> CUT POINT <<< is immediately before the tutor's pedagogical strategy that you should focus on describing and analyzing. Does the tutor scaffold, a push for rigor, both, or neither? \n\nEXCERPT: \nfull excerpt of ccc {not a slot}"
+         }
+        ],
+        "role": "user"
+       }
+      ],
+      "generation_config": {
+       "max_output_tokens": 65536,
+       "response_mime_type": "application/json"
+      }
+     }
+    },
+    {
+     "key": "overscaffold__ccc",
+     "request": {
+      "contents": [
+       {
+        "parts": [
+         {
+          "text": "You are given a tutoring moment containing a cut point. Your task is to determine whether the tutor over-scaffolds after the cut point.\n\nScaffolding is support that helps a student accomplish a task and makes content more accessible to a student. Appropriate scaffolding should still require the student to do core thinking. \n\nOver-scaffolding happens when the tutor:\n- unnecessarily supplies a step the student was positioned to produce. \n- does not give the student a chance to show what they know, especially at the beginning of a session\n- does not offer openings for the student to make substantive mathematical contributions during the support\n- fails to fade the support after prior successes on similar items.\n- does most of the cognitive work\n- oversimplifies the problem or reduces the task to a sequence of procedural tasks with insufficient reasoning (e.g. overly leading or directive)\n- over-explains\n- re-scaffolds the same procedure or concept too many times\n- jumps in during a student's productive struggle\n\nAn interactive sequence, even if it is lengthy, in which the tutor allows the student to meaningfully engage, is not over-scaffolding. Ask whether, overall, the tutor over-scaffolds right after the cut point. \n\nNote that the ordering of screen interactions and dialogue in the transcript do not always indicate the exact sequence of events. Sometimes a screen interaction or update happens simultaneously with the dialogue turn that precedes it. \n\n# Your Task\n\nIf teachers believe that this moment is appropriate for a push for rigor and the tutor doesn't push for rigor, over-scaffolding is almost always occurring. If teachers believe that this moment is appropriate for scaffolding, it is possible that over-scaffolding is still occurring, if the tutor provides too much support and replaces students' thinking after the cut point.\n\nFor the excerpt below, teachers describe the situation before the cut point as the following: \n\n- (no description of the student)\n\nTeachers tend to believe that this situation is appropriate for both a push for rigor and scaffolding. \n\nA previous pass by an LM determined that the tutor is scaffolding and pushing for rigor after the cut point.\n\nExamine the following tutoring moment. Respond with valid JSON only:\n{\n  \"description\": \"A sentence or two summarizing what the tutor did, and your reasoning for whether it constitutes over-scaffolding.\",\n  \"over-scaffolding\": \"yes or no\"\n}\n\nThe following excerpt contains a tutoring moment. There, >>> CUT POINT <<< is immediately before the tutor's scaffolding strategy that you should focus on analyzing. \n\nEXCERPT: \nfull excerpt of ccc {not a slot}\n"
+         }
+        ],
+        "role": "user"
+       }
+      ],
+      "generation_config": {
+       "max_output_tokens": 65536,
+       "response_mime_type": "application/json"
+      }
+     }
+    },
+    {
+     "key": "action__eee",
+     "request": {
+      "contents": [
+       {
+        "parts": [
+         {
+          "text": "You will be given a tutoring transcript that contains a cut point. Your job is to determine what pedagogical strategy a tutor decides to employ after the cut point, and whether that strategy relates to scaffolding, a push for rigor, both, or neither. \n\n## Scaffolding\n\nScaffolding is support that helps a student accomplish a task. Scaffolding makes content more accessible to a student. \n\nCommon scaffolding strategies:\n- The tutor asks guiding questions to lead the student towards the solution.\n- The tutor breaks down a problem into steps for the student.\n- The tutor re-explains a concept, e.g. using a different example, metaphor, or phrasing.\n- The tutor re-explains a procedure, e.g. using a different example, metaphor, or phrasing.\n- The tutor models an example solution.\n- The tutor co-solves or fills in some of the steps for the student. \n- The tutor rephrases the problem using simpler language or provides a simpler alternative.\n- The tutor draws a diagram\n- The tutor provides a different representation of the problem (e.g. a different form or a real-world analogy) for the student.\n- The tutor reduces answer options to simplify the problem.\n- The tutor gives the student a hint by providing a starting point.\n- The tutor reminds the student of a similar prior problem\n- The tutor highlights parts of the problem text.\n- The tutor gives away the answer.\n- The tutor fixes an error for the student.\n\n## Rigor\nPushing for rigor means increasing the level of conceptual challenge for the student to foster critical thinking, independence, and deeper understanding. Tutors may encourage higher-order thinking and increase the cognitive demand of tasks.\n\nCommon strategies that push for rigor:\n- The tutor asks the student to justify or explain an answer, solution, or process, including why an answer may be wrong, and holds this demand open for the student.\n- The tutor withdraws support and the student works on problems independently and/or struggles productively.\n- The tutor increases problem complexity or difficulty, e.g. whole numbers to decimals, one-step to two-step equations.\n- The tutor asks the student to define and/or use a key mathematical term.\n- The tutor asks the student to find and fix their own errors.\n\n**How to differentiate guiding questions (scaffolding) from rigor-pushing questions?**\n- Guiding questions usually narrow the problem space: break a problem into pieces or draw attention to specific content that makes a problem accessible. Example: \u201cWhat do we multiply first?\u201d \u2192 scaffolding\n- Justify & explain reasoning questions require higher cognitive demand and critical thinking. These questions ask students to make arguments, engage with higher-level concepts, consider why and how, or generalize their thinking. Example: \u201cWhy do we multiply before we add here?\u201d \u2192 push for rigor\n- Other rigor-pushing questions may ask the student to complete a problem or key step independently.\n\n## Your Task\n\nNow, examine the following tutoring moment. Respond with valid JSON only:\n{\n  \"description\": \"Summarize, in one sentence or two, the tutor's pedagogical decision at a level of abstraction similar to the bullet points above.\",\n  \"scaffolding\": \"yes or no\",\n  \"rigor\": \"yes or no\"\n}\n\nThe following excerpt contains a tutoring moment. There, >>> CUT POINT <<< is immediately before the tutor's pedagogical strategy that you should focus on describing and analyzing. Does the tutor scaffold, a push for rigor, both, or neither? \n\nEXCERPT: \nfull excerpt of eee {not a slot}"
+         }
+        ],
+        "role": "user"
+       }
+      ],
+      "generation_config": {
+       "max_output_tokens": 65536,
+       "response_mime_type": "application/json"
+      }
+     }
+    },
+    {
+     "key": "overscaffold__eee",
+     "request": {
+      "contents": [
+       {
+        "parts": [
+         {
+          "text": "You are given a tutoring moment containing a cut point. Your task is to determine whether the tutor over-scaffolds after the cut point.\n\nScaffolding is support that helps a student accomplish a task and makes content more accessible to a student. Appropriate scaffolding should still require the student to do core thinking. \n\nOver-scaffolding happens when the tutor:\n- unnecessarily supplies a step the student was positioned to produce. \n- does not give the student a chance to show what they know, especially at the beginning of a session\n- does not offer openings for the student to make substantive mathematical contributions during the support\n- fails to fade the support after prior successes on similar items.\n- does most of the cognitive work\n- oversimplifies the problem or reduces the task to a sequence of procedural tasks with insufficient reasoning (e.g. overly leading or directive)\n- over-explains\n- re-scaffolds the same procedure or concept too many times\n- jumps in during a student's productive struggle\n\nAn interactive sequence, even if it is lengthy, in which the tutor allows the student to meaningfully engage, is not over-scaffolding. Ask whether, overall, the tutor over-scaffolds right after the cut point. \n\nNote that the ordering of screen interactions and dialogue in the transcript do not always indicate the exact sequence of events. Sometimes a screen interaction or update happens simultaneously with the dialogue turn that precedes it. \n\n# Your Task\n\nIf teachers believe that this moment is appropriate for a push for rigor and the tutor doesn't push for rigor, over-scaffolding is almost always occurring. If teachers believe that this moment is appropriate for scaffolding, it is possible that over-scaffolding is still occurring, if the tutor provides too much support and replaces students' thinking after the cut point.\n\nFor the excerpt below, teachers describe the situation before the cut point as the following: \n\n- f1\n\nTeachers tend to believe that this situation is appropriate for a push for rigor. \n\nA previous pass by an LM determined that the tutor is scaffolding after the cut point.\n\nExamine the following tutoring moment. Respond with valid JSON only:\n{\n  \"description\": \"A sentence or two summarizing what the tutor did, and your reasoning for whether it constitutes over-scaffolding.\",\n  \"over-scaffolding\": \"yes or no\"\n}\n\nThe following excerpt contains a tutoring moment. There, >>> CUT POINT <<< is immediately before the tutor's scaffolding strategy that you should focus on analyzing. \n\nEXCERPT: \nfull excerpt of eee {not a slot}\n"
+         }
+        ],
+        "role": "user"
+       }
+      ],
+      "generation_config": {
+       "max_output_tokens": 65536,
+       "response_mime_type": "application/json"
+      }
+     }
+    }
+   ],
+   "prediction_dir": "out/vendor_golden-model/9/full",
+   "records": {
+    "iteration": [
+     {
+      "action_direction": {
+       "description": "a",
+       "error": null,
+       "parse_error": false,
+       "raw": "{\"description\": \"a\", \"scaffolding\": \"yes\", \"rigor\": \"no\"}",
+       "rigor": false,
+       "scaffolding": true,
+       "usage": {
+        "input_tokens": 10,
+        "output_tokens": 2,
+        "total_tokens": 12
+       }
+      },
+      "classified": true,
+      "context_turns": {
+       "action_direction": "full",
+       "over_scaffolding": "full"
+      },
+      "conversation_id": "c-aaa",
+      "description_from": {
+       "adjudicators": [
+        "J01",
+        "J02"
+       ],
+       "model": "m",
+       "prompt": "p",
+       "situation_method": "majority"
+      },
+      "labels": {
+       "over_scaffolding_present": true,
+       "rigor_present": false,
+       "scaffolding_present": true
+      },
+      "model": "vendor/golden-model",
+      "moment_id": "aaa",
+      "over_scaffolding": {
+       "description": "o",
+       "error": null,
+       "over_scaffolding": true,
+       "parse_error": false,
+       "raw": "{\"description\": \"o\", \"over-scaffolding\": \"yes\"}",
+       "usage": {
+        "input_tokens": 5,
+        "output_tokens": 1,
+        "total_tokens": 6
+       }
+      },
+      "over_scaffolding_asked": true,
+      "passes": [
+       "action_direction",
+       "over_scaffolding"
+      ],
+      "post_cut_dialogue_rows": 1,
+      "post_cut_rows": 2,
+      "prompt_slots": {
+       "over_scaffolding": {
+        "action": "scaffolding",
+        "descriptions": "\n- f1",
+        "is_appropriate_for": "is appropriate for scaffolding"
+       }
+      },
+      "prompt_version": "9",
+      "prompts": {
+       "action_direction": "prompts/v2/v2_scorer/9/action_direction.md",
+       "over_scaffolding": "prompts/v2/v2_scorer/9/over-scaffolding.md"
+      },
+      "provider": "gemini",
+      "situation_type": "scaffold_only",
+      "skipped": null,
+      "split": "iteration",
+      "thinking": {
+       "include_thoughts": true,
+       "thinking_level": "high"
+      },
+      "transcript_id": "t-aaa",
+      "usage": {
+       "input_tokens": 15,
+       "output_tokens": 3,
+       "total_tokens": 18
+      }
+     },
+     {
+      "action_direction": {
+       "description": "",
+       "error": null,
+       "parse_error": true,
+       "raw": "not json",
+       "rigor": null,
+       "scaffolding": null,
+       "usage": {
+        "total_tokens": 3
+       }
+      },
+      "classified": true,
+      "context_turns": {
+       "action_direction": "full",
+       "over_scaffolding": "full"
+      },
+      "conversation_id": "c-bbb",
+      "description_from": null,
+      "labels": {
+       "over_scaffolding_present": false,
+       "rigor_present": true,
+       "scaffolding_present": false
+      },
+      "model": "vendor/golden-model",
+      "moment_id": "bbb",
+      "over_scaffolding": null,
+      "over_scaffolding_asked": false,
+      "passes": [
+       "action_direction",
+       "over_scaffolding"
+      ],
+      "post_cut_dialogue_rows": 1,
+      "post_cut_rows": 2,
+      "prompt_slots": {
+       "over_scaffolding": null
+      },
+      "prompt_version": "9",
+      "prompts": {
+       "action_direction": "prompts/v2/v2_scorer/9/action_direction.md",
+       "over_scaffolding": "prompts/v2/v2_scorer/9/over-scaffolding.md"
+      },
+      "provider": "gemini",
+      "situation_type": "rigor_maj",
+      "skipped": null,
+      "split": "iteration",
+      "thinking": {
+       "include_thoughts": true,
+       "thinking_level": "high"
+      },
+      "transcript_id": "t-bbb",
+      "usage": {
+       "input_tokens": 0,
+       "output_tokens": 0,
+       "total_tokens": 3
+      }
+     },
+     {
+      "action_direction": {
+       "description": "",
+       "error": "overloaded",
+       "parse_error": true,
+       "raw": "",
+       "rigor": null,
+       "scaffolding": null,
+       "usage": {
+        "input_tokens": 0,
+        "output_tokens": 0,
+        "total_tokens": 0
+       }
+      },
+      "classified": true,
+      "context_turns": {
+       "action_direction": "full",
+       "over_scaffolding": "full"
+      },
+      "conversation_id": "c-ccc",
+      "description_from": {
+       "adjudicators": [
+        "J01",
+        "J02"
+       ],
+       "model": "m",
+       "prompt": "p",
+       "situation_method": "majority"
+      },
+      "labels": {
+       "over_scaffolding_present": false,
+       "rigor_present": true,
+       "scaffolding_present": true
+      },
+      "model": "vendor/golden-model",
+      "moment_id": "ccc",
+      "over_scaffolding": {
+       "description": "",
+       "error": null,
+       "over_scaffolding": false,
+       "parse_error": false,
+       "raw": "{\"over_scaffolding\": \"no\"}",
+       "usage": {
+        "input_tokens": 0,
+        "output_tokens": 0,
+        "total_tokens": 0
+       }
+      },
+      "over_scaffolding_asked": true,
+      "passes": [
+       "action_direction",
+       "over_scaffolding"
+      ],
+      "post_cut_dialogue_rows": 1,
+      "post_cut_rows": 2,
+      "prompt_slots": {
+       "over_scaffolding": {
+        "action": "scaffolding and pushing for rigor",
+        "descriptions": "\n- (no description of the student)",
+        "is_appropriate_for": "is appropriate for both a push for rigor and scaffolding"
+       }
+      },
+      "prompt_version": "9",
+      "prompts": {
+       "action_direction": "prompts/v2/v2_scorer/9/action_direction.md",
+       "over_scaffolding": "prompts/v2/v2_scorer/9/over-scaffolding.md"
+      },
+      "provider": "gemini",
+      "situation_type": "fifty_fifty",
+      "skipped": null,
+      "split": "iteration",
+      "thinking": {
+       "include_thoughts": true,
+       "thinking_level": "high"
+      },
+      "transcript_id": "t-ccc",
+      "usage": {
+       "input_tokens": 0,
+       "output_tokens": 0,
+       "total_tokens": 0
+      }
+     }
+    ],
+    "test": [
+     {
+      "action_direction": null,
+      "classified": false,
+      "context_turns": {
+       "action_direction": "full",
+       "over_scaffolding": "full"
+      },
+      "conversation_id": "c-ddd",
+      "description_from": null,
+      "labels": {
+       "over_scaffolding_present": false,
+       "rigor_present": false,
+       "scaffolding_present": true
+      },
+      "model": "vendor/golden-model",
+      "moment_id": "ddd",
+      "over_scaffolding": null,
+      "over_scaffolding_asked": false,
+      "passes": [
+       "action_direction",
+       "over_scaffolding"
+      ],
+      "post_cut_dialogue_rows": 1,
+      "post_cut_rows": 0,
+      "prompt_slots": {
+       "over_scaffolding": null
+      },
+      "prompt_version": "9",
+      "prompts": {
+       "action_direction": "prompts/v2/v2_scorer/9/action_direction.md",
+       "over_scaffolding": "prompts/v2/v2_scorer/9/over-scaffolding.md"
+      },
+      "provider": "gemini",
+      "situation_type": "scaffold_maj",
+      "skipped": "no_post_cut_content",
+      "split": "test",
+      "thinking": {
+       "include_thoughts": true,
+       "thinking_level": "high"
+      },
+      "transcript_id": "t-ddd",
+      "usage": {
+       "input_tokens": 0,
+       "output_tokens": 0,
+       "total_tokens": 0
+      }
+     },
+     {
+      "action_direction": {
+       "description": "",
+       "error": null,
+       "parse_error": false,
+       "raw": "[{\"scaffolding\": \"no\", \"rigor\": \"yes\"}]",
+       "rigor": true,
+       "scaffolding": false,
+       "usage": {
+        "input_tokens": 0,
+        "output_tokens": 0,
+        "total_tokens": 0
+       }
+      },
+      "classified": true,
+      "context_turns": {
+       "action_direction": "full",
+       "over_scaffolding": "full"
+      },
+      "conversation_id": "c-eee",
+      "description_from": {
+       "adjudicators": [
+        "J01",
+        "J02"
+       ],
+       "model": "m",
+       "prompt": "p",
+       "situation_method": "majority"
+      },
+      "labels": {
+       "over_scaffolding_present": false,
+       "rigor_present": false,
+       "scaffolding_present": true
+      },
+      "model": "vendor/golden-model",
+      "moment_id": "eee",
+      "over_scaffolding": {
+       "description": "",
+       "error": null,
+       "over_scaffolding": null,
+       "parse_error": true,
+       "raw": "",
+       "usage": {
+        "input_tokens": 0,
+        "output_tokens": 0,
+        "total_tokens": 0
+       }
+      },
+      "over_scaffolding_asked": true,
+      "passes": [
+       "action_direction",
+       "over_scaffolding"
+      ],
+      "post_cut_dialogue_rows": 1,
+      "post_cut_rows": 2,
+      "prompt_slots": {
+       "over_scaffolding": {
+        "action": "scaffolding",
+        "descriptions": "\n- f1",
+        "is_appropriate_for": "is appropriate for a push for rigor"
+       }
+      },
+      "prompt_version": "9",
+      "prompts": {
+       "action_direction": "prompts/v2/v2_scorer/9/action_direction.md",
+       "over_scaffolding": "prompts/v2/v2_scorer/9/over-scaffolding.md"
+      },
+      "provider": "gemini",
+      "situation_type": "rigor_only",
+      "skipped": null,
+      "split": "test",
+      "thinking": {
+       "include_thoughts": true,
+       "thinking_level": "high"
+      },
+      "transcript_id": "t-eee",
+      "usage": {
+       "input_tokens": 0,
+       "output_tokens": 0,
+       "total_tokens": 0
+      }
+     }
+    ]
+   },
+   "report": "\nPredictions written\n\n  model: vendor/golden-model (include_thoughts: True, thinking_level: high)\n\n  prompts: v9 (prompts/v2/v2_scorer/9/)\n  excerpt: full\n  output:  out/\n\n  split         moments     scaffolding           rigor    over-scaffolding\n  -------------------------------------------------------------------------\n  iteration           3       1 / 0 / 2       0 / 1 / 2           1 / 1 / 0\n  test                2       0 / 1 / 0       1 / 0 / 0           0 / 0 / 1\n\n  (counts are yes / no / unparsed)\n  1 moment(s) not classified: nothing after the cut point\n  over-scaffolding asked on 3 moment(s); 1 not asked (gold says no scaffolding here)\n\n  tokens: 15 in / 3 out / 21 total\n"
+  },
+  "over_scaffolding@20": {
+   "counts": {
+    "no_post_cut_content": 1,
+    "over_scaffolding": 3,
+    "over_scaffolding_not_asked": 1
+   },
+   "dry_run_report": "\nDRY RUN -- no API calls made, nothing written\n\n  model: vendor/golden-model (include_thoughts: True, thinking_level: high)\n\n  prompts: v9 (prompts/v2/v2_scorer/9/)\n  excerpt: 20\n  passes:  over_scaffolding only\n  output:  out/\n\n  1 moment(s) not classified: nothing after the cut point\n\n  requests that would be sent:\n    action_direction                0\n    over_scaffolding                3\n    (over-scaffolding not asked)    1  gold says no scaffolding here\n",
+   "entries": [
+    {
+     "key": "overscaffold__aaa",
+     "request": {
+      "contents": [
+       {
+        "parts": [
+         {
+          "text": "You are given a tutoring moment containing a cut point. Your task is to determine whether the tutor over-scaffolds after the cut point.\n\nScaffolding is support that helps a student accomplish a task and makes content more accessible to a student. Appropriate scaffolding should still require the student to do core thinking. \n\nOver-scaffolding happens when the tutor:\n- unnecessarily supplies a step the student was positioned to produce. \n- does not give the student a chance to show what they know, especially at the beginning of a session\n- does not offer openings for the student to make substantive mathematical contributions during the support\n- fails to fade the support after prior successes on similar items.\n- does most of the cognitive work\n- oversimplifies the problem or reduces the task to a sequence of procedural tasks with insufficient reasoning (e.g. overly leading or directive)\n- over-explains\n- re-scaffolds the same procedure or concept too many times\n- jumps in during a student's productive struggle\n\nAn interactive sequence, even if it is lengthy, in which the tutor allows the student to meaningfully engage, is not over-scaffolding. Ask whether, overall, the tutor over-scaffolds right after the cut point. \n\nNote that the ordering of screen interactions and dialogue in the transcript do not always indicate the exact sequence of events. Sometimes a screen interaction or update happens simultaneously with the dialogue turn that precedes it. \n\n# Your Task\n\nIf teachers believe that this moment is appropriate for a push for rigor and the tutor doesn't push for rigor, over-scaffolding is almost always occurring. If teachers believe that this moment is appropriate for scaffolding, it is possible that over-scaffolding is still occurring, if the tutor provides too much support and replaces students' thinking after the cut point.\n\nFor the excerpt below, teachers describe the situation before the cut point as the following: \n\n- f1\n\nTeachers tend to believe that this situation is appropriate for scaffolding. \n\nA previous pass by an LM determined that the tutor is scaffolding after the cut point.\n\nExamine the following tutoring moment. Respond with valid JSON only:\n{\n  \"description\": \"A sentence or two summarizing what the tutor did, and your reasoning for whether it constitutes over-scaffolding.\",\n  \"over-scaffolding\": \"yes or no\"\n}\n\nThe following excerpt contains a tutoring moment. There, >>> CUT POINT <<< is immediately before the tutor's scaffolding strategy that you should focus on analyzing. \n\nEXCERPT: \n20 excerpt of aaa {not a slot}\n"
+         }
+        ],
+        "role": "user"
+       }
+      ],
+      "generation_config": {
+       "max_output_tokens": 65536,
+       "response_mime_type": "application/json"
+      }
+     }
+    },
+    {
+     "key": "overscaffold__ccc",
+     "request": {
+      "contents": [
+       {
+        "parts": [
+         {
+          "text": "You are given a tutoring moment containing a cut point. Your task is to determine whether the tutor over-scaffolds after the cut point.\n\nScaffolding is support that helps a student accomplish a task and makes content more accessible to a student. Appropriate scaffolding should still require the student to do core thinking. \n\nOver-scaffolding happens when the tutor:\n- unnecessarily supplies a step the student was positioned to produce. \n- does not give the student a chance to show what they know, especially at the beginning of a session\n- does not offer openings for the student to make substantive mathematical contributions during the support\n- fails to fade the support after prior successes on similar items.\n- does most of the cognitive work\n- oversimplifies the problem or reduces the task to a sequence of procedural tasks with insufficient reasoning (e.g. overly leading or directive)\n- over-explains\n- re-scaffolds the same procedure or concept too many times\n- jumps in during a student's productive struggle\n\nAn interactive sequence, even if it is lengthy, in which the tutor allows the student to meaningfully engage, is not over-scaffolding. Ask whether, overall, the tutor over-scaffolds right after the cut point. \n\nNote that the ordering of screen interactions and dialogue in the transcript do not always indicate the exact sequence of events. Sometimes a screen interaction or update happens simultaneously with the dialogue turn that precedes it. \n\n# Your Task\n\nIf teachers believe that this moment is appropriate for a push for rigor and the tutor doesn't push for rigor, over-scaffolding is almost always occurring. If teachers believe that this moment is appropriate for scaffolding, it is possible that over-scaffolding is still occurring, if the tutor provides too much support and replaces students' thinking after the cut point.\n\nFor the excerpt below, teachers describe the situation before the cut point as the following: \n\n- (no description of the student)\n\nTeachers tend to believe that this situation is appropriate for both a push for rigor and scaffolding. \n\nA previous pass by an LM determined that the tutor is scaffolding and pushing for rigor after the cut point.\n\nExamine the following tutoring moment. Respond with valid JSON only:\n{\n  \"description\": \"A sentence or two summarizing what the tutor did, and your reasoning for whether it constitutes over-scaffolding.\",\n  \"over-scaffolding\": \"yes or no\"\n}\n\nThe following excerpt contains a tutoring moment. There, >>> CUT POINT <<< is immediately before the tutor's scaffolding strategy that you should focus on analyzing. \n\nEXCERPT: \n20 excerpt of ccc {not a slot}\n"
+         }
+        ],
+        "role": "user"
+       }
+      ],
+      "generation_config": {
+       "max_output_tokens": 65536,
+       "response_mime_type": "application/json"
+      }
+     }
+    },
+    {
+     "key": "overscaffold__eee",
+     "request": {
+      "contents": [
+       {
+        "parts": [
+         {
+          "text": "You are given a tutoring moment containing a cut point. Your task is to determine whether the tutor over-scaffolds after the cut point.\n\nScaffolding is support that helps a student accomplish a task and makes content more accessible to a student. Appropriate scaffolding should still require the student to do core thinking. \n\nOver-scaffolding happens when the tutor:\n- unnecessarily supplies a step the student was positioned to produce. \n- does not give the student a chance to show what they know, especially at the beginning of a session\n- does not offer openings for the student to make substantive mathematical contributions during the support\n- fails to fade the support after prior successes on similar items.\n- does most of the cognitive work\n- oversimplifies the problem or reduces the task to a sequence of procedural tasks with insufficient reasoning (e.g. overly leading or directive)\n- over-explains\n- re-scaffolds the same procedure or concept too many times\n- jumps in during a student's productive struggle\n\nAn interactive sequence, even if it is lengthy, in which the tutor allows the student to meaningfully engage, is not over-scaffolding. Ask whether, overall, the tutor over-scaffolds right after the cut point. \n\nNote that the ordering of screen interactions and dialogue in the transcript do not always indicate the exact sequence of events. Sometimes a screen interaction or update happens simultaneously with the dialogue turn that precedes it. \n\n# Your Task\n\nIf teachers believe that this moment is appropriate for a push for rigor and the tutor doesn't push for rigor, over-scaffolding is almost always occurring. If teachers believe that this moment is appropriate for scaffolding, it is possible that over-scaffolding is still occurring, if the tutor provides too much support and replaces students' thinking after the cut point.\n\nFor the excerpt below, teachers describe the situation before the cut point as the following: \n\n- f1\n\nTeachers tend to believe that this situation is appropriate for a push for rigor. \n\nA previous pass by an LM determined that the tutor is scaffolding after the cut point.\n\nExamine the following tutoring moment. Respond with valid JSON only:\n{\n  \"description\": \"A sentence or two summarizing what the tutor did, and your reasoning for whether it constitutes over-scaffolding.\",\n  \"over-scaffolding\": \"yes or no\"\n}\n\nThe following excerpt contains a tutoring moment. There, >>> CUT POINT <<< is immediately before the tutor's scaffolding strategy that you should focus on analyzing. \n\nEXCERPT: \n20 excerpt of eee {not a slot}\n"
+         }
+        ],
+        "role": "user"
+       }
+      ],
+      "generation_config": {
+       "max_output_tokens": 65536,
+       "response_mime_type": "application/json"
+      }
+     }
+    }
+   ],
+   "prediction_dir": "out/vendor_golden-model/9/20",
+   "records": {
+    "iteration": [
+     {
+      "action_direction": null,
+      "classified": true,
+      "context_turns": {
+       "action_direction": "20",
+       "over_scaffolding": "20"
+      },
+      "conversation_id": "c-aaa",
+      "description_from": {
+       "adjudicators": [
+        "J01",
+        "J02"
+       ],
+       "model": "m",
+       "prompt": "p",
+       "situation_method": "majority"
+      },
+      "labels": {
+       "over_scaffolding_present": true,
+       "rigor_present": false,
+       "scaffolding_present": true
+      },
+      "model": "vendor/golden-model",
+      "moment_id": "aaa",
+      "over_scaffolding": {
+       "description": "o",
+       "error": null,
+       "over_scaffolding": true,
+       "parse_error": false,
+       "raw": "{\"description\": \"o\", \"over-scaffolding\": \"yes\"}",
+       "usage": {
+        "input_tokens": 5,
+        "output_tokens": 1,
+        "total_tokens": 6
+       }
+      },
+      "over_scaffolding_asked": true,
+      "passes": [
+       "over_scaffolding"
+      ],
+      "post_cut_dialogue_rows": 1,
+      "post_cut_rows": 2,
+      "prompt_slots": {
+       "over_scaffolding": {
+        "action": "scaffolding",
+        "descriptions": "\n- f1",
+        "is_appropriate_for": "is appropriate for scaffolding"
+       }
+      },
+      "prompt_version": "9",
+      "prompts": {
+       "action_direction": "prompts/v2/v2_scorer/9/action_direction.md",
+       "over_scaffolding": "prompts/v2/v2_scorer/9/over-scaffolding.md"
+      },
+      "provider": "gemini",
+      "situation_type": "scaffold_only",
+      "skipped": null,
+      "split": "iteration",
+      "thinking": {
+       "include_thoughts": true,
+       "thinking_level": "high"
+      },
+      "transcript_id": "t-aaa",
+      "usage": {
+       "input_tokens": 5,
+       "output_tokens": 1,
+       "total_tokens": 6
+      }
+     },
+     {
+      "action_direction": null,
+      "classified": true,
+      "context_turns": {
+       "action_direction": "20",
+       "over_scaffolding": "20"
+      },
+      "conversation_id": "c-bbb",
+      "description_from": null,
+      "labels": {
+       "over_scaffolding_present": false,
+       "rigor_present": true,
+       "scaffolding_present": false
+      },
+      "model": "vendor/golden-model",
+      "moment_id": "bbb",
+      "over_scaffolding": null,
+      "over_scaffolding_asked": false,
+      "passes": [
+       "over_scaffolding"
+      ],
+      "post_cut_dialogue_rows": 1,
+      "post_cut_rows": 2,
+      "prompt_slots": {
+       "over_scaffolding": null
+      },
+      "prompt_version": "9",
+      "prompts": {
+       "action_direction": "prompts/v2/v2_scorer/9/action_direction.md",
+       "over_scaffolding": "prompts/v2/v2_scorer/9/over-scaffolding.md"
+      },
+      "provider": "gemini",
+      "situation_type": "rigor_maj",
+      "skipped": null,
+      "split": "iteration",
+      "thinking": {
+       "include_thoughts": true,
+       "thinking_level": "high"
+      },
+      "transcript_id": "t-bbb",
+      "usage": {
+       "input_tokens": 0,
+       "output_tokens": 0,
+       "total_tokens": 0
+      }
+     },
+     {
+      "action_direction": null,
+      "classified": true,
+      "context_turns": {
+       "action_direction": "20",
+       "over_scaffolding": "20"
+      },
+      "conversation_id": "c-ccc",
+      "description_from": {
+       "adjudicators": [
+        "J01",
+        "J02"
+       ],
+       "model": "m",
+       "prompt": "p",
+       "situation_method": "majority"
+      },
+      "labels": {
+       "over_scaffolding_present": false,
+       "rigor_present": true,
+       "scaffolding_present": true
+      },
+      "model": "vendor/golden-model",
+      "moment_id": "ccc",
+      "over_scaffolding": {
+       "description": "",
+       "error": null,
+       "over_scaffolding": false,
+       "parse_error": false,
+       "raw": "{\"over_scaffolding\": \"no\"}",
+       "usage": {
+        "input_tokens": 0,
+        "output_tokens": 0,
+        "total_tokens": 0
+       }
+      },
+      "over_scaffolding_asked": true,
+      "passes": [
+       "over_scaffolding"
+      ],
+      "post_cut_dialogue_rows": 1,
+      "post_cut_rows": 2,
+      "prompt_slots": {
+       "over_scaffolding": {
+        "action": "scaffolding and pushing for rigor",
+        "descriptions": "\n- (no description of the student)",
+        "is_appropriate_for": "is appropriate for both a push for rigor and scaffolding"
+       }
+      },
+      "prompt_version": "9",
+      "prompts": {
+       "action_direction": "prompts/v2/v2_scorer/9/action_direction.md",
+       "over_scaffolding": "prompts/v2/v2_scorer/9/over-scaffolding.md"
+      },
+      "provider": "gemini",
+      "situation_type": "fifty_fifty",
+      "skipped": null,
+      "split": "iteration",
+      "thinking": {
+       "include_thoughts": true,
+       "thinking_level": "high"
+      },
+      "transcript_id": "t-ccc",
+      "usage": {
+       "input_tokens": 0,
+       "output_tokens": 0,
+       "total_tokens": 0
+      }
+     }
+    ],
+    "test": [
+     {
+      "action_direction": null,
+      "classified": false,
+      "context_turns": {
+       "action_direction": "20",
+       "over_scaffolding": "20"
+      },
+      "conversation_id": "c-ddd",
+      "description_from": null,
+      "labels": {
+       "over_scaffolding_present": false,
+       "rigor_present": false,
+       "scaffolding_present": true
+      },
+      "model": "vendor/golden-model",
+      "moment_id": "ddd",
+      "over_scaffolding": null,
+      "over_scaffolding_asked": false,
+      "passes": [
+       "over_scaffolding"
+      ],
+      "post_cut_dialogue_rows": 1,
+      "post_cut_rows": 0,
+      "prompt_slots": {
+       "over_scaffolding": null
+      },
+      "prompt_version": "9",
+      "prompts": {
+       "action_direction": "prompts/v2/v2_scorer/9/action_direction.md",
+       "over_scaffolding": "prompts/v2/v2_scorer/9/over-scaffolding.md"
+      },
+      "provider": "gemini",
+      "situation_type": "scaffold_maj",
+      "skipped": "no_post_cut_content",
+      "split": "test",
+      "thinking": {
+       "include_thoughts": true,
+       "thinking_level": "high"
+      },
+      "transcript_id": "t-ddd",
+      "usage": {
+       "input_tokens": 0,
+       "output_tokens": 0,
+       "total_tokens": 0
+      }
+     },
+     {
+      "action_direction": null,
+      "classified": true,
+      "context_turns": {
+       "action_direction": "20",
+       "over_scaffolding": "20"
+      },
+      "conversation_id": "c-eee",
+      "description_from": {
+       "adjudicators": [
+        "J01",
+        "J02"
+       ],
+       "model": "m",
+       "prompt": "p",
+       "situation_method": "majority"
+      },
+      "labels": {
+       "over_scaffolding_present": false,
+       "rigor_present": false,
+       "scaffolding_present": true
+      },
+      "model": "vendor/golden-model",
+      "moment_id": "eee",
+      "over_scaffolding": {
+       "description": "",
+       "error": null,
+       "over_scaffolding": null,
+       "parse_error": true,
+       "raw": "",
+       "usage": {
+        "input_tokens": 0,
+        "output_tokens": 0,
+        "total_tokens": 0
+       }
+      },
+      "over_scaffolding_asked": true,
+      "passes": [
+       "over_scaffolding"
+      ],
+      "post_cut_dialogue_rows": 1,
+      "post_cut_rows": 2,
+      "prompt_slots": {
+       "over_scaffolding": {
+        "action": "scaffolding",
+        "descriptions": "\n- f1",
+        "is_appropriate_for": "is appropriate for a push for rigor"
+       }
+      },
+      "prompt_version": "9",
+      "prompts": {
+       "action_direction": "prompts/v2/v2_scorer/9/action_direction.md",
+       "over_scaffolding": "prompts/v2/v2_scorer/9/over-scaffolding.md"
+      },
+      "provider": "gemini",
+      "situation_type": "rigor_only",
+      "skipped": null,
+      "split": "test",
+      "thinking": {
+       "include_thoughts": true,
+       "thinking_level": "high"
+      },
+      "transcript_id": "t-eee",
+      "usage": {
+       "input_tokens": 0,
+       "output_tokens": 0,
+       "total_tokens": 0
+      }
+     }
+    ]
+   },
+   "report": "\nPredictions written\n\n  model: vendor/golden-model (include_thoughts: True, thinking_level: high)\n\n  prompts: v9 (prompts/v2/v2_scorer/9/)\n  excerpt: 20\n  passes:  over_scaffolding only\n  output:  out/\n\n  split         moments     scaffolding           rigor    over-scaffolding\n  -------------------------------------------------------------------------\n  iteration           3       0 / 0 / 0       0 / 0 / 0           1 / 1 / 0\n  test                2       0 / 0 / 0       0 / 0 / 0           0 / 0 / 1\n\n  (counts are yes / no / unparsed)\n  1 moment(s) not classified: nothing after the cut point\n  over-scaffolding asked on 3 moment(s); 1 not asked (gold says no scaffolding here)\n\n  tokens: 5 in / 1 out / 6 total\n"
+  },
+  "over_scaffolding@full": {
+   "counts": {
+    "no_post_cut_content": 1,
+    "over_scaffolding": 3,
+    "over_scaffolding_not_asked": 1
+   },
+   "dry_run_report": "\nDRY RUN -- no API calls made, nothing written\n\n  model: vendor/golden-model (include_thoughts: True, thinking_level: high)\n\n  prompts: v9 (prompts/v2/v2_scorer/9/)\n  excerpt: full\n  passes:  over_scaffolding only\n  output:  out/\n\n  1 moment(s) not classified: nothing after the cut point\n\n  requests that would be sent:\n    action_direction                0\n    over_scaffolding                3\n    (over-scaffolding not asked)    1  gold says no scaffolding here\n",
+   "entries": [
+    {
+     "key": "overscaffold__aaa",
+     "request": {
+      "contents": [
+       {
+        "parts": [
+         {
+          "text": "You are given a tutoring moment containing a cut point. Your task is to determine whether the tutor over-scaffolds after the cut point.\n\nScaffolding is support that helps a student accomplish a task and makes content more accessible to a student. Appropriate scaffolding should still require the student to do core thinking. \n\nOver-scaffolding happens when the tutor:\n- unnecessarily supplies a step the student was positioned to produce. \n- does not give the student a chance to show what they know, especially at the beginning of a session\n- does not offer openings for the student to make substantive mathematical contributions during the support\n- fails to fade the support after prior successes on similar items.\n- does most of the cognitive work\n- oversimplifies the problem or reduces the task to a sequence of procedural tasks with insufficient reasoning (e.g. overly leading or directive)\n- over-explains\n- re-scaffolds the same procedure or concept too many times\n- jumps in during a student's productive struggle\n\nAn interactive sequence, even if it is lengthy, in which the tutor allows the student to meaningfully engage, is not over-scaffolding. Ask whether, overall, the tutor over-scaffolds right after the cut point. \n\nNote that the ordering of screen interactions and dialogue in the transcript do not always indicate the exact sequence of events. Sometimes a screen interaction or update happens simultaneously with the dialogue turn that precedes it. \n\n# Your Task\n\nIf teachers believe that this moment is appropriate for a push for rigor and the tutor doesn't push for rigor, over-scaffolding is almost always occurring. If teachers believe that this moment is appropriate for scaffolding, it is possible that over-scaffolding is still occurring, if the tutor provides too much support and replaces students' thinking after the cut point.\n\nFor the excerpt below, teachers describe the situation before the cut point as the following: \n\n- f1\n\nTeachers tend to believe that this situation is appropriate for scaffolding. \n\nA previous pass by an LM determined that the tutor is scaffolding after the cut point.\n\nExamine the following tutoring moment. Respond with valid JSON only:\n{\n  \"description\": \"A sentence or two summarizing what the tutor did, and your reasoning for whether it constitutes over-scaffolding.\",\n  \"over-scaffolding\": \"yes or no\"\n}\n\nThe following excerpt contains a tutoring moment. There, >>> CUT POINT <<< is immediately before the tutor's scaffolding strategy that you should focus on analyzing. \n\nEXCERPT: \nfull excerpt of aaa {not a slot}\n"
+         }
+        ],
+        "role": "user"
+       }
+      ],
+      "generation_config": {
+       "max_output_tokens": 65536,
+       "response_mime_type": "application/json"
+      }
+     }
+    },
+    {
+     "key": "overscaffold__ccc",
+     "request": {
+      "contents": [
+       {
+        "parts": [
+         {
+          "text": "You are given a tutoring moment containing a cut point. Your task is to determine whether the tutor over-scaffolds after the cut point.\n\nScaffolding is support that helps a student accomplish a task and makes content more accessible to a student. Appropriate scaffolding should still require the student to do core thinking. \n\nOver-scaffolding happens when the tutor:\n- unnecessarily supplies a step the student was positioned to produce. \n- does not give the student a chance to show what they know, especially at the beginning of a session\n- does not offer openings for the student to make substantive mathematical contributions during the support\n- fails to fade the support after prior successes on similar items.\n- does most of the cognitive work\n- oversimplifies the problem or reduces the task to a sequence of procedural tasks with insufficient reasoning (e.g. overly leading or directive)\n- over-explains\n- re-scaffolds the same procedure or concept too many times\n- jumps in during a student's productive struggle\n\nAn interactive sequence, even if it is lengthy, in which the tutor allows the student to meaningfully engage, is not over-scaffolding. Ask whether, overall, the tutor over-scaffolds right after the cut point. \n\nNote that the ordering of screen interactions and dialogue in the transcript do not always indicate the exact sequence of events. Sometimes a screen interaction or update happens simultaneously with the dialogue turn that precedes it. \n\n# Your Task\n\nIf teachers believe that this moment is appropriate for a push for rigor and the tutor doesn't push for rigor, over-scaffolding is almost always occurring. If teachers believe that this moment is appropriate for scaffolding, it is possible that over-scaffolding is still occurring, if the tutor provides too much support and replaces students' thinking after the cut point.\n\nFor the excerpt below, teachers describe the situation before the cut point as the following: \n\n- (no description of the student)\n\nTeachers tend to believe that this situation is appropriate for both a push for rigor and scaffolding. \n\nA previous pass by an LM determined that the tutor is scaffolding and pushing for rigor after the cut point.\n\nExamine the following tutoring moment. Respond with valid JSON only:\n{\n  \"description\": \"A sentence or two summarizing what the tutor did, and your reasoning for whether it constitutes over-scaffolding.\",\n  \"over-scaffolding\": \"yes or no\"\n}\n\nThe following excerpt contains a tutoring moment. There, >>> CUT POINT <<< is immediately before the tutor's scaffolding strategy that you should focus on analyzing. \n\nEXCERPT: \nfull excerpt of ccc {not a slot}\n"
+         }
+        ],
+        "role": "user"
+       }
+      ],
+      "generation_config": {
+       "max_output_tokens": 65536,
+       "response_mime_type": "application/json"
+      }
+     }
+    },
+    {
+     "key": "overscaffold__eee",
+     "request": {
+      "contents": [
+       {
+        "parts": [
+         {
+          "text": "You are given a tutoring moment containing a cut point. Your task is to determine whether the tutor over-scaffolds after the cut point.\n\nScaffolding is support that helps a student accomplish a task and makes content more accessible to a student. Appropriate scaffolding should still require the student to do core thinking. \n\nOver-scaffolding happens when the tutor:\n- unnecessarily supplies a step the student was positioned to produce. \n- does not give the student a chance to show what they know, especially at the beginning of a session\n- does not offer openings for the student to make substantive mathematical contributions during the support\n- fails to fade the support after prior successes on similar items.\n- does most of the cognitive work\n- oversimplifies the problem or reduces the task to a sequence of procedural tasks with insufficient reasoning (e.g. overly leading or directive)\n- over-explains\n- re-scaffolds the same procedure or concept too many times\n- jumps in during a student's productive struggle\n\nAn interactive sequence, even if it is lengthy, in which the tutor allows the student to meaningfully engage, is not over-scaffolding. Ask whether, overall, the tutor over-scaffolds right after the cut point. \n\nNote that the ordering of screen interactions and dialogue in the transcript do not always indicate the exact sequence of events. Sometimes a screen interaction or update happens simultaneously with the dialogue turn that precedes it. \n\n# Your Task\n\nIf teachers believe that this moment is appropriate for a push for rigor and the tutor doesn't push for rigor, over-scaffolding is almost always occurring. If teachers believe that this moment is appropriate for scaffolding, it is possible that over-scaffolding is still occurring, if the tutor provides too much support and replaces students' thinking after the cut point.\n\nFor the excerpt below, teachers describe the situation before the cut point as the following: \n\n- f1\n\nTeachers tend to believe that this situation is appropriate for a push for rigor. \n\nA previous pass by an LM determined that the tutor is scaffolding after the cut point.\n\nExamine the following tutoring moment. Respond with valid JSON only:\n{\n  \"description\": \"A sentence or two summarizing what the tutor did, and your reasoning for whether it constitutes over-scaffolding.\",\n  \"over-scaffolding\": \"yes or no\"\n}\n\nThe following excerpt contains a tutoring moment. There, >>> CUT POINT <<< is immediately before the tutor's scaffolding strategy that you should focus on analyzing. \n\nEXCERPT: \nfull excerpt of eee {not a slot}\n"
+         }
+        ],
+        "role": "user"
+       }
+      ],
+      "generation_config": {
+       "max_output_tokens": 65536,
+       "response_mime_type": "application/json"
+      }
+     }
+    }
+   ],
+   "prediction_dir": "out/vendor_golden-model/9/full",
+   "records": {
+    "iteration": [
+     {
+      "action_direction": null,
+      "classified": true,
+      "context_turns": {
+       "action_direction": "full",
+       "over_scaffolding": "full"
+      },
+      "conversation_id": "c-aaa",
+      "description_from": {
+       "adjudicators": [
+        "J01",
+        "J02"
+       ],
+       "model": "m",
+       "prompt": "p",
+       "situation_method": "majority"
+      },
+      "labels": {
+       "over_scaffolding_present": true,
+       "rigor_present": false,
+       "scaffolding_present": true
+      },
+      "model": "vendor/golden-model",
+      "moment_id": "aaa",
+      "over_scaffolding": {
+       "description": "o",
+       "error": null,
+       "over_scaffolding": true,
+       "parse_error": false,
+       "raw": "{\"description\": \"o\", \"over-scaffolding\": \"yes\"}",
+       "usage": {
+        "input_tokens": 5,
+        "output_tokens": 1,
+        "total_tokens": 6
+       }
+      },
+      "over_scaffolding_asked": true,
+      "passes": [
+       "over_scaffolding"
+      ],
+      "post_cut_dialogue_rows": 1,
+      "post_cut_rows": 2,
+      "prompt_slots": {
+       "over_scaffolding": {
+        "action": "scaffolding",
+        "descriptions": "\n- f1",
+        "is_appropriate_for": "is appropriate for scaffolding"
+       }
+      },
+      "prompt_version": "9",
+      "prompts": {
+       "action_direction": "prompts/v2/v2_scorer/9/action_direction.md",
+       "over_scaffolding": "prompts/v2/v2_scorer/9/over-scaffolding.md"
+      },
+      "provider": "gemini",
+      "situation_type": "scaffold_only",
+      "skipped": null,
+      "split": "iteration",
+      "thinking": {
+       "include_thoughts": true,
+       "thinking_level": "high"
+      },
+      "transcript_id": "t-aaa",
+      "usage": {
+       "input_tokens": 5,
+       "output_tokens": 1,
+       "total_tokens": 6
+      }
+     },
+     {
+      "action_direction": null,
+      "classified": true,
+      "context_turns": {
+       "action_direction": "full",
+       "over_scaffolding": "full"
+      },
+      "conversation_id": "c-bbb",
+      "description_from": null,
+      "labels": {
+       "over_scaffolding_present": false,
+       "rigor_present": true,
+       "scaffolding_present": false
+      },
+      "model": "vendor/golden-model",
+      "moment_id": "bbb",
+      "over_scaffolding": null,
+      "over_scaffolding_asked": false,
+      "passes": [
+       "over_scaffolding"
+      ],
+      "post_cut_dialogue_rows": 1,
+      "post_cut_rows": 2,
+      "prompt_slots": {
+       "over_scaffolding": null
+      },
+      "prompt_version": "9",
+      "prompts": {
+       "action_direction": "prompts/v2/v2_scorer/9/action_direction.md",
+       "over_scaffolding": "prompts/v2/v2_scorer/9/over-scaffolding.md"
+      },
+      "provider": "gemini",
+      "situation_type": "rigor_maj",
+      "skipped": null,
+      "split": "iteration",
+      "thinking": {
+       "include_thoughts": true,
+       "thinking_level": "high"
+      },
+      "transcript_id": "t-bbb",
+      "usage": {
+       "input_tokens": 0,
+       "output_tokens": 0,
+       "total_tokens": 0
+      }
+     },
+     {
+      "action_direction": null,
+      "classified": true,
+      "context_turns": {
+       "action_direction": "full",
+       "over_scaffolding": "full"
+      },
+      "conversation_id": "c-ccc",
+      "description_from": {
+       "adjudicators": [
+        "J01",
+        "J02"
+       ],
+       "model": "m",
+       "prompt": "p",
+       "situation_method": "majority"
+      },
+      "labels": {
+       "over_scaffolding_present": false,
+       "rigor_present": true,
+       "scaffolding_present": true
+      },
+      "model": "vendor/golden-model",
+      "moment_id": "ccc",
+      "over_scaffolding": {
+       "description": "",
+       "error": null,
+       "over_scaffolding": false,
+       "parse_error": false,
+       "raw": "{\"over_scaffolding\": \"no\"}",
+       "usage": {
+        "input_tokens": 0,
+        "output_tokens": 0,
+        "total_tokens": 0
+       }
+      },
+      "over_scaffolding_asked": true,
+      "passes": [
+       "over_scaffolding"
+      ],
+      "post_cut_dialogue_rows": 1,
+      "post_cut_rows": 2,
+      "prompt_slots": {
+       "over_scaffolding": {
+        "action": "scaffolding and pushing for rigor",
+        "descriptions": "\n- (no description of the student)",
+        "is_appropriate_for": "is appropriate for both a push for rigor and scaffolding"
+       }
+      },
+      "prompt_version": "9",
+      "prompts": {
+       "action_direction": "prompts/v2/v2_scorer/9/action_direction.md",
+       "over_scaffolding": "prompts/v2/v2_scorer/9/over-scaffolding.md"
+      },
+      "provider": "gemini",
+      "situation_type": "fifty_fifty",
+      "skipped": null,
+      "split": "iteration",
+      "thinking": {
+       "include_thoughts": true,
+       "thinking_level": "high"
+      },
+      "transcript_id": "t-ccc",
+      "usage": {
+       "input_tokens": 0,
+       "output_tokens": 0,
+       "total_tokens": 0
+      }
+     }
+    ],
+    "test": [
+     {
+      "action_direction": null,
+      "classified": false,
+      "context_turns": {
+       "action_direction": "full",
+       "over_scaffolding": "full"
+      },
+      "conversation_id": "c-ddd",
+      "description_from": null,
+      "labels": {
+       "over_scaffolding_present": false,
+       "rigor_present": false,
+       "scaffolding_present": true
+      },
+      "model": "vendor/golden-model",
+      "moment_id": "ddd",
+      "over_scaffolding": null,
+      "over_scaffolding_asked": false,
+      "passes": [
+       "over_scaffolding"
+      ],
+      "post_cut_dialogue_rows": 1,
+      "post_cut_rows": 0,
+      "prompt_slots": {
+       "over_scaffolding": null
+      },
+      "prompt_version": "9",
+      "prompts": {
+       "action_direction": "prompts/v2/v2_scorer/9/action_direction.md",
+       "over_scaffolding": "prompts/v2/v2_scorer/9/over-scaffolding.md"
+      },
+      "provider": "gemini",
+      "situation_type": "scaffold_maj",
+      "skipped": "no_post_cut_content",
+      "split": "test",
+      "thinking": {
+       "include_thoughts": true,
+       "thinking_level": "high"
+      },
+      "transcript_id": "t-ddd",
+      "usage": {
+       "input_tokens": 0,
+       "output_tokens": 0,
+       "total_tokens": 0
+      }
+     },
+     {
+      "action_direction": null,
+      "classified": true,
+      "context_turns": {
+       "action_direction": "full",
+       "over_scaffolding": "full"
+      },
+      "conversation_id": "c-eee",
+      "description_from": {
+       "adjudicators": [
+        "J01",
+        "J02"
+       ],
+       "model": "m",
+       "prompt": "p",
+       "situation_method": "majority"
+      },
+      "labels": {
+       "over_scaffolding_present": false,
+       "rigor_present": false,
+       "scaffolding_present": true
+      },
+      "model": "vendor/golden-model",
+      "moment_id": "eee",
+      "over_scaffolding": {
+       "description": "",
+       "error": null,
+       "over_scaffolding": null,
+       "parse_error": true,
+       "raw": "",
+       "usage": {
+        "input_tokens": 0,
+        "output_tokens": 0,
+        "total_tokens": 0
+       }
+      },
+      "over_scaffolding_asked": true,
+      "passes": [
+       "over_scaffolding"
+      ],
+      "post_cut_dialogue_rows": 1,
+      "post_cut_rows": 2,
+      "prompt_slots": {
+       "over_scaffolding": {
+        "action": "scaffolding",
+        "descriptions": "\n- f1",
+        "is_appropriate_for": "is appropriate for a push for rigor"
+       }
+      },
+      "prompt_version": "9",
+      "prompts": {
+       "action_direction": "prompts/v2/v2_scorer/9/action_direction.md",
+       "over_scaffolding": "prompts/v2/v2_scorer/9/over-scaffolding.md"
+      },
+      "provider": "gemini",
+      "situation_type": "rigor_only",
+      "skipped": null,
+      "split": "test",
+      "thinking": {
+       "include_thoughts": true,
+       "thinking_level": "high"
+      },
+      "transcript_id": "t-eee",
+      "usage": {
+       "input_tokens": 0,
+       "output_tokens": 0,
+       "total_tokens": 0
+      }
+     }
+    ]
+   },
+   "report": "\nPredictions written\n\n  model: vendor/golden-model (include_thoughts: True, thinking_level: high)\n\n  prompts: v9 (prompts/v2/v2_scorer/9/)\n  excerpt: full\n  passes:  over_scaffolding only\n  output:  out/\n\n  split         moments     scaffolding           rigor    over-scaffolding\n  -------------------------------------------------------------------------\n  iteration           3       0 / 0 / 0       0 / 0 / 0           1 / 1 / 0\n  test                2       0 / 0 / 0       0 / 0 / 0           0 / 0 / 1\n\n  (counts are yes / no / unparsed)\n  1 moment(s) not classified: nothing after the cut point\n  over-scaffolding asked on 3 moment(s); 1 not asked (gold says no scaffolding here)\n\n  tokens: 5 in / 1 out / 6 total\n"
+  }
+ },
+ "latest_version": "9"
+}
