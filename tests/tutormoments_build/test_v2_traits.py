@@ -1,4 +1,4 @@
-"""v2 personas: what the generator sees, the uncapped adapter, and resume."""
+"""Tests for persona generation: what the generator reads, token usage, and resuming."""
 
 import json
 import threading
@@ -79,7 +79,7 @@ def test_adapter_is_uncapped_and_sums_usage():
         "Turn 1. Tutor: hi", client, SPEC.thinking
     )
 
-    # joined-3: one call per dimension.
+    # joined-3 mode makes one call per dimension.
     assert calls == len(ALL_DIMENSIONS) == len(client.calls)
     assert all(c["max_tokens"] == 0 for c in client.calls)
     assert all(c["thinking"] == SPEC.thinking for c in client.calls)
@@ -148,7 +148,7 @@ class ScriptedClient(FakeClient):
 
 
 def test_a_quoted_marker_in_the_plan_is_not_kept_as_the_persona():
-    """v1 cut at the first marker, keeping a plan that quoted the format."""
+    """v1 kept all text after the first marker, including a plan quoting the format."""
     leaked = (
         "Plan: output `DESCRIPTION:\\n[description]`.\n1. analyse...\n"
         "DESCRIPTION:\nThe student stays focused."
@@ -162,7 +162,7 @@ def test_a_quoted_marker_in_the_plan_is_not_kept_as_the_persona():
 
 
 def test_an_empty_description_is_not_written(tmp_path):
-    """A failed moment is left out of the file so the next run retries it."""
+    """A failed moment isn't written, so the next run retries it."""
     out = str(tmp_path / "traits.jsonl")
     written = T.generate(
         [_moment("m1")], out, client=ScriptedClient("DESCRIPTION:   "), spec=SPEC

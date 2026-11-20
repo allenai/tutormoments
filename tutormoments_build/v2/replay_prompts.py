@@ -1,18 +1,11 @@
-"""Tutor and student prompts for v2 replays.
+"""Loads and fills the tutor and student prompts used in replays.
 
-The prompts are versioned copies of the v1 runtime's, under
-``prompts/v2/tutor/<version>/`` and ``prompts/v2/student/<version>/``, so they
-can be revised without mixing results. Version 1 renders byte-identically to
-v1 (``tutormoments.tutor`` / ``tutormoments.student`` /
-``tutormoments.conversation._build_role_prompt``): the text v1 keeps in Python
--- the student's shared generation instructions, the empty-reference fallback,
-the "Here is the conversation so far:" joiner and the role instructions -- lives
-in the version folder instead.
-
-Every file a version needs is read when it is loaded, so a version missing one
-fails before any moment is sent.
+Prompts live in `prompts/v2/tutor/<version>/` and `prompts/v2/student/<version>/`.
+The newest version is the default. All of a version's files are read when it
+loads, so a missing file fails before any API call. See README.md, "Replays".
 """
 
+import re
 from dataclasses import dataclass
 
 from tutormoments_build.resources import resource_text
@@ -24,7 +17,7 @@ from tutormoments_build.v2.classify_excerpts import (
 TUTOR_PROMPT_ROOT = "prompts/v2/tutor"
 STUDENT_PROMPT_ROOT = "prompts/v2/student"
 
-# v1's plain and scaffolding_rigor tutors; v1's oracle tutor is not copied.
+# v1 also had an oracle tutor; it isn't offered here.
 TUTOR_MODES = ("plain", "scaffolding_rigor")
 
 _SHARED_FILES = {"joiner": "conversation_so_far.md", "respond": "respond.md"}
@@ -38,7 +31,7 @@ STUDENT_FILES = {
 
 @dataclass(frozen=True)
 class RolePrompts:
-    """One role's prompt files at one version, read and trimmed."""
+    """One role's prompt files at one version."""
 
     role: str
     version: str
@@ -59,27 +52,39 @@ def _load(role: str, root: str, files: dict[str, str], version: str | None):
                 f"no {role} prompt at {path}; versions available: "
                 f"{', '.join(available) or '(none)'}"
             ) from exc
-        # v1 strips the tutor template and only right-strips newlines off the
-        # student template; matching each keeps the rendering byte-identical.
+        # Trimmed as v1 did: tutor files fully, the student prompt only of
+        # trailing newlines.
         texts[name] = raw.rstrip("\n") if name == "oracle" else raw.strip()
     return RolePrompts(role=role, version=version, root=root, texts=texts)
 
 
 def load_tutor_prompts(version: str | None = None) -> RolePrompts:
-    """The tutor prompt files at ``version`` (default: the newest)."""
+    """The tutor prompt files at `version` (default: the newest)."""
     return _load("TUTOR", TUTOR_PROMPT_ROOT, TUTOR_FILES, version)
 
 
 def load_student_prompts(version: str | None = None) -> RolePrompts:
-    """The student prompt files at ``version`` (default: the newest)."""
+    """The student prompt files at `version` (default: the newest)."""
     return _load("STUDENT", STUDENT_PROMPT_ROOT, STUDENT_FILES, version)
 
 
+def fill_context(text: str, placeholder: str, context: str) -> str:
+    """Put the student context where `placeholder` is.
+
+    If the context is empty and the placeholder has a line to itself, that line and
+    one blank line after it are removed, so no gap is left.
+    """
+    if context:
+        return text.replace(placeholder, context)
+    alone = re.compile(rf"^[ \t]*{re.escape(placeholder)}[ \t]*\n(\n)?", re.M)
+    return alone.sub("", text).replace(placeholder, "")
+
+
 def tutor_system_prompt(prompts: RolePrompts, mode: str, student_context: str) -> str:
-    """The tutor system prompt for ``mode``, as v1's build_tutor_system_prompt."""
+    """The tutor's system prompt for `mode`, with the student context filled in."""
     if mode not in TUTOR_MODES:
         raise ValueError(f"unknown tutor mode {mode!r}; choose from {TUTOR_MODES}")
-    return prompts.texts[mode].replace("{student_context}", student_context or "")
+    return fill_context(prompts.texts[mode], "{student_context}", student_context)
 
 
 def student_system_prompt(
@@ -89,13 +94,15 @@ def student_system_prompt(
     reference_transcript: str | None,
     persona: str,
 ) -> str:
-    """The oracle student system prompt, as v1's build_student_system_prompt.
+    """The student's system prompt, with context, persona and reference filled in.
 
-    An empty reference (the real conversation ends at the cut) is replaced by
-    the version's fallback text.
+    With no reference transcript (the real conversation ends at the cut), the
+    version's `empty_reference.md` text is used.
     """
     out = prompts.texts["oracle"]
-    out = out.replace("[[NEXT_CONVERSATION_INFORMATION_HERE]]", student_context or "")
+    out = fill_context(
+        out, "[[NEXT_CONVERSATION_INFORMATION_HERE]]", student_context or ""
+    )
     out = out.replace("[[PERSONA_DESCRIPTION_HERE]]", persona or "")
     ref = reference_transcript or prompts.texts["empty_reference"]
     return out.replace("[[REFERENCE_TRANSCRIPT_HERE]]", ref)
@@ -104,11 +111,11 @@ def student_system_prompt(
 def role_prompt(
     prompts: RolePrompts, system_prompt: str, transcript_prefix: str, extra: str
 ) -> tuple[str, str]:
-    """``(cacheable head, tail)`` for one call, as v1's _build_role_prompt.
+    """Split one call's prompt into (head, tail).
 
-    The head (system prompt + the pre-cut transcript) is byte-stable across a
-    replay's calls, so it is passed as the cacheable prefix; generated turns
-    flow through ``extra`` in the tail.
+    The head is the system prompt plus the transcript up to the cut. It is the same
+    on every call in a replay, so it is sent as the cacheable prefix. The tail is
+    the turns generated so far plus the "respond as" instruction.
     """
     head = f"{system_prompt}\n\n{prompts.texts['joiner']}\n\n{transcript_prefix}"
     tail = f"{extra}\n\n{prompts.texts['respond']}"

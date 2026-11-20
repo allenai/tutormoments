@@ -48,7 +48,7 @@ python -m tutormoments_build.v2.traits --sample 20
 python -m tutormoments_build.v2.traits
 ```
 
-**2. Replays.** `--turns N` is the number of generated tutor turns; the replay always starts and ends on a tutor turn. The tutor sees the whole transcript up to and including the cut row, but not the cut marker. The student also sees the real post-cut turns through the moment's end, as a reference to imitate. Prompts are in `tutormoments_build/prompts/v2/{tutor,student}/<version>/`. The run is resumable, and `--overwrite` regenerates.
+**2. Replays.** `--turns N` is the number of generated tutor turns; the replay always starts and ends on a tutor turn. The tutor sees the whole transcript up to and including the cut row, but not the cut marker. The student also sees the real post-cut turns through the moment's end, as a reference to imitate. Both see the student context: for provider C, the session's year(s) and each learning objective with its slides' text underneath, in slide order (slide text from `data/v2_annotations/source/tutoring_provider_c_lesson_slides.jsonl`, `--slides`). Provider A has no such information, so its context is empty. Prompts are in `tutormoments_build/prompts/v2/{tutor,student}/<version>/`. The run is resumable, and `--overwrite` regenerates.
 
 ```
 python -m tutormoments_build.v2.replays --tutor gemini-4-argon --dry-run
@@ -65,7 +65,9 @@ Output: `outputs/v2_replays/<tutor arm>/<tutor prompt>_v<n>/n<N>/student-<studen
 1. `action_direction` on every replay.
 2. `over-scaffolding` only where stage 1 *predicted* scaffolding. `{action}` comes from that prediction; `{is_appropriate_for}` and `{descriptions}` are gold, since they describe the moment at the cut.
 
-Replays that aren't sent to stage 2 record why ("not routed: predicted no scaffolding" or "not routed: action_direction unparseable"), so they're never counted as a "no".
+Replays that aren't sent to stage 2 record why ("not routed: predicted no scaffolding", "not routed: action_direction unparseable" or "not routed: action_direction request failed"), so they're never counted as a "no".
+
+A request that fails (an API error or no result) is resubmitted in a new batch of just the failures, up to 3 times. Usage is summed over every attempt, and each record stores its `attempts`. A response that arrives but doesn't parse is not resubmitted, since that would re-roll the model's answer.
 
 ```
 python -m tutormoments_build.v2.classify_replays outputs/v2_replays/gemini-4-argon/plain_v1/n1/student-gemini-4-argon_sp1.jsonl --dry-run

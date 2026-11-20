@@ -1,13 +1,12 @@
-"""Resumable, write-as-you-go JSONL runs keyed by ``moment_id``.
+"""Runs that write one JSON line per moment as they go, so they can resume.
 
-Shared by the persona and replay scripts: each record is appended as soon as
-it is made, so an interrupted run loses at most the moments in flight, and a
-rerun skips moments already in the file. A moment whose work raises is logged
-and left out, so the next run retries it.
+Used by the persona and replay scripts. Each record is written as soon as it's
+made, so an interrupted run loses only the moments in progress. A rerun skips
+moments already in the file. A moment that raises is logged and left out, so
+the next run retries it.
 
-``overwrite`` regenerates the given moments into ``<path>.partial``, carrying
-over records for moments not given, and replaces the file only once every
-record is in -- a failure leaves the old file untouched.
+With `overwrite`, new records go to `<path>.partial` and replace the file only
+once all of them succeed. If any fail, the old file is left as it was.
 """
 
 import json
@@ -33,15 +32,15 @@ def load_by_id(path: str) -> dict[str, dict]:
 
 
 def pending(moments, path: str, overwrite: bool = False) -> list:
-    """The moments a run would generate: all with ``overwrite``, else the missing."""
+    """The moments a run would do: all with `overwrite`, else only the missing ones."""
     existing = load_by_id(path)
     return [m for m in moments if overwrite or m.moment_id not in existing]
 
 
 def run(moments, path: str, work, *, overwrite=False, concurrency=4) -> list[dict]:
-    """Apply ``work(moment) -> record`` to each pending moment, writing as it goes.
+    """Run `work(moment) -> record` for each pending moment, writing as it goes.
 
-    Returns the records written by this call.
+    Returns the records this call wrote.
     """
     existing = load_by_id(path)
     todo = pending(moments, path, overwrite)

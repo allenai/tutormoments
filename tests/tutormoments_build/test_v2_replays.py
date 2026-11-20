@@ -1,4 +1,4 @@
-"""v2 replays: what each side sees, the loop, records and paths."""
+"""Tests for replays: what each side sees, the turn loop, records and output paths."""
 
 import threading
 from types import SimpleNamespace
@@ -28,10 +28,20 @@ ROWS = [
     _row(7, 5, "TUTOR", "after the moment"),
 ]
 
+
+def _problem(slide_id, objective, year):
+    return {
+        "slide_id": slide_id,
+        "objective": objective,
+        "year": year,
+        "slide_text": f"text of slide {slide_id}",
+    }
+
+
 PROBLEMS = [
-    {"objective": "Adding money using the column method.", "year": 4},
-    {"objective": "Adding money using the column method.", "year": 4},
-    {"objective": "Subtracting money", "year": 5},
+    _problem(11, "Adding money using the column method.", 4),
+    _problem(12, "Adding money using the column method.", 4),
+    _problem(20, "Subtracting money", 5),
 ]
 
 
@@ -112,23 +122,54 @@ def test_reference_runs_from_after_the_cut_through_end_index():
     assert R.reference_transcript(_moment(end_index=3)) == ""
 
 
-def test_provider_c_context_lists_years_and_objectives_once():
+def test_provider_c_context_lists_each_objective_with_its_slides_in_order():
     assert R.student_context(_moment(problems=PROBLEMS)) == (
-        "Years 4-5. Learning objectives covered in this session:\n"
-        "- Adding money using the column method.\n"
-        "- Subtracting money"
+        "Years 4-5.\n"
+        "\n"
+        "Learning objective: Adding money using the column method.\n"
+        "\n"
+        "Session Content 1:\n"
+        "text of slide 11\n"
+        "\n"
+        "Session Content 2:\n"
+        "text of slide 12\n"
+        "\n"
+        "Learning objective: Subtracting money\n"
+        "\n"
+        "Session Content 1:\n"
+        "text of slide 20"
     )
-    one_year = [{"objective": "Fractions", "year": 3}]
-    assert R.student_context(_moment(problems=one_year)).startswith("Year 3. ")
+    one_year = [_problem(1, "Fractions", 3)]
+    assert R.student_context(_moment(problems=one_year)).startswith("Year 3.\n")
+    no_year = [_problem(1, "Fractions", None)]
+    assert R.student_context(_moment(problems=no_year)).startswith(
+        "Learning objective: Fractions\n"
+    )
 
 
 def test_non_consecutive_years_are_listed_not_ranged():
-    problems = [{"objective": "a", "year": 3}, {"objective": "b", "year": 5}]
-    assert R.student_context(_moment(problems=problems)).startswith("Years 3, 5. ")
+    problems = [_problem(1, "a", 3), _problem(2, "b", 5)]
+    assert R.student_context(_moment(problems=problems)).startswith("Years 3, 5.\n")
 
 
-def test_provider_a_gets_v1s_fallback_context():
-    assert R.student_context(_moment()) == "K-12 tutoring session"
+def test_slide_text_is_joined_on_slide_id_and_a_missing_slide_stops_the_load(
+    tmp_path,
+):
+    path = tmp_path / "slides.jsonl"
+    path.write_text(
+        '{"slide_id": "11", "problem_text": " the slide "}\n'
+        '{"slide_id": "12", "problem_text": ""}\n'
+    )
+    slides = RD.load_slides(str(path))
+    problems = [{"slide_id": 11, "objective": "a", "year": 3}]
+    assert RD.with_slide_text("m", problems, slides)[0]["slide_text"] == "the slide"
+    for missing in (12, 99):  # empty text, and not in the file at all
+        with pytest.raises(ValueError, match=f"slide {missing}"):
+            RD.with_slide_text("m", [{"slide_id": missing}], slides)
+
+
+def test_provider_a_gets_no_context():
+    assert R.student_context(_moment()) == ""
 
 
 def test_tutor_prompt_holds_context_and_transcript_but_no_cut_marker():
@@ -136,7 +177,8 @@ def test_tutor_prompt_holds_context_and_transcript_but_no_cut_marker():
     _replay(_moment(problems=PROBLEMS), 1, tutor)
     head = tutor.calls[0]["cacheable_prefix"]
 
-    assert "Learning objectives covered in this session" in head
+    assert R.student_context(_moment(problems=PROBLEMS)) in head
+    assert "text of slide 20" in head
     assert head.endswith(R.transcript_so_far(_moment()))
     assert excerpts.CUT_POINT not in head + tutor.calls[0]["prompt"]
     assert "real post-cut" not in head  # the tutor never sees the reference
@@ -183,7 +225,7 @@ def test_n_controls_tutor_turns_and_ends_on_a_tutor_turn():
     assert [r["turn_number"] for r in rows] == [3, 4, 5, 6, 7, 8]
     assert rows[-1]["role"] == "TUTOR"
     assert result["tutor_turns"] == 3
-    # Generated turns reach later calls through the tail, not the cached head.
+    # Generated turns go in the tail of later calls, not the cached head.
     assert "Turn 5. STUDENT: s1b" in tutor.calls[2]["prompt"]
     assert all(
         c["cacheable_prefix"] == tutor.calls[0]["cacheable_prefix"] for c in tutor.calls
@@ -252,6 +294,7 @@ def test_record_excerpt_is_a_human_excerpt_with_generated_rows():
     assert C.has_post_cut_content(record)
     assert record["labels"] == {"scaffolding_present": True}
     assert record["situation_type"] == "scaffold_only"
+    assert record["student_context"] == R.NO_CONTEXT
     assert "split" not in record
 
 
@@ -268,7 +311,8 @@ def test_replay_lead_up_matches_the_human_excerpt_at_every_width():
         cut = f"{excerpts.CUT_POINT}\n"
         assert replay.split(cut)[0] == human.split(cut)[0]
         assert first == human_first
-    # A window narrower than the lead-up opens on a dialogue turn, as humans do.
+    # A window shorter than the lead-up starts on a dialogue turn, like the human
+    # excerpts.
     assert R.replay_excerpt(moment, [], 1)[0].startswith("Turn 1. TUTOR: hi there")
 
 

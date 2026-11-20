@@ -1,35 +1,8 @@
-"""Classify v2 replays with the prompts ``classify_excerpts`` runs on humans.
+"""Classifies replays with the same v2 scorer prompts used on human moments.
 
-A replay file (``replays.py``) holds one record per moment whose excerpt is the
-human excerpt's shape -- transcript so far, ``>>> CUT POINT <<<``, then the
-generated rows -- so the same v2 scorer prompts read it unchanged. Two batches,
-in order:
-
-  1. ``action_direction`` on every replay.
-  2. ``over-scaffolding`` only where stage 1 *predicted* scaffolding. The human
-     round gates on gold; a replay's tutor did something else, so its own
-     predicted action decides, and fills ``{action}``. ``{is_appropriate_for}``
-     and ``{descriptions}`` stay gold: they describe the moment at the cut,
-     which the replay shares.
-
-Replays stage 1 did not route are recorded with the reason, never as a "no":
-``not routed: action_direction unparseable`` or ``not routed: predicted no
-scaffolding``.
-
-The scorer is ``v2_replay.scorer``; ``--model`` overrides it with the lookup
-``classify_excerpts --model`` uses (``v2.models``, then the arms). Output sits
-beside the replay file:
-``student-<m>_sp<n>__scorer-<model>_v<prompt version>_ctx<width>.jsonl``.
-``--context-turns`` picks the excerpt width as in ``classify_excerpts``
-(default 20 turns before the cut, the human round's default).
-
-Usage::
-
-    python -m tutormoments_build.v2.classify_replays REPLAYS.jsonl --dry-run
-    python -m tutormoments_build.v2.classify_replays REPLAYS.jsonl
-    python -m tutormoments_build.v2.classify_replays REPLAYS.jsonl --print 02e8
-    python -m tutormoments_build.v2.classify_replays REPLAYS.jsonl \\
-        --action-batch-id ID --over-batch-id ID
+Two batches: `action_direction` on every replay, then `over-scaffolding` only
+where the first one predicted scaffolding. Usage, routing and output paths are
+in README.md, "Replays".
 """
 
 import argparse
@@ -41,18 +14,22 @@ from collections import Counter
 
 from tutormoments.logging_setup import logging_args_parent, setup_logging
 from tutormoments.models import infer_provider
+from tutormoments.usage import add_usage
 from tutormoments_build.v2 import classify_excerpts as C
 from tutormoments_build.v2 import jsonl_runs, replay_config
 
 logger = logging.getLogger("tutormoments_build.v2.classify_replays")
 
-# Replay records carry a rendering per width the human excerpts carry, with
-# the same lead-up (see replays.replay_excerpts). The default is the human
-# round's default, so replay and human classifications read the same context.
+# Score on the same excerpt width as the human round by default.
 WIDTH = C.EXCERPT_WIDTH
 
 NOT_ROUTED_UNPARSEABLE = "not routed: action_direction unparseable"
 NOT_ROUTED_NO_SCAFFOLDING = "not routed: predicted no scaffolding"
+NOT_ROUTED_FAILED = "not routed: action_direction request failed"
+
+# Failed requests are resent at most this many times. A reply that arrived
+# but doesn't parse is kept; resending it would re-roll the answer.
+MAX_RETRIES = 3
 
 
 # ===========================================================================
@@ -61,10 +38,10 @@ NOT_ROUTED_NO_SCAFFOLDING = "not routed: predicted no scaffolding"
 
 
 def scorer_spec(model: str | None = None, config_path=None) -> C.V2Spec:
-    """``v2_replay.scorer``, or ``model`` looked up as ``classify_excerpts`` does.
+    """The scorer's settings: `v2_replay.scorer`, or an override `model`.
 
-    An override takes its parameters wholesale from its own entry, never merged
-    with the scorer's (see ``classify_excerpts.phase_config``).
+    An override is looked up as `classify_excerpts --model` looks it up, and uses
+    only its own config entry; nothing is taken from the default scorer.
     """
     from tutormoments.config import load_config
 
@@ -85,7 +62,7 @@ def scorer_spec(model: str | None = None, config_path=None) -> C.V2Spec:
 def classification_path(
     replay_file: str, model: str, prompt_version: str, width: str = WIDTH
 ) -> str:
-    """The replay file's path with ``__scorer-<model>_v<version>_ctx<width>``."""
+    """The replay file path plus `__scorer-<model>_v<version>_ctx<width>`."""
     stem, ext = os.path.splitext(replay_file)
     model = model.replace("/", "_")
     return f"{stem}__scorer-{model}_v{prompt_version}_ctx{width}{ext}"
@@ -97,7 +74,7 @@ def classification_path(
 
 
 def action_result(record: dict, raw: dict) -> dict | None:
-    """Stage 1's parsed result for one replay; None if it had nothing to read."""
+    """The parsed stage-1 result for a replay; None if nothing follows the cut."""
     if not C.has_post_cut_content(record):
         return None
     return C._pass_result(
@@ -107,18 +84,19 @@ def action_result(record: dict, raw: dict) -> dict | None:
 
 
 def route(action: dict | None) -> tuple[bool, str | None]:
-    """``(routed, reason not routed)`` from a stage-1 result."""
+    """Whether a replay goes to stage 2, and if not, why. Returns (routed, reason)."""
     if action is None:
         return False, "not classified: no post-cut content"
     if action["scaffolding"] is None:
-        return False, NOT_ROUTED_UNPARSEABLE
+        failed_request = action["error"] and not action["raw"]
+        return False, NOT_ROUTED_FAILED if failed_request else NOT_ROUTED_UNPARSEABLE
     if action["scaffolding"] is False:
         return False, NOT_ROUTED_NO_SCAFFOLDING
     return True, None
 
 
 def predicted_presence(actions: dict[str, dict | None]):
-    """A ``presence`` for ``classify_excerpts``: the stage-1 prediction."""
+    """Fills `{action}` from the stage-1 prediction instead of the gold labels."""
 
     def presence(record: dict) -> tuple[bool, bool]:
         action = actions[record["moment_id"]]
@@ -128,11 +106,10 @@ def predicted_presence(actions: dict[str, dict | None]):
 
 
 def check_fillable(records: list[dict], prompts: C.PromptSet) -> None:
-    """Fail before stage 1 if any replay could not be given the stage-2 prompt.
+    """Fail before stage 1 if any replay couldn't be given the stage-2 prompt.
 
-    Stage 2 needs gold ``situation_type`` and student-state facets for every
-    routed replay, and which are routed is known only after stage 1 is paid
-    for. So every replay is checked as if routed.
+    We only know which replays go to stage 2 after stage 1 is paid for, so every
+    replay is checked as if it would.
     """
     template = prompts.templates["over_scaffolding"]
     for record in records:
@@ -194,7 +171,7 @@ def build_record(
         "classified": classified,
         "skipped": None if classified else "no_post_cut_content",
         "action_direction": action,
-        # Stage 2 is gated on this replay's own stage-1 prediction, not gold.
+        # Stage 2 is decided by this replay's own stage-1 prediction, not gold.
         "over_scaffolding_routing": {
             "gated_on": "predicted",
             "routed": routed,
@@ -205,7 +182,7 @@ def build_record(
         },
         "over_scaffolding": over,
         "over_scaffolding_asked": over is not None,
-        # {action} is predicted; {is_appropriate_for} and {descriptions} gold.
+        # {action} comes from the prediction; the other slots are gold.
         "prompt_slots": {"over_scaffolding": over_slots},
         "description_from": description_from,
         "situation_type": replay.get("situation_type"),
@@ -227,6 +204,61 @@ def write_records(path: str, records: list[dict]) -> None:
 # ===========================================================================
 
 
+def failed(result: dict | None) -> bool:
+    """Whether a batch result is a failed request (an error, or no result)."""
+    return result is None or bool(result.get("error"))
+
+
+def run_with_retries(
+    entries: list[dict],
+    cfg: C.V2Spec,
+    *,
+    batch_id: str | None,
+    display_name: str,
+    max_retries: int = MAX_RETRIES,
+) -> tuple[dict, dict[str, int]]:
+    """Run one batch, resending failed requests up to `max_retries` times.
+
+    Each retry is a new batch of just the failures. Token usage is added up over
+    every attempt. Returns (results by key, attempts by key).
+    """
+    results = dict(
+        C.run_entries(entries, cfg, batch_id=batch_id, display_name=display_name)
+    )
+    attempts = {entry["key"]: 1 for entry in entries}
+    for retry in range(1, max_retries + 1):
+        todo = [e for e in entries if failed(results.get(e["key"]))]
+        if not todo:
+            break
+        logger.warning(
+            "%s: resubmitting %d failed request(s) (retry %d of %d)",
+            display_name,
+            len(todo),
+            retry,
+            max_retries,
+        )
+        again = C.run_entries(todo, cfg, display_name=f"{display_name}_retry{retry}")
+        for entry in todo:
+            key = entry["key"]
+            attempts[key] += 1
+            new = again.get(key)
+            if new is None:
+                continue
+            usage: dict = {}
+            for result in (results.get(key), new):
+                add_usage(usage, (result or {}).get("usage") or {})
+            results[key] = {**new, "usage": usage}
+    still = sum(failed(results.get(e["key"])) for e in entries)
+    if still:
+        logger.warning(
+            "%s: %d request(s) still failed after %d retries",
+            display_name,
+            still,
+            max_retries,
+        )
+    return results, attempts
+
+
 def classify(
     replays: list[dict],
     cfg: C.V2Spec,
@@ -237,17 +269,17 @@ def classify(
     over_batch_id: str | None = None,
     width: str = WIDTH,
 ) -> tuple[list[dict], Counter]:
-    """Both stages over one replay file at one width. Returns (records, counts)."""
+    """Run both stages on one replay file. Returns (records, counts)."""
     entries, counts = C.build_entries(replays, prompts, ("action_direction",), width)
-    raw1 = (
-        C.run_entries(
+    raw1, attempts1 = (
+        run_with_retries(
             entries,
             cfg,
             batch_id=action_batch_id,
             display_name="v2_classify_replays_action",
         )
         if entries
-        else {}
+        else ({}, {})
     )
     actions = {r["moment_id"]: action_result(r, raw1) for r in replays}
 
@@ -261,15 +293,15 @@ def classify(
         presence=predicted_presence(actions),
     )
     counts["over_scaffolding"] = over_counts["over_scaffolding"]
-    raw2 = (
-        C.run_entries(
+    raw2, attempts2 = (
+        run_with_retries(
             over_entries,
             cfg,
             batch_id=over_batch_id,
             display_name="v2_classify_replays_over_scaffolding",
         )
         if over_entries
-        else {}
+        else ({}, {})
     )
 
     records = [
@@ -279,6 +311,17 @@ def classify(
         for r in replays
     ]
     for record in records:
+        moment_id = record["moment_id"]
+        record["attempts"] = {
+            "action_direction": attempts1.get(f"{C.ACTION_PREFIX}__{moment_id}", 0),
+            "over_scaffolding": attempts2.get(
+                f"{C.OVER_SCAFFOLDING_PREFIX}__{moment_id}", 0
+            ),
+        }
+        for pass_name in ("action_direction", "over_scaffolding"):
+            result = record[pass_name]
+            if result and result["error"]:
+                counts[f"{pass_name}_failed"] += 1
         reason = record["over_scaffolding_routing"]["reason"]
         if reason:
             counts[reason] += 1
@@ -308,9 +351,19 @@ def report(records: list[dict], counts: Counter) -> str:
         "  (asked only where scaffolding was predicted)",
         "  (counts are yes / no / unparsed)",
     ]
-    for reason in (NOT_ROUTED_NO_SCAFFOLDING, NOT_ROUTED_UNPARSEABLE):
+    for reason in (
+        NOT_ROUTED_NO_SCAFFOLDING,
+        NOT_ROUTED_UNPARSEABLE,
+        NOT_ROUTED_FAILED,
+    ):
         if counts[reason]:
             lines.append(f"  {reason}: {counts[reason]}")
+    for pass_name in ("action_direction", "over_scaffolding"):
+        if counts[f"{pass_name}_failed"]:
+            lines.append(
+                f"  {pass_name} requests still failed after {MAX_RETRIES} retries: "
+                f"{counts[f'{pass_name}_failed']}"
+            )
     lines.append(
         f"  tokens: {usage['input_tokens']:,} in / {usage['output_tokens']:,} out "
         f"/ {usage['total_tokens']:,} total"
@@ -411,7 +464,7 @@ def main(argv: list[str] | None = None) -> int:
         )
         return 0
 
-    # Everything that can fail does so before either batch is paid for.
+    # Check everything before either batch is paid for.
     cfg = scorer_spec(args.model)
     check_fillable(replays, prompts)
     width = args.context_turns

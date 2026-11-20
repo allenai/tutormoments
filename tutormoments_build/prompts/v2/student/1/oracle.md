@@ -20,7 +20,8 @@ Make sure to follow these instructions:
 
 You may generate multiple student turns in a row as needed. Do *not* generate any turns as the tutor. You should only generate turns that involve student utterances or actions. Remember to wait for the tutor to respond before generating your next turns.
 
-Now you will generate the student's turn(s) for a new conversation with the following context:
+Now you will generate the student's turn(s) for a new conversation.
+
 [[NEXT_CONVERSATION_INFORMATION_HERE]]
 
 Remember to match the student in the example conversation above as closely as possible, even if the student does things that are not ideal (like making mistakes or responding with very short answers). Your goal is to have a conversation that is indistinguishable from the student's conversation.

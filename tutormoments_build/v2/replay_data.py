@@ -1,16 +1,11 @@
-"""The v2 moments a replay starts from, with their transcript rows.
+"""Loads the ground-truth moments that replays start from.
 
-Replays (and the personas they read) cover both ground-truth splits: the split
-distinction matters only for the human-human classification round. Split is
-therefore left out of replay paths and records, which is only safe while
-``moment_id`` is unique across splits -- so loading checks that and stops on a
-collision.
-
-Moments are located exactly as ``excerpts.build`` locates them: the same
-transcripts files, the same ``resolve_boundaries``, the same reasons for
-skipping one.
+Moments come from both splits and are found in the transcripts the same way
+`excerpts.py` finds them. Provider C moments also get the text of their
+session's slides. See README.md, "Replays".
 """
 
+import json
 import logging
 from collections import Counter
 from dataclasses import dataclass
@@ -20,10 +15,12 @@ from tutormoments_build.v2 import excerpts
 
 logger = logging.getLogger("tutormoments_build.v2.replay_data")
 
+DEFAULT_SLIDES = "data/v2_annotations/source/tutoring_provider_c_lesson_slides.jsonl"
+
 
 @dataclass(frozen=True)
 class ReplayMoment:
-    """One ground-truth moment, its rendered rows and resolved boundaries."""
+    """One moment, with its transcript rows and where the cut and end fall."""
 
     moment: dict
     conversation_id: str
@@ -38,7 +35,10 @@ class ReplayMoment:
 
 
 def check_unique_ids(ground_truth: dict[str, list[dict]]) -> None:
-    """Raise if any ``moment_id`` appears more than once across the splits."""
+    """Stop if a `moment_id` appears in both splits.
+
+    Replay files don't record the split, so a repeated ID would be ambiguous.
+    """
     seen: dict[str, str] = {}
     for split, records in ground_truth.items():
         for record in records:
@@ -52,11 +52,41 @@ def check_unique_ids(ground_truth: dict[str, list[dict]]) -> None:
             seen[moment_id] = split
 
 
+def load_slides(path: str = DEFAULT_SLIDES) -> dict[str, str]:
+    """Slide text by `slide_id`, from the lesson-slides file."""
+    slides = {}
+    with open(path, encoding="utf-8") as fh:
+        for line in fh:
+            if line.strip():
+                record = json.loads(line)
+                slides[str(record["slide_id"])] = record["problem_text"]
+    return slides
+
+
+def with_slide_text(moment_id: str, problems: list[dict], slides: dict) -> list:
+    """Add each slide's text to its problem. Stops if a slide has no text."""
+    out = []
+    for problem in problems:
+        text = (slides.get(str(problem["slide_id"])) or "").strip()
+        if not text:
+            raise ValueError(
+                f"moment {moment_id}: no text for slide {problem['slide_id']} "
+                "in the lesson-slides file"
+            )
+        out.append({**problem, "slide_text": text})
+    return out
+
+
 def load_moments(
     ground_truth_dir: str = excerpts.DEFAULT_GROUND_TRUTH_DIR,
     transcripts_paths=excerpts.DEFAULT_TRANSCRIPTS,
+    slides_path: str | None = DEFAULT_SLIDES,
 ) -> tuple[list[ReplayMoment], Counter]:
-    """Every locatable moment in both splits, and per-reason drop counts."""
+    """Every moment found in the transcripts, and counts of those dropped, by reason.
+
+    Pass `slides_path=None` to skip the slide text (personas don't use it).
+    """
+    slides = load_slides(slides_path) if slides_path else None
     ground_truth = excerpts.load_ground_truth(ground_truth_dir)
     check_unique_ids(ground_truth)
     moments = [m for records in ground_truth.values() for m in records]
@@ -95,18 +125,23 @@ def load_moments(
                 rows=index.rows(transcript_id),
                 cut_index=bounds["cut_index"],
                 end_index=bounds["end_index"],
-                problems=index.problems(transcript_id),
+                problems=(
+                    with_slide_text(
+                        moment["moment_id"], index.problems(transcript_id), slides
+                    )
+                    if slides is not None
+                    else index.problems(transcript_id)
+                ),
             )
         )
     return out, dropped
 
 
 def dialogue_prefix(moment: ReplayMoment) -> str:
-    """The dialogue rows from the first through the cut row, one per line.
+    """The transcript up to and including the cut turn, dialogue rows only.
 
-    Enrichments are left out (v1's personas were generated from dialogue
-    alone); the cut turn is included, as v1's ``_prefix_turns_to_context``
-    includes it. Rows render as the human-human excerpts render them.
+    Personas are generated from this. Screen-activity and pause rows are left out,
+    as in v1.
     """
     return "\n".join(
         excerpts.format_row(row)

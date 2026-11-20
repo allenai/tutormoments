@@ -1,13 +1,12 @@
-"""Golden snapshot of the human-human v2 classification pipeline.
+"""Snapshot tests for the human-round classification (`classify_excerpts`).
 
-Pins what ``classify_excerpts`` sends and writes for a fixed set of excerpt
-records -- batch entries (keys, filled prompt text, request params), counts,
-parsed prediction records, output paths and the dry-run report -- at every
-prompt version, so a refactor made for replay classification cannot change the
-human round unnoticed.
+For a fixed set of excerpt records, these pin everything the human round sends
+and writes at every prompt version: batch requests, counts, parsed records,
+output paths and reports. They make sure changes made for replay classification
+can't silently change the human round.
 
-The latest version is stored in full, so a diff is readable; earlier versions
-are stored as hashes. Regenerate (only for an intended change) with:
+The latest prompt version is stored in full so a diff is readable; older
+versions are stored as hashes. To regenerate after an intended change:
 
     python tests/tutormoments_build/test_v2_classify_excerpts_golden.py
 """

@@ -1,4 +1,4 @@
-"""v2 replay classification: stage-1 routing, predicted {action}, gold slots."""
+"""Tests for classifying replays: routing to stage 2, filling prompts, and retries."""
 
 import json
 
@@ -52,7 +52,8 @@ def _action(scaffolding, rigor):
     }
 
 
-# Gold says rigor only for every replay; the predictions differ on purpose.
+# Gold says rigor only for every replay. The predictions differ, so the tests
+# can tell which one was used.
 REPLAYS = [_replay("yes1"), _replay("no1"), _replay("bad1"), _replay("both")]
 STAGE1 = {
     "action__yes1": _action("yes", "no"),
@@ -226,3 +227,77 @@ def test_cli_writes_once_and_refuses_to_overwrite(monkeypatch, tmp_path, batches
 
     _, code = _cli(monkeypatch, tmp_path)
     assert code == 1
+
+
+def _serve(monkeypatch, *responses):
+    """Serve each batch from `responses` in turn, recording the keys sent."""
+    sent = []
+
+    def run_entries(entries, cfg, batch_id=None, display_name=""):
+        sent.append((display_name, sorted(e["key"] for e in entries)))
+        return responses[len(sent) - 1]
+
+    monkeypatch.setattr(C, "run_entries", run_entries)
+    return sent
+
+
+FAILED = {"text": "", "error": "overloaded", "usage": {"input_tokens": 2}}
+
+
+def test_a_failed_request_is_resubmitted_alone_and_its_usage_kept(monkeypatch):
+    replays = [_replay("ok"), _replay("flaky")]
+    sent = _serve(
+        monkeypatch,
+        {"action__ok": _action("no", "yes")},  # flaky: no result at all
+        {"action__flaky": FAILED},
+        {"action__flaky": _action("no", "yes")},
+    )
+    records, counts = CR.classify(replays, CFG, PROMPTS, "r.jsonl")
+
+    assert sent == [
+        ("v2_classify_replays_action", ["action__flaky", "action__ok"]),
+        ("v2_classify_replays_action_retry1", ["action__flaky"]),
+        ("v2_classify_replays_action_retry2", ["action__flaky"]),
+    ]
+    by_id = {r["moment_id"]: r for r in records}
+    assert by_id["flaky"]["action_direction"]["rigor"] is True
+    assert by_id["flaky"]["attempts"] == {"action_direction": 3, "over_scaffolding": 0}
+    assert by_id["ok"]["attempts"]["action_direction"] == 1
+    # The failed attempt's 2 input tokens are summed with the success's 4.
+    assert by_id["flaky"]["action_direction"]["usage"]["input_tokens"] == 6
+    assert not counts["action_direction_failed"]
+
+
+def test_retries_stop_after_three_and_the_failure_is_recorded(monkeypatch):
+    sent = _serve(monkeypatch, *[{"action__x": FAILED}] * 4)
+    records, counts = CR.classify([_replay("x")], CFG, PROMPTS, "r.jsonl")
+
+    assert len(sent) == 1 + CR.MAX_RETRIES == 4
+    record = records[0]
+    assert record["attempts"]["action_direction"] == 4
+    assert record["over_scaffolding_routing"]["reason"] == CR.NOT_ROUTED_FAILED
+    assert record["action_direction"]["error"] == "overloaded"
+    assert counts["action_direction_failed"] == 1
+    assert "still failed after 3 retries: 1" in CR.report(records, counts)
+
+
+def test_an_unparseable_response_is_not_resubmitted(batches):
+    records, _ = CR.classify(REPLAYS, CFG, PROMPTS, "r.jsonl")
+    assert len(batches) == 2  # stage 1 and stage 2, no retry batch
+    bad = next(r for r in records if r["moment_id"] == "bad1")
+    assert bad["attempts"]["action_direction"] == 1
+
+
+def test_stage_two_failures_are_retried_too(monkeypatch):
+    sent = _serve(
+        monkeypatch,
+        {"action__s": _action("yes", "no")},
+        {"overscaffold__s": FAILED},
+        {"overscaffold__s": {"text": '{"over-scaffolding": "no"}'}},
+    )
+    records, _ = CR.classify([_replay("s")], CFG, PROMPTS, "r.jsonl")
+    assert [name for name, _ in sent][-1] == (
+        "v2_classify_replays_over_scaffolding_retry1"
+    )
+    assert records[0]["over_scaffolding"]["over_scaffolding"] is False
+    assert records[0]["attempts"] == {"action_direction": 1, "over_scaffolding": 2}

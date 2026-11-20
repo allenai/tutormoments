@@ -1,12 +1,12 @@
-"""The v2_replay config block: shipped roles and load-time validation."""
+"""Tests for the `v2_replay` config block: shipped settings and load-time checks."""
 
 import pytest
 
 from tutormoments.models import ThinkingConfigError, resolve_thinking
 from tutormoments_build.v2 import replay_config as RC
 
-# The exact request each shipped role sends. A config edit that changes a row
-# here changes how replays are run or scored and must be deliberate.
+# The exact settings each role sends. Changing a row here changes how replays
+# are run or scored, so it should only happen on purpose.
 EXPECTED = {
     "student": {"include_thoughts": True, "thinking_level": "low"},
     "scorer": {"include_thoughts": True, "thinking_level": "high"},
@@ -21,7 +21,7 @@ def test_shipped_roles_run_argon_at_their_stated_parameters(role):
     assert spec.model == "gemini-4-argon"
     assert spec.provider == "gemini"
     assert spec.thinking == EXPECTED[role]
-    # And the client can put it on the wire.
+    # And the client accepts them.
     assert resolve_thinking(spec.model, spec.thinking).provider == "gemini"
 
 
@@ -45,8 +45,11 @@ def test_a_cross_vendor_knob_is_refused(monkeypatch):
 
 
 def test_a_malformed_condition_is_refused(monkeypatch):
-    """Shape is checked offline (level vocabularies differ per model and are
-    proven live by smoke, see docs/thinking.md)."""
+    """Only a setting's shape is checked here.
+
+    Whether a model accepts a given level is checked live by `tutormoments smoke`
+    (see docs/thinking.md).
+    """
     entry = {"model": "gemini-4-argon", "thinking_level": "low", "thinking_budget": 0}
     _patch(monkeypatch, {"v2_replay": {"scorer": entry}})
     with pytest.raises(ThinkingConfigError, match="v2_replay.scorer"):

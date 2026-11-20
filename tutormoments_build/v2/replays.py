@@ -1,31 +1,8 @@
-"""Replay v2 moments with an LM tutor and a simulated student.
+"""Replays v2 moments: an LM tutor and a simulated student continue a real
+transcript from its cut point.
 
-Given a real human-human transcript up to an expert-annotated cut point, an LM
-tutor and a simulated student converse, as in v1 replays
-(``tutormoments.conversation.run_conversation``). The replay always opens with
-a generated tutor turn and ends on one: ``--turns N`` is the number of
-generated tutor turns, with one student reply between each (a reply may hold
-several messages). At N=1 the student never speaks.
-
-What each side sees:
-- **Transcript so far**: every row from the first through the cut row,
-  enrichments included, rendered as the human-human excerpts are
-  (``excerpts.format_row``). No cut marker.
-- **Student context** (both prompts): provider C's year(s) and learning
-  objectives; provider A has no usable metadata and gets v1's fallback.
-- **Student reference** (what the oracle student imitates): the real rows
-  after the cut through the moment's ``end_index``.
-- **Persona**: the moment's frozen persona (``v2.traits``); a missing one
-  raises once the student would speak.
-
-Each record carries the rendered replay excerpt -- transcript so far, CUT
-POINT, generated rows -- in the ``excerpts`` shape ``classify_excerpts`` reads,
-so a replay is classified the way a human moment is.
-
-Usage:
-    python -m tutormoments_build.v2.replays --tutor gemini-4-argon --dry-run
-    python -m tutormoments_build.v2.replays --tutor gemini-4-argon --sample 5
-    python -m tutormoments_build.v2.replays --tutor gemini-4-argon --print 02e8
+Usage, what each side sees and the output paths are in README.md, "Replays".
+The loop follows v1's `tutormoments.conversation.run_conversation`.
 """
 
 import argparse
@@ -56,9 +33,8 @@ from tutormoments_build.v2 import (
 logger = logging.getLogger("tutormoments_build.v2.replays")
 
 DEFAULT_OUT_DIR = "outputs/v2_replays"
-# v1's student context when a transcript carries no metadata
-# (tutormoments_build.moments_build._get_student_context).
-NO_CONTEXT = "K-12 tutoring session"
+# Provider A has no session information, so its context is empty.
+NO_CONTEXT = ""
 EMPTY_TURN = "..."
 
 
@@ -68,14 +44,14 @@ EMPTY_TURN = "..."
 
 
 def transcript_so_far(moment: replay_data.ReplayMoment) -> str:
-    """Every row from the first through the cut row, enrichments included."""
+    """The transcript through the cut row, screen-activity and pause rows included."""
     return "\n".join(
         excerpts.format_row(row) for row in moment.rows[: moment.cut_index + 1]
     )
 
 
 def reference_transcript(moment: replay_data.ReplayMoment) -> str:
-    """The real rows after the cut through ``end_index`` ('' when none)."""
+    """The real rows after the cut, through the moment's end ('' if none)."""
     return "\n".join(
         excerpts.format_row(row)
         for row in moment.rows[moment.cut_index + 1 : moment.end_index + 1]
@@ -87,38 +63,48 @@ def _years(years: list[int]) -> str:
         return f"Year {years[0]}."
     if years == list(range(years[0], years[-1] + 1)):
         return f"Years {years[0]}-{years[-1]}."
-    # Not consecutive: a range would imply a year that is not there.
+    # Not consecutive, so list them; a range would imply a missing year.
     return f"Years {', '.join(map(str, years))}."
 
 
 def student_context(moment: replay_data.ReplayMoment) -> str:
-    """Provider C's year(s) and objectives, else v1's fallback.
+    """The student context: provider C's year(s), then each objective with its slides.
 
-    Objectives are listed once each in the order the session's slides run
-    (``TranscriptIndex.problems``), titles verbatim. None is tied to a turn,
-    so the whole session's objectives are listed.
+    Provider A has none, so it gets an empty string. Objectives and slides keep the
+    session's order. The transcripts don't say which slide was up when, so the
+    whole session's slides are given.
     """
     if not moment.problems:
         return NO_CONTEXT
     years = sorted({p["year"] for p in moment.problems if p["year"] is not None})
-    titles = list(
-        dict.fromkeys(p["objective"] for p in moment.problems if p["objective"])
-    )
-    if not titles:
+    decks: dict[str, list[str]] = {}
+    for problem in moment.problems:
+        if problem["objective"]:
+            decks.setdefault(problem["objective"], []).append(problem["slide_text"])
+    if not decks:
         return NO_CONTEXT
-    head = f"{_years(years)} " if years else ""
-    lines = [f"{head}Learning objectives covered in this session:"]
-    lines += [f"- {title}" for title in titles]
+    lines = [_years(years)] if years else []
+    for title, slides in decks.items():
+        lines += (
+            ["", f"Learning objective: {title}"]
+            if lines
+            else [f"Learning objective: {title}"]
+        )
+        for number, text in enumerate(slides, 1):
+            lines += ["", f"Session Content {number}:", text]
     return "\n".join(lines)
 
 
 # ===========================================================================
-# Turn handling (v1's, reimplemented on its public tokens)
+# Turn handling (as in v1)
 # ===========================================================================
 
 
 def parse_tutor_tokens(text: str) -> tuple[str, bool, bool]:
-    """``(cleaned text, ended, problem_change)``; as v1's ``_parse_tutor_tokens``."""
+    """Remove `[END]` / `[PROBLEM_CHANGE]` from a tutor reply, as v1 does.
+
+    Returns (text, ended, problem_change).
+    """
     has_end = END_TOKEN in text
     has_change = PROBLEM_CHANGE_TOKEN in text or NEXT_PROBLEM_TOKEN in text
     cleaned = (
@@ -133,13 +119,13 @@ def parse_tutor_tokens(text: str) -> tuple[str, bool, bool]:
 
 
 def split_messages(text: str) -> list[str]:
-    """One message per ``[NEW_MESSAGE]`` / ``[NEXT]``; as v1's ``_split_messages``."""
+    """Split a reply into messages on `[NEW_MESSAGE]` or `[NEXT]`, as v1 does."""
     parts = text.replace(NEW_MESSAGE_DELIMITER, NEXT_DELIMITER).split(NEXT_DELIMITER)
     return [p.strip() for p in parts if p.strip()]
 
 
 def next_turn_number(moment: replay_data.ReplayMoment) -> int:
-    """Generated turns continue from the last real dialogue turn up to the cut."""
+    """The first generated turn's number: one past the last real turn up to the cut."""
     numbers = [
         row["turn_number"]
         for row in moment.rows[: moment.cut_index + 1]
@@ -166,11 +152,11 @@ def replay(
     student_prompts: replay_prompts.RolePrompts,
     persona: str | None,
 ) -> dict:
-    """Run one replay. Returns its generated rows, calls and how it ended.
+    """Run one replay and return its generated rows, calls, usage and how it ended.
 
-    tutor -> (student -> tutor) x (turns - 1), stopping early if the tutor
-    emits ``[END]`` / ``[PROBLEM_CHANGE]``. Calls are uncapped (``max_tokens=0``);
-    an empty tutor or student response is recorded as ``"..."``, as in v1.
+    The tutor speaks first, then student and tutor alternate until there are
+    `turns` tutor turns. It stops early if the tutor sends `[END]` or
+    `[PROBLEM_CHANGE]`. An empty reply is recorded as "...", as in v1.
     """
     if turns < 1:
         raise ValueError("a replay needs at least one tutor turn")
@@ -243,23 +229,22 @@ def replay(
     return {
         "generated_rows": rows,
         "tutor_turns": tutor_turns,
-        # How the replay stopped, and whether that was before N tutor turns.
+        # How the replay stopped, and whether it stopped before `turns`.
         "ended_via": ended_via,
         "ended_early": tutor_turns < turns,
         "calls": calls,
         "usage": usage,
+        "student_context": context,
     }
 
 
 def replay_excerpt(
     moment: replay_data.ReplayMoment, rows: list[dict], width=excerpts.FULL
 ) -> tuple[str, int]:
-    """Lead-up, CUT POINT, generated rows -- a human excerpt's shape.
+    """The replay as an excerpt: lead-up, the CUT POINT marker, then the generated rows.
 
-    The lead-up at ``width`` opens where the human excerpt at that width opens
-    (``excerpts.context_start``, anchored on the cut), so replay and human
-    classifications at the same width read the same pre-cut context. Returns
-    (text, first row rendered).
+    The lead-up at `width` starts where the human excerpt at that width starts, so
+    both are scored on the same context. Returns (text, index of the first row).
     """
     first = excerpts.context_start(moment.rows, moment.cut_index, width)
     lines = [
@@ -271,7 +256,7 @@ def replay_excerpt(
 
 
 def replay_excerpts(moment: replay_data.ReplayMoment, rows: list[dict]) -> dict:
-    """One rendering per width the human excerpt files carry, keyed as they are."""
+    """The replay excerpt at each width the human excerpts have."""
     out = {}
     for width in excerpts.DEFAULT_CONTEXT_WIDTHS:
         text, first = replay_excerpt(moment, rows, width)
@@ -299,11 +284,13 @@ def build_record(
         "end_turn": m["end_turn"],
         "cut_index": moment.cut_index,
         "end_index": moment.end_index,
-        # Gold, for the moment at the cut (the over-scaffolding prompt's
-        # {is_appropriate_for} reads situation_type).
+        # Gold labels for the moment at the cut. Classification reads
+        # situation_type for the over-scaffolding prompt.
         "labels": m["labels"],
         "situation_type": m.get("situation_type"),
         "settings": settings,
+        # The student context the tutor and student were given.
+        "student_context": result["student_context"],
         "generated_rows": rows,
         "post_cut_rows": len(rows),
         "post_cut_dialogue_rows": len(rows),
@@ -327,7 +314,7 @@ def build_record(
 def settings_for(
     arm, tutor_mode, tutor_prompts, student, student_prompts, turns
 ) -> dict:
-    """Everything that defines a replay run, stored on every record."""
+    """The settings that define a replay run, stored on every record."""
     return {
         "tutor": {
             "arm": arm.name,
@@ -347,7 +334,7 @@ def settings_for(
 
 
 def replay_path(out_dir: str, settings: dict) -> str:
-    """``<out>/<arm>/<prompt>_v<n>/n<N>/student-<model>_sp<n>.jsonl``."""
+    """Where a run's replays are written (see README.md, "Replays")."""
     tutor, student = settings["tutor"], settings["student"]
     return os.path.join(
         out_dir,
@@ -408,6 +395,12 @@ def build_parser() -> argparse.ArgumentParser:
         default=list(excerpts.DEFAULT_TRANSCRIPTS),
         metavar="FILE",
     )
+    parser.add_argument(
+        "--slides",
+        default=replay_data.DEFAULT_SLIDES,
+        metavar="FILE",
+        help="Provider C lesson-slides file (slide text for the student context)",
+    )
     parser.add_argument("--traits", default=traits.DEFAULT_OUT, metavar="FILE")
     parser.add_argument("--out-dir", default=DEFAULT_OUT_DIR, metavar="DIR")
     parser.add_argument("--limit", type=int, default=None, metavar="N")
@@ -456,12 +449,14 @@ def main(argv: list[str] | None = None) -> int:
         print("--turns must be at least 1", file=sys.stderr)
         return 2
 
-    # Everything that can fail on config or prompts fails before any spend.
+    # Load config and prompts first, so a mistake fails before any API call.
     arms = [resolve_arm(name) for name in args.tutor]
     student = replay_config.role_spec("student")
     tutor_prompts = replay_prompts.load_tutor_prompts(args.tutor_prompt_version)
     student_prompts = replay_prompts.load_student_prompts(args.student_prompt_version)
-    moments, dropped = replay_data.load_moments(args.ground_truth, args.transcripts)
+    moments, dropped = replay_data.load_moments(
+        args.ground_truth, args.transcripts, args.slides
+    )
     personas = traits.load_traits(args.traits) if args.turns > 1 else {}
 
     if args.show_prompt:

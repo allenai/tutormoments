@@ -1,11 +1,8 @@
-"""The ``v2_replay`` config block: the student, scorer and traits roles.
+"""Reads and checks the `v2_replay` config block: the student, scorer and traits models.
 
-The tutor is a ``benchmark_models`` arm at that arm's own parameters; this
-block states the other roles. ``tutormoments.config`` validates only the blocks
-it knows, so this one is validated here, the way ``classify_excerpts`` validates
-``v2``: every role names a model and its provider-native parameters, checked by
-the runtime's own ``resolve_thinking`` when the config is read, so a bad
-setting fails before any spend. Nothing is filled in from code.
+`tutormoments.config` doesn't check this block, so this module does when the
+config is read. A bad setting fails before any API call. See README.md,
+"Replays".
 """
 
 from dataclasses import dataclass
@@ -19,7 +16,7 @@ ROLES = ("student", "scorer", "traits")
 
 @dataclass(frozen=True)
 class RoleSpec:
-    """One role's model and the provider-native parameters it runs at."""
+    """One role's model and its provider-native settings."""
 
     role: str
     model: str
@@ -41,7 +38,7 @@ def _block(config_path=None) -> dict:
 
 
 def role_spec(role: str, config_path=None) -> RoleSpec:
-    """The spec for one ``v2_replay`` role, validated."""
+    """The checked settings for one `v2_replay` role."""
     if role not in ROLES:
         raise ValueError(f"unknown {BLOCK} role {role!r}; choose from {ROLES}")
     entry = dict(_block(config_path).get(role) or {})
@@ -57,5 +54,5 @@ def role_spec(role: str, config_path=None) -> RoleSpec:
 
 
 def poll_interval(config_path=None) -> int:
-    """Seconds between batch polls for replay classification."""
+    """Seconds to wait between checks on a running batch."""
     return int(_block(config_path).get("poll_interval", 60))

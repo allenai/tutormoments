@@ -1,21 +1,13 @@
-"""Generate the frozen per-moment student personas v2 replays read.
+"""Generates one student persona per moment and saves them for replays to read.
 
-Reuses v1's trait machinery (``tutormoments_build.traits.TraitGenerator``,
-``prompts/trait_generator/``, mode ``joined-3``: one 3-sentence description per
-dimension, joined) on each moment's pre-cut dialogue. Differences from v1:
-calls pass ``max_tokens=0`` (v1's adapter capped at 1024; the benchmark imposes
-no cap), every call's token usage is recorded, the description is taken after
-the *last* ``DESCRIPTION:`` marker rather than the first
-(``LastMarkerTraitGenerator``), and each dimension's raw output is kept.
+Runs v1's trait generator on the dialogue up to the cut, with these changes:
+- no output token cap (v1 capped at 1024),
+- token usage is recorded,
+- the description is taken after the last `DESCRIPTION:` marker, not the first,
+- each dimension's raw output is kept.
 
-Personas are generated once and frozen: a replay reads them and raises on a
-missing one rather than generating its own. The file is resumable -- moments
-already in it are skipped -- and only ``--overwrite`` regenerates.
-
-Usage:
-    python -m tutormoments_build.v2.traits --dry-run
-    python -m tutormoments_build.v2.traits --limit 2
-    python -m tutormoments_build.v2.traits --print 02e89625
+Personas are made once; reruns skip moments already in the file. See README.md,
+"Replays", for usage.
 """
 
 import argparse
@@ -39,12 +31,10 @@ DEFAULT_OUT = "data/ground_truth/v2_student_traits.jsonl"
 
 
 class UsageRecordingAdapter:
-    """``TraitGenerator``'s model interface, uncapped and usage-recording.
+    """Connects v1's `TraitGenerator` to the model client.
 
-    ``TraitGenerator`` calls ``call(non_system_messages, system_prompt, ...)``
-    and wants text back; this forwards each call to ``client.generate`` with the
-    system prompt as the cacheable prefix, as v1's adapter does, and sums the
-    usage of every call it makes.
+    Like v1's adapter, but it sends no output token cap and adds up the token usage
+    of every call.
     """
 
     def __init__(self, client, thinking: dict) -> None:
@@ -54,8 +44,8 @@ class UsageRecordingAdapter:
         self.calls = 0
 
     def call(self, non_system_messages, system_prompt, **_ignored) -> str:
-        # TraitGenerator's max_tokens/temperature are ignored: no output cap,
-        # and v1's adapter never forwarded temperature either.
+        # max_tokens and temperature from TraitGenerator are ignored: there is no
+        # output cap, and v1 didn't send temperature either.
         user_text = "\n\n".join(
             m.get("content", "")
             for m in (non_system_messages or [])
@@ -77,14 +67,12 @@ MARKER = "DESCRIPTION:"
 
 
 class LastMarkerTraitGenerator(TraitGenerator):
-    """v1's generator, parsing on the last ``DESCRIPTION:`` and keeping raw text.
+    """v1's trait generator, keeping the text after the last `DESCRIPTION:` marker.
 
-    The prompt asks for visible step-by-step thinking before ``DESCRIPTION:``.
-    v1 keeps everything after the *first* marker, so a model that quotes the
-    required format while planning (``DESCRIPTION:\\n[description]``) has its
-    whole plan kept as the persona. The final description always follows the
-    last marker. Each dimension's raw output is kept so parsing can be redone
-    from the file without another call.
+    The model sometimes writes the marker while planning, before its real answer.
+    v1 kept everything after the first marker, which could include that plan. Each
+    dimension's raw output is also saved, so it can be re-parsed without another
+    call.
     """
 
     def __init__(self, model) -> None:
@@ -113,7 +101,7 @@ class LastMarkerTraitGenerator(TraitGenerator):
 def generate_persona(
     prefix: str, client, thinking: dict, trait_mode: str = DEFAULT_TRAIT_MODE
 ) -> tuple[str, dict, int, dict]:
-    """``(persona, summed usage, call count, raw output by dimension)``."""
+    """One persona: (persona, token usage, call count, raw output by dimension)."""
     adapter = UsageRecordingAdapter(client, thinking)
     generator = LastMarkerTraitGenerator(adapter)
     persona = generator.generate_trait(conversation_text=prefix, trait_mode=trait_mode)
@@ -140,12 +128,12 @@ def build_record(moment, persona, usage, calls, raw, spec, trait_mode) -> dict:
 
 
 def load_traits(path: str = DEFAULT_OUT) -> dict[str, dict]:
-    """``{moment_id: trait record}``; empty when the file does not exist."""
+    """Saved personas by `moment_id`; empty if the file doesn't exist yet."""
     return jsonl_runs.load_by_id(path)
 
 
 def persona_for(traits: dict[str, dict], moment_id: str) -> str:
-    """The frozen persona for a moment; raises rather than generating one."""
+    """The saved persona for a moment. Raises if missing; replays never make one."""
     record = traits.get(moment_id)
     if not record or not record.get("persona"):
         raise KeyError(
@@ -165,10 +153,9 @@ def generate(
     concurrency: int = 4,
     trait_mode: str = DEFAULT_TRAIT_MODE,
 ) -> list[dict]:
-    """Generate personas for ``moments`` missing from ``out_path``.
+    """Generate personas for moments not yet in `out_path`, saving each as it's made.
 
-    Written as they are made and resumable; ``overwrite`` regenerates the given
-    moments and replaces the file only once all succeed (see ``jsonl_runs``).
+    See `jsonl_runs.run` for how reruns and `overwrite` work.
     """
 
     def one(moment):
@@ -239,7 +226,9 @@ def main(argv: list[str] | None = None) -> int:
     setup_logging(level=args.log_level, log_file=args.log_file)
 
     spec = replay_config.role_spec("traits")
-    moments, dropped = replay_data.load_moments(args.ground_truth, args.transcripts)
+    moments, dropped = replay_data.load_moments(
+        args.ground_truth, args.transcripts, slides_path=None
+    )
 
     if args.print_moment:
         for moment in moments:
