@@ -194,36 +194,59 @@ def parse_categories(template: str) -> dict[str, str]:
     return out
 
 
-def action_slot(record: dict) -> str | None:
-    """The ``{action}`` value from the gold labels, or None if gold marks neither."""
+def gold_presence(record: dict) -> tuple[bool, bool]:
+    """(scaffolding, rigor) from the gold labels: the human round's ``{action}``."""
     labels = record.get("labels") or {}
-    key = (bool(labels.get("scaffolding_present")), bool(labels.get("rigor_present")))
-    return ACTION_WORDING.get(key)
+    return bool(labels.get("scaffolding_present")), bool(labels.get("rigor_present"))
 
 
-def skip_reason(record: dict) -> str | None:
+def action_slot(record: dict, presence=gold_presence) -> str | None:
+    """The ``{action}`` value, or None if `presence` marks neither.
+
+    `presence(record) -> (scaffolding, rigor)` says what the tutor did; it is
+    the gold labels unless a caller (the replay round) passes its own.
+    """
+    return ACTION_WORDING.get(presence(record))
+
+
+def skip_reason(
+    record: dict, presence=gold_presence, neither: str = NO_GOLD_ACTION
+) -> str | None:
     """Why a moment is not sent, or None if it is."""
     if not has_post_cut_content(record):
         return NO_POST_CUT
-    if action_slot(record) is None:
-        return NO_GOLD_ACTION
+    if action_slot(record, presence) is None:
+        return neither
     return None
 
 
-def fill_prompt(template: str, record: dict, width: str = EXCERPT_WIDTH) -> str:
-    return fill(template, excerpt_at(record, width), {"action": action_slot(record)})
+def fill_prompt(
+    template: str, record: dict, width: str = EXCERPT_WIDTH, presence=gold_presence
+) -> str:
+    return fill(
+        template, excerpt_at(record, width), {"action": action_slot(record, presence)}
+    )
 
 
 def build_entries(
-    records: list[dict], template: str, width: str = EXCERPT_WIDTH
+    records: list[dict],
+    template: str,
+    width: str = EXCERPT_WIDTH,
+    *,
+    presence=gold_presence,
+    neither: str = NO_GOLD_ACTION,
 ) -> tuple[list[dict], Counter]:
-    """One batch entry per askable moment. Returns (entries, counts)."""
+    """One batch entry per askable moment. Returns (entries, counts).
+
+    `presence` and `neither` default to the human round's gold-labelled
+    behaviour; the replay round passes the replay's predicted labels.
+    """
     from tutormoments.client import build_batch_entry
 
     entries: list[dict] = []
     counts: Counter = Counter()
     for record in records:
-        reason = skip_reason(record)
+        reason = skip_reason(record, presence, neither)
         if reason:
             counts[reason] += 1
             continue
@@ -233,12 +256,12 @@ def build_entries(
         entries.append(
             build_batch_entry(
                 f"{ENTRY_PREFIX}__{record['moment_id']}",
-                fill_prompt(template, record, width),
+                fill_prompt(template, record, width, presence),
                 json_mode=False,
             )
         )
         counts["asked"] += 1
-        counts[f"asked_{action_slot(record)}"] += 1
+        counts[f"asked_{action_slot(record, presence)}"] += 1
     return entries, counts
 
 
@@ -314,6 +337,20 @@ def parse_actions(text: str, categories: dict[str, str]) -> tuple[dict, bool]:
 # ===========================================================================
 
 
+def taxonomy_result(raw_entries: dict, moment_id: str, categories: dict) -> dict:
+    """One asked moment's parsed labels, plus the raw text, any error and usage."""
+    raw = raw_entries.get(f"{ENTRY_PREFIX}__{moment_id}") or {}
+    text = raw.get("text", "")
+    fields, had_error = parse_actions(text, categories)
+    return {
+        **fields,
+        "parse_error": bool(had_error),
+        "error": raw.get("error"),
+        "raw": text,
+        "usage": raw.get("usage", dict(ZERO_USAGE)),
+    }
+
+
 def build_record(
     excerpt_record: dict,
     raw_entries: dict,
@@ -328,16 +365,7 @@ def build_record(
 
     taxonomy = None
     if reason is None:
-        raw = raw_entries.get(f"{ENTRY_PREFIX}__{moment_id}") or {}
-        text = raw.get("text", "")
-        fields, had_error = parse_actions(text, categories)
-        taxonomy = {
-            **fields,
-            "parse_error": bool(had_error),
-            "error": raw.get("error"),
-            "raw": text,
-            "usage": raw.get("usage", dict(ZERO_USAGE)),
-        }
+        taxonomy = taxonomy_result(raw_entries, moment_id, categories)
 
     return {
         "moment_id": moment_id,

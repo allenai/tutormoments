@@ -1,0 +1,721 @@
+{
+ "hashes": {
+  "1": "4f77e75d1c874379509e5f6d6ebbb7e6a91227329129b7925ecc4b05de176656",
+  "2": "6b58963de1670d38202405d748e7d31270fdfad1435cad2679a7201243d4b57f"
+ },
+ "latest": {
+  "20": {
+   "counts": {
+    "asked": 4,
+    "asked_push for rigor": 2,
+    "asked_scaffold": 1,
+    "asked_scaffold and push for rigor": 1,
+    "gold_marks_neither": 1,
+    "no_post_cut_content": 1,
+    "unparsed": 2
+   },
+   "dry_run_report": "\nDRY RUN -- no API calls made, nothing written\n\n  model:   vendor/golden-model (effort: high, thinking: {'type': 'adaptive'})\n  prompt:  prompts/v2/classify_action/2/classify_action.md (version 2)\n  excerpt: 20\n  output:  out/\n\n  requests: 4\n    scaffold and push for rigor       1\n    scaffold                          1\n    push for rigor                    2\n  not asked, nothing after the cut:  1\n  not asked, gold marks neither:     1\n",
+   "entries": [
+    {
+     "key": "taxonomy__aaa",
+     "request": {
+      "contents": [
+       {
+        "parts": [
+         {
+          "text": "You will be given a K-12 tutoring transcript that contains a cut point. Your job is to determine what pedagogical strategy a tutor is employing after the cut point. Identify which of the listed action types are occurring after the cut point, and output a json of turn numbers and labels. \n\n**How to differentiate guiding questions (scaffolding) from rigor-pushing questions?**\n- Guiding questions usually narrow the problem space: break a problem into pieces or draw attention to specific content that makes a problem accessible. Example: \u201cWhat do we multiply first?\u201d \u2192 scaffolding\n- Justify & explain reasoning questions require higher cognitive demand and critical thinking. These questions ask students to make arguments, engage with higher-level concepts, consider why and how, or generalize their thinking. Example: \u201cWhy do we multiply before we add here?\u201d \u2192 push for rigor\n- Other rigor-pushing questions may ask the student to complete a problem or key step independently.\n\n## Action types\n\n### Scaffolding\n\n`guiding_questions`: The tutor asks guiding questions to lead the student towards the solution.\n`break_into_steps`: The tutor breaks down a problem into steps for the student.\n`re_explain`: The tutor re-explains a concept or a procedure, e.g. using a different or simpler example, metaphor, or phrasing.\n`model_example`: The tutor models an example solution.\n`co_solve`: The tutor co-solves or fills in some of the steps for the student. \n`draw_diagram`: The tutor draws a diagram to support an explanation of a concept.\n`diff_rep`: The tutor provides a different representation of the problem (e.g. a different form or a real-world analogy) for the student.\n`reduce_options`: The tutor narrows the problem's choices, by eliminating some answer options for the student. \n`hint`: The tutor gives the student a hint.\n`remind_prior_problem`: The tutor reminds the student of a similar prior problem.\n`highlight_problem_text`: The tutor highlights parts of the problem's text.\n`give_answer`: The tutor gives away the answer.\n`state_correction`: The tutor fixes an error for the student.\n\n### Rigor\n\n`justify_explain`: The tutor asks the student to justify or explain an answer, solution, or process, including why an answer may be wrong, and holds this demand open for the student.\n`withdraw_support`: The tutor withdraws support and the student works on problems independently and/or struggles productively.\n`increase_complexity`: The tutor increases problem complexity or difficulty, e.g. whole numbers to decimals, one-step to two-step equations.\n`define_term`: The tutor asks the student to define and/or use a key mathematical term.\n`find_fix_errors`: The tutor asks the student to find and fix their own errors.\n\n## Instructions\n\nA previous pass by an LM already determined that the tutor has decided to scaffold *after the cut point* in the excerpt below. Output category labels that fall under these action types using the fine-grained action list/s above, in the following format: \n\n```json\n[{\"evidence\": \"turn number/s\", \"category\": \"hint\"}, {\"evidence\": \"turn number/s\", \"category\": \"reduce_options\"}]\n```\n\nIf there are no relevant category labels for this moment, output an empty list.\n\nEXCERPT:\n20 excerpt of aaa {not a slot}\n"
+         }
+        ],
+        "role": "user"
+       }
+      ],
+      "generation_config": {
+       "max_output_tokens": 65536
+      }
+     }
+    },
+    {
+     "key": "taxonomy__bbb",
+     "request": {
+      "contents": [
+       {
+        "parts": [
+         {
+          "text": "You will be given a K-12 tutoring transcript that contains a cut point. Your job is to determine what pedagogical strategy a tutor is employing after the cut point. Identify which of the listed action types are occurring after the cut point, and output a json of turn numbers and labels. \n\n**How to differentiate guiding questions (scaffolding) from rigor-pushing questions?**\n- Guiding questions usually narrow the problem space: break a problem into pieces or draw attention to specific content that makes a problem accessible. Example: \u201cWhat do we multiply first?\u201d \u2192 scaffolding\n- Justify & explain reasoning questions require higher cognitive demand and critical thinking. These questions ask students to make arguments, engage with higher-level concepts, consider why and how, or generalize their thinking. Example: \u201cWhy do we multiply before we add here?\u201d \u2192 push for rigor\n- Other rigor-pushing questions may ask the student to complete a problem or key step independently.\n\n## Action types\n\n### Scaffolding\n\n`guiding_questions`: The tutor asks guiding questions to lead the student towards the solution.\n`break_into_steps`: The tutor breaks down a problem into steps for the student.\n`re_explain`: The tutor re-explains a concept or a procedure, e.g. using a different or simpler example, metaphor, or phrasing.\n`model_example`: The tutor models an example solution.\n`co_solve`: The tutor co-solves or fills in some of the steps for the student. \n`draw_diagram`: The tutor draws a diagram to support an explanation of a concept.\n`diff_rep`: The tutor provides a different representation of the problem (e.g. a different form or a real-world analogy) for the student.\n`reduce_options`: The tutor narrows the problem's choices, by eliminating some answer options for the student. \n`hint`: The tutor gives the student a hint.\n`remind_prior_problem`: The tutor reminds the student of a similar prior problem.\n`highlight_problem_text`: The tutor highlights parts of the problem's text.\n`give_answer`: The tutor gives away the answer.\n`state_correction`: The tutor fixes an error for the student.\n\n### Rigor\n\n`justify_explain`: The tutor asks the student to justify or explain an answer, solution, or process, including why an answer may be wrong, and holds this demand open for the student.\n`withdraw_support`: The tutor withdraws support and the student works on problems independently and/or struggles productively.\n`increase_complexity`: The tutor increases problem complexity or difficulty, e.g. whole numbers to decimals, one-step to two-step equations.\n`define_term`: The tutor asks the student to define and/or use a key mathematical term.\n`find_fix_errors`: The tutor asks the student to find and fix their own errors.\n\n## Instructions\n\nA previous pass by an LM already determined that the tutor has decided to push for rigor *after the cut point* in the excerpt below. Output category labels that fall under these action types using the fine-grained action list/s above, in the following format: \n\n```json\n[{\"evidence\": \"turn number/s\", \"category\": \"hint\"}, {\"evidence\": \"turn number/s\", \"category\": \"reduce_options\"}]\n```\n\nIf there are no relevant category labels for this moment, output an empty list.\n\nEXCERPT:\n20 excerpt of bbb {not a slot}\n"
+         }
+        ],
+        "role": "user"
+       }
+      ],
+      "generation_config": {
+       "max_output_tokens": 65536
+      }
+     }
+    },
+    {
+     "key": "taxonomy__ccc",
+     "request": {
+      "contents": [
+       {
+        "parts": [
+         {
+          "text": "You will be given a K-12 tutoring transcript that contains a cut point. Your job is to determine what pedagogical strategy a tutor is employing after the cut point. Identify which of the listed action types are occurring after the cut point, and output a json of turn numbers and labels. \n\n**How to differentiate guiding questions (scaffolding) from rigor-pushing questions?**\n- Guiding questions usually narrow the problem space: break a problem into pieces or draw attention to specific content that makes a problem accessible. Example: \u201cWhat do we multiply first?\u201d \u2192 scaffolding\n- Justify & explain reasoning questions require higher cognitive demand and critical thinking. These questions ask students to make arguments, engage with higher-level concepts, consider why and how, or generalize their thinking. Example: \u201cWhy do we multiply before we add here?\u201d \u2192 push for rigor\n- Other rigor-pushing questions may ask the student to complete a problem or key step independently.\n\n## Action types\n\n### Scaffolding\n\n`guiding_questions`: The tutor asks guiding questions to lead the student towards the solution.\n`break_into_steps`: The tutor breaks down a problem into steps for the student.\n`re_explain`: The tutor re-explains a concept or a procedure, e.g. using a different or simpler example, metaphor, or phrasing.\n`model_example`: The tutor models an example solution.\n`co_solve`: The tutor co-solves or fills in some of the steps for the student. \n`draw_diagram`: The tutor draws a diagram to support an explanation of a concept.\n`diff_rep`: The tutor provides a different representation of the problem (e.g. a different form or a real-world analogy) for the student.\n`reduce_options`: The tutor narrows the problem's choices, by eliminating some answer options for the student. \n`hint`: The tutor gives the student a hint.\n`remind_prior_problem`: The tutor reminds the student of a similar prior problem.\n`highlight_problem_text`: The tutor highlights parts of the problem's text.\n`give_answer`: The tutor gives away the answer.\n`state_correction`: The tutor fixes an error for the student.\n\n### Rigor\n\n`justify_explain`: The tutor asks the student to justify or explain an answer, solution, or process, including why an answer may be wrong, and holds this demand open for the student.\n`withdraw_support`: The tutor withdraws support and the student works on problems independently and/or struggles productively.\n`increase_complexity`: The tutor increases problem complexity or difficulty, e.g. whole numbers to decimals, one-step to two-step equations.\n`define_term`: The tutor asks the student to define and/or use a key mathematical term.\n`find_fix_errors`: The tutor asks the student to find and fix their own errors.\n\n## Instructions\n\nA previous pass by an LM already determined that the tutor has decided to scaffold and push for rigor *after the cut point* in the excerpt below. Output category labels that fall under these action types using the fine-grained action list/s above, in the following format: \n\n```json\n[{\"evidence\": \"turn number/s\", \"category\": \"hint\"}, {\"evidence\": \"turn number/s\", \"category\": \"reduce_options\"}]\n```\n\nIf there are no relevant category labels for this moment, output an empty list.\n\nEXCERPT:\n20 excerpt of ccc {not a slot}\n"
+         }
+        ],
+        "role": "user"
+       }
+      ],
+      "generation_config": {
+       "max_output_tokens": 65536
+      }
+     }
+    },
+    {
+     "key": "taxonomy__eee",
+     "request": {
+      "contents": [
+       {
+        "parts": [
+         {
+          "text": "You will be given a K-12 tutoring transcript that contains a cut point. Your job is to determine what pedagogical strategy a tutor is employing after the cut point. Identify which of the listed action types are occurring after the cut point, and output a json of turn numbers and labels. \n\n**How to differentiate guiding questions (scaffolding) from rigor-pushing questions?**\n- Guiding questions usually narrow the problem space: break a problem into pieces or draw attention to specific content that makes a problem accessible. Example: \u201cWhat do we multiply first?\u201d \u2192 scaffolding\n- Justify & explain reasoning questions require higher cognitive demand and critical thinking. These questions ask students to make arguments, engage with higher-level concepts, consider why and how, or generalize their thinking. Example: \u201cWhy do we multiply before we add here?\u201d \u2192 push for rigor\n- Other rigor-pushing questions may ask the student to complete a problem or key step independently.\n\n## Action types\n\n### Scaffolding\n\n`guiding_questions`: The tutor asks guiding questions to lead the student towards the solution.\n`break_into_steps`: The tutor breaks down a problem into steps for the student.\n`re_explain`: The tutor re-explains a concept or a procedure, e.g. using a different or simpler example, metaphor, or phrasing.\n`model_example`: The tutor models an example solution.\n`co_solve`: The tutor co-solves or fills in some of the steps for the student. \n`draw_diagram`: The tutor draws a diagram to support an explanation of a concept.\n`diff_rep`: The tutor provides a different representation of the problem (e.g. a different form or a real-world analogy) for the student.\n`reduce_options`: The tutor narrows the problem's choices, by eliminating some answer options for the student. \n`hint`: The tutor gives the student a hint.\n`remind_prior_problem`: The tutor reminds the student of a similar prior problem.\n`highlight_problem_text`: The tutor highlights parts of the problem's text.\n`give_answer`: The tutor gives away the answer.\n`state_correction`: The tutor fixes an error for the student.\n\n### Rigor\n\n`justify_explain`: The tutor asks the student to justify or explain an answer, solution, or process, including why an answer may be wrong, and holds this demand open for the student.\n`withdraw_support`: The tutor withdraws support and the student works on problems independently and/or struggles productively.\n`increase_complexity`: The tutor increases problem complexity or difficulty, e.g. whole numbers to decimals, one-step to two-step equations.\n`define_term`: The tutor asks the student to define and/or use a key mathematical term.\n`find_fix_errors`: The tutor asks the student to find and fix their own errors.\n\n## Instructions\n\nA previous pass by an LM already determined that the tutor has decided to push for rigor *after the cut point* in the excerpt below. Output category labels that fall under these action types using the fine-grained action list/s above, in the following format: \n\n```json\n[{\"evidence\": \"turn number/s\", \"category\": \"hint\"}, {\"evidence\": \"turn number/s\", \"category\": \"reduce_options\"}]\n```\n\nIf there are no relevant category labels for this moment, output an empty list.\n\nEXCERPT:\n20 excerpt of eee {not a slot}\n"
+         }
+        ],
+        "role": "user"
+       }
+      ],
+      "generation_config": {
+       "max_output_tokens": 65536
+      }
+     }
+    }
+   ],
+   "records": {
+    "iteration": [
+     {
+      "action": "scaffold",
+      "asked": true,
+      "context_turns": "20",
+      "conversation_id": "c-aaa",
+      "labels": {
+       "rigor_present": false,
+       "scaffolding_present": true
+      },
+      "model": "vendor/golden-model",
+      "moment_id": "aaa",
+      "post_cut_dialogue_rows": 1,
+      "post_cut_rows": 2,
+      "prompt": "prompts/v2/classify_action/2/classify_action.md",
+      "prompt_sha256": "814b7ffe248e913906714dae2e2ddc753e440a1b879a8a9d08e89d095b41cfff",
+      "prompt_version": "2",
+      "provider": "anthropic",
+      "situation_type": "scaffold_only",
+      "skipped": null,
+      "split": "iteration",
+      "taxonomy": {
+       "actions": [
+        {
+         "category": "hint",
+         "evidence": "3",
+         "family": "scaffolding"
+        },
+        {
+         "category": "made_up",
+         "evidence": "4",
+         "family": null
+        }
+       ],
+       "error": null,
+       "parse_error": false,
+       "raw": "[{\"evidence\": \"3\", \"category\": \"hint\"}, {\"evidence\": \"4\", \"category\": \"made_up\"}]",
+       "unknown_categories": [
+        "made_up"
+       ],
+       "usage": {
+        "input_tokens": 10,
+        "output_tokens": 2,
+        "total_tokens": 12
+       }
+      },
+      "thinking": {
+       "effort": "high",
+       "thinking": {
+        "type": "adaptive"
+       }
+      },
+      "transcript_id": "t-aaa",
+      "usage": {
+       "input_tokens": 10,
+       "output_tokens": 2,
+       "total_tokens": 12
+      }
+     },
+     {
+      "action": "push for rigor",
+      "asked": true,
+      "context_turns": "20",
+      "conversation_id": "c-bbb",
+      "labels": {
+       "rigor_present": true,
+       "scaffolding_present": false
+      },
+      "model": "vendor/golden-model",
+      "moment_id": "bbb",
+      "post_cut_dialogue_rows": 1,
+      "post_cut_rows": 2,
+      "prompt": "prompts/v2/classify_action/2/classify_action.md",
+      "prompt_sha256": "814b7ffe248e913906714dae2e2ddc753e440a1b879a8a9d08e89d095b41cfff",
+      "prompt_version": "2",
+      "provider": "anthropic",
+      "situation_type": "rigor_maj",
+      "skipped": null,
+      "split": "iteration",
+      "taxonomy": {
+       "actions": null,
+       "error": null,
+       "parse_error": true,
+       "raw": "not json",
+       "unknown_categories": [],
+       "usage": {
+        "total_tokens": 3
+       }
+      },
+      "thinking": {
+       "effort": "high",
+       "thinking": {
+        "type": "adaptive"
+       }
+      },
+      "transcript_id": "t-bbb",
+      "usage": {
+       "total_tokens": 3
+      }
+     },
+     {
+      "action": "scaffold and push for rigor",
+      "asked": true,
+      "context_turns": "20",
+      "conversation_id": "c-ccc",
+      "labels": {
+       "rigor_present": true,
+       "scaffolding_present": true
+      },
+      "model": "vendor/golden-model",
+      "moment_id": "ccc",
+      "post_cut_dialogue_rows": 1,
+      "post_cut_rows": 2,
+      "prompt": "prompts/v2/classify_action/2/classify_action.md",
+      "prompt_sha256": "814b7ffe248e913906714dae2e2ddc753e440a1b879a8a9d08e89d095b41cfff",
+      "prompt_version": "2",
+      "provider": "anthropic",
+      "situation_type": "fifty_fifty",
+      "skipped": null,
+      "split": "iteration",
+      "taxonomy": {
+       "actions": null,
+       "error": "overloaded",
+       "parse_error": true,
+       "raw": "",
+       "unknown_categories": [],
+       "usage": {
+        "input_tokens": 0,
+        "output_tokens": 0,
+        "total_tokens": 0
+       }
+      },
+      "thinking": {
+       "effort": "high",
+       "thinking": {
+        "type": "adaptive"
+       }
+      },
+      "transcript_id": "t-ccc",
+      "usage": {
+       "input_tokens": 0,
+       "output_tokens": 0,
+       "total_tokens": 0
+      }
+     },
+     {
+      "action": null,
+      "asked": false,
+      "context_turns": "20",
+      "conversation_id": "c-fff",
+      "labels": {
+       "rigor_present": false,
+       "scaffolding_present": false
+      },
+      "model": "vendor/golden-model",
+      "moment_id": "fff",
+      "post_cut_dialogue_rows": 1,
+      "post_cut_rows": 2,
+      "prompt": "prompts/v2/classify_action/2/classify_action.md",
+      "prompt_sha256": "814b7ffe248e913906714dae2e2ddc753e440a1b879a8a9d08e89d095b41cfff",
+      "prompt_version": "2",
+      "provider": "anthropic",
+      "situation_type": "rigor_only",
+      "skipped": "gold_marks_neither",
+      "split": "iteration",
+      "taxonomy": null,
+      "thinking": {
+       "effort": "high",
+       "thinking": {
+        "type": "adaptive"
+       }
+      },
+      "transcript_id": "t-fff",
+      "usage": {
+       "input_tokens": 0,
+       "output_tokens": 0,
+       "total_tokens": 0
+      }
+     }
+    ],
+    "test": [
+     {
+      "action": null,
+      "asked": false,
+      "context_turns": "20",
+      "conversation_id": "c-ddd",
+      "labels": {
+       "rigor_present": false,
+       "scaffolding_present": true
+      },
+      "model": "vendor/golden-model",
+      "moment_id": "ddd",
+      "post_cut_dialogue_rows": 1,
+      "post_cut_rows": 0,
+      "prompt": "prompts/v2/classify_action/2/classify_action.md",
+      "prompt_sha256": "814b7ffe248e913906714dae2e2ddc753e440a1b879a8a9d08e89d095b41cfff",
+      "prompt_version": "2",
+      "provider": "anthropic",
+      "situation_type": "scaffold_maj",
+      "skipped": "no_post_cut_content",
+      "split": "test",
+      "taxonomy": null,
+      "thinking": {
+       "effort": "high",
+       "thinking": {
+        "type": "adaptive"
+       }
+      },
+      "transcript_id": "t-ddd",
+      "usage": {
+       "input_tokens": 0,
+       "output_tokens": 0,
+       "total_tokens": 0
+      }
+     },
+     {
+      "action": "push for rigor",
+      "asked": true,
+      "context_turns": "20",
+      "conversation_id": "c-eee",
+      "labels": {
+       "rigor_present": true,
+       "scaffolding_present": false
+      },
+      "model": "vendor/golden-model",
+      "moment_id": "eee",
+      "post_cut_dialogue_rows": 1,
+      "post_cut_rows": 2,
+      "prompt": "prompts/v2/classify_action/2/classify_action.md",
+      "prompt_sha256": "814b7ffe248e913906714dae2e2ddc753e440a1b879a8a9d08e89d095b41cfff",
+      "prompt_version": "2",
+      "provider": "anthropic",
+      "situation_type": "rigor_only",
+      "skipped": null,
+      "split": "test",
+      "taxonomy": {
+       "actions": [
+        {
+         "category": "define_term",
+         "evidence": "5",
+         "family": "rigor"
+        }
+       ],
+       "error": null,
+       "parse_error": false,
+       "raw": "```json\n[{\"evidence\": \"5\", \"category\": \"define_term\"}]\n```",
+       "unknown_categories": [],
+       "usage": {
+        "input_tokens": 0,
+        "output_tokens": 0,
+        "total_tokens": 0
+       }
+      },
+      "thinking": {
+       "effort": "high",
+       "thinking": {
+        "type": "adaptive"
+       }
+      },
+      "transcript_id": "t-eee",
+      "usage": {
+       "input_tokens": 0,
+       "output_tokens": 0,
+       "total_tokens": 0
+      }
+     }
+    ]
+   },
+   "report": "\nPredictions written\n\n  model:   vendor/golden-model (effort: high, thinking: {'type': 'adaptive'})\n  prompt:  prompts/v2/classify_action/2/classify_action.md (version 2)\n  excerpt: 20\n  output:  out/\n\n  asked: 4\n    scaffold and push for rigor       1\n    scaffold                          1\n    push for rigor                    2\n  not asked, nothing after the cut:  1\n  not asked, gold marks neither:     1\n\n  labels returned:\n    hint                              1\n    made_up                           1  (not in prompt)\n    define_term                       1\n\n  unparsed responses: 2\n\n  tokens: 10 in / 2 out / 15 total\n"
+  },
+  "full": {
+   "counts": {
+    "asked": 4,
+    "asked_push for rigor": 2,
+    "asked_scaffold": 1,
+    "asked_scaffold and push for rigor": 1,
+    "gold_marks_neither": 1,
+    "no_post_cut_content": 1,
+    "unparsed": 2
+   },
+   "dry_run_report": "\nDRY RUN -- no API calls made, nothing written\n\n  model:   vendor/golden-model (effort: high, thinking: {'type': 'adaptive'})\n  prompt:  prompts/v2/classify_action/2/classify_action.md (version 2)\n  excerpt: full\n  output:  out/\n\n  requests: 4\n    scaffold and push for rigor       1\n    scaffold                          1\n    push for rigor                    2\n  not asked, nothing after the cut:  1\n  not asked, gold marks neither:     1\n",
+   "entries": [
+    {
+     "key": "taxonomy__aaa",
+     "request": {
+      "contents": [
+       {
+        "parts": [
+         {
+          "text": "You will be given a K-12 tutoring transcript that contains a cut point. Your job is to determine what pedagogical strategy a tutor is employing after the cut point. Identify which of the listed action types are occurring after the cut point, and output a json of turn numbers and labels. \n\n**How to differentiate guiding questions (scaffolding) from rigor-pushing questions?**\n- Guiding questions usually narrow the problem space: break a problem into pieces or draw attention to specific content that makes a problem accessible. Example: \u201cWhat do we multiply first?\u201d \u2192 scaffolding\n- Justify & explain reasoning questions require higher cognitive demand and critical thinking. These questions ask students to make arguments, engage with higher-level concepts, consider why and how, or generalize their thinking. Example: \u201cWhy do we multiply before we add here?\u201d \u2192 push for rigor\n- Other rigor-pushing questions may ask the student to complete a problem or key step independently.\n\n## Action types\n\n### Scaffolding\n\n`guiding_questions`: The tutor asks guiding questions to lead the student towards the solution.\n`break_into_steps`: The tutor breaks down a problem into steps for the student.\n`re_explain`: The tutor re-explains a concept or a procedure, e.g. using a different or simpler example, metaphor, or phrasing.\n`model_example`: The tutor models an example solution.\n`co_solve`: The tutor co-solves or fills in some of the steps for the student. \n`draw_diagram`: The tutor draws a diagram to support an explanation of a concept.\n`diff_rep`: The tutor provides a different representation of the problem (e.g. a different form or a real-world analogy) for the student.\n`reduce_options`: The tutor narrows the problem's choices, by eliminating some answer options for the student. \n`hint`: The tutor gives the student a hint.\n`remind_prior_problem`: The tutor reminds the student of a similar prior problem.\n`highlight_problem_text`: The tutor highlights parts of the problem's text.\n`give_answer`: The tutor gives away the answer.\n`state_correction`: The tutor fixes an error for the student.\n\n### Rigor\n\n`justify_explain`: The tutor asks the student to justify or explain an answer, solution, or process, including why an answer may be wrong, and holds this demand open for the student.\n`withdraw_support`: The tutor withdraws support and the student works on problems independently and/or struggles productively.\n`increase_complexity`: The tutor increases problem complexity or difficulty, e.g. whole numbers to decimals, one-step to two-step equations.\n`define_term`: The tutor asks the student to define and/or use a key mathematical term.\n`find_fix_errors`: The tutor asks the student to find and fix their own errors.\n\n## Instructions\n\nA previous pass by an LM already determined that the tutor has decided to scaffold *after the cut point* in the excerpt below. Output category labels that fall under these action types using the fine-grained action list/s above, in the following format: \n\n```json\n[{\"evidence\": \"turn number/s\", \"category\": \"hint\"}, {\"evidence\": \"turn number/s\", \"category\": \"reduce_options\"}]\n```\n\nIf there are no relevant category labels for this moment, output an empty list.\n\nEXCERPT:\nfull excerpt of aaa {not a slot}\n"
+         }
+        ],
+        "role": "user"
+       }
+      ],
+      "generation_config": {
+       "max_output_tokens": 65536
+      }
+     }
+    },
+    {
+     "key": "taxonomy__bbb",
+     "request": {
+      "contents": [
+       {
+        "parts": [
+         {
+          "text": "You will be given a K-12 tutoring transcript that contains a cut point. Your job is to determine what pedagogical strategy a tutor is employing after the cut point. Identify which of the listed action types are occurring after the cut point, and output a json of turn numbers and labels. \n\n**How to differentiate guiding questions (scaffolding) from rigor-pushing questions?**\n- Guiding questions usually narrow the problem space: break a problem into pieces or draw attention to specific content that makes a problem accessible. Example: \u201cWhat do we multiply first?\u201d \u2192 scaffolding\n- Justify & explain reasoning questions require higher cognitive demand and critical thinking. These questions ask students to make arguments, engage with higher-level concepts, consider why and how, or generalize their thinking. Example: \u201cWhy do we multiply before we add here?\u201d \u2192 push for rigor\n- Other rigor-pushing questions may ask the student to complete a problem or key step independently.\n\n## Action types\n\n### Scaffolding\n\n`guiding_questions`: The tutor asks guiding questions to lead the student towards the solution.\n`break_into_steps`: The tutor breaks down a problem into steps for the student.\n`re_explain`: The tutor re-explains a concept or a procedure, e.g. using a different or simpler example, metaphor, or phrasing.\n`model_example`: The tutor models an example solution.\n`co_solve`: The tutor co-solves or fills in some of the steps for the student. \n`draw_diagram`: The tutor draws a diagram to support an explanation of a concept.\n`diff_rep`: The tutor provides a different representation of the problem (e.g. a different form or a real-world analogy) for the student.\n`reduce_options`: The tutor narrows the problem's choices, by eliminating some answer options for the student. \n`hint`: The tutor gives the student a hint.\n`remind_prior_problem`: The tutor reminds the student of a similar prior problem.\n`highlight_problem_text`: The tutor highlights parts of the problem's text.\n`give_answer`: The tutor gives away the answer.\n`state_correction`: The tutor fixes an error for the student.\n\n### Rigor\n\n`justify_explain`: The tutor asks the student to justify or explain an answer, solution, or process, including why an answer may be wrong, and holds this demand open for the student.\n`withdraw_support`: The tutor withdraws support and the student works on problems independently and/or struggles productively.\n`increase_complexity`: The tutor increases problem complexity or difficulty, e.g. whole numbers to decimals, one-step to two-step equations.\n`define_term`: The tutor asks the student to define and/or use a key mathematical term.\n`find_fix_errors`: The tutor asks the student to find and fix their own errors.\n\n## Instructions\n\nA previous pass by an LM already determined that the tutor has decided to push for rigor *after the cut point* in the excerpt below. Output category labels that fall under these action types using the fine-grained action list/s above, in the following format: \n\n```json\n[{\"evidence\": \"turn number/s\", \"category\": \"hint\"}, {\"evidence\": \"turn number/s\", \"category\": \"reduce_options\"}]\n```\n\nIf there are no relevant category labels for this moment, output an empty list.\n\nEXCERPT:\nfull excerpt of bbb {not a slot}\n"
+         }
+        ],
+        "role": "user"
+       }
+      ],
+      "generation_config": {
+       "max_output_tokens": 65536
+      }
+     }
+    },
+    {
+     "key": "taxonomy__ccc",
+     "request": {
+      "contents": [
+       {
+        "parts": [
+         {
+          "text": "You will be given a K-12 tutoring transcript that contains a cut point. Your job is to determine what pedagogical strategy a tutor is employing after the cut point. Identify which of the listed action types are occurring after the cut point, and output a json of turn numbers and labels. \n\n**How to differentiate guiding questions (scaffolding) from rigor-pushing questions?**\n- Guiding questions usually narrow the problem space: break a problem into pieces or draw attention to specific content that makes a problem accessible. Example: \u201cWhat do we multiply first?\u201d \u2192 scaffolding\n- Justify & explain reasoning questions require higher cognitive demand and critical thinking. These questions ask students to make arguments, engage with higher-level concepts, consider why and how, or generalize their thinking. Example: \u201cWhy do we multiply before we add here?\u201d \u2192 push for rigor\n- Other rigor-pushing questions may ask the student to complete a problem or key step independently.\n\n## Action types\n\n### Scaffolding\n\n`guiding_questions`: The tutor asks guiding questions to lead the student towards the solution.\n`break_into_steps`: The tutor breaks down a problem into steps for the student.\n`re_explain`: The tutor re-explains a concept or a procedure, e.g. using a different or simpler example, metaphor, or phrasing.\n`model_example`: The tutor models an example solution.\n`co_solve`: The tutor co-solves or fills in some of the steps for the student. \n`draw_diagram`: The tutor draws a diagram to support an explanation of a concept.\n`diff_rep`: The tutor provides a different representation of the problem (e.g. a different form or a real-world analogy) for the student.\n`reduce_options`: The tutor narrows the problem's choices, by eliminating some answer options for the student. \n`hint`: The tutor gives the student a hint.\n`remind_prior_problem`: The tutor reminds the student of a similar prior problem.\n`highlight_problem_text`: The tutor highlights parts of the problem's text.\n`give_answer`: The tutor gives away the answer.\n`state_correction`: The tutor fixes an error for the student.\n\n### Rigor\n\n`justify_explain`: The tutor asks the student to justify or explain an answer, solution, or process, including why an answer may be wrong, and holds this demand open for the student.\n`withdraw_support`: The tutor withdraws support and the student works on problems independently and/or struggles productively.\n`increase_complexity`: The tutor increases problem complexity or difficulty, e.g. whole numbers to decimals, one-step to two-step equations.\n`define_term`: The tutor asks the student to define and/or use a key mathematical term.\n`find_fix_errors`: The tutor asks the student to find and fix their own errors.\n\n## Instructions\n\nA previous pass by an LM already determined that the tutor has decided to scaffold and push for rigor *after the cut point* in the excerpt below. Output category labels that fall under these action types using the fine-grained action list/s above, in the following format: \n\n```json\n[{\"evidence\": \"turn number/s\", \"category\": \"hint\"}, {\"evidence\": \"turn number/s\", \"category\": \"reduce_options\"}]\n```\n\nIf there are no relevant category labels for this moment, output an empty list.\n\nEXCERPT:\nfull excerpt of ccc {not a slot}\n"
+         }
+        ],
+        "role": "user"
+       }
+      ],
+      "generation_config": {
+       "max_output_tokens": 65536
+      }
+     }
+    },
+    {
+     "key": "taxonomy__eee",
+     "request": {
+      "contents": [
+       {
+        "parts": [
+         {
+          "text": "You will be given a K-12 tutoring transcript that contains a cut point. Your job is to determine what pedagogical strategy a tutor is employing after the cut point. Identify which of the listed action types are occurring after the cut point, and output a json of turn numbers and labels. \n\n**How to differentiate guiding questions (scaffolding) from rigor-pushing questions?**\n- Guiding questions usually narrow the problem space: break a problem into pieces or draw attention to specific content that makes a problem accessible. Example: \u201cWhat do we multiply first?\u201d \u2192 scaffolding\n- Justify & explain reasoning questions require higher cognitive demand and critical thinking. These questions ask students to make arguments, engage with higher-level concepts, consider why and how, or generalize their thinking. Example: \u201cWhy do we multiply before we add here?\u201d \u2192 push for rigor\n- Other rigor-pushing questions may ask the student to complete a problem or key step independently.\n\n## Action types\n\n### Scaffolding\n\n`guiding_questions`: The tutor asks guiding questions to lead the student towards the solution.\n`break_into_steps`: The tutor breaks down a problem into steps for the student.\n`re_explain`: The tutor re-explains a concept or a procedure, e.g. using a different or simpler example, metaphor, or phrasing.\n`model_example`: The tutor models an example solution.\n`co_solve`: The tutor co-solves or fills in some of the steps for the student. \n`draw_diagram`: The tutor draws a diagram to support an explanation of a concept.\n`diff_rep`: The tutor provides a different representation of the problem (e.g. a different form or a real-world analogy) for the student.\n`reduce_options`: The tutor narrows the problem's choices, by eliminating some answer options for the student. \n`hint`: The tutor gives the student a hint.\n`remind_prior_problem`: The tutor reminds the student of a similar prior problem.\n`highlight_problem_text`: The tutor highlights parts of the problem's text.\n`give_answer`: The tutor gives away the answer.\n`state_correction`: The tutor fixes an error for the student.\n\n### Rigor\n\n`justify_explain`: The tutor asks the student to justify or explain an answer, solution, or process, including why an answer may be wrong, and holds this demand open for the student.\n`withdraw_support`: The tutor withdraws support and the student works on problems independently and/or struggles productively.\n`increase_complexity`: The tutor increases problem complexity or difficulty, e.g. whole numbers to decimals, one-step to two-step equations.\n`define_term`: The tutor asks the student to define and/or use a key mathematical term.\n`find_fix_errors`: The tutor asks the student to find and fix their own errors.\n\n## Instructions\n\nA previous pass by an LM already determined that the tutor has decided to push for rigor *after the cut point* in the excerpt below. Output category labels that fall under these action types using the fine-grained action list/s above, in the following format: \n\n```json\n[{\"evidence\": \"turn number/s\", \"category\": \"hint\"}, {\"evidence\": \"turn number/s\", \"category\": \"reduce_options\"}]\n```\n\nIf there are no relevant category labels for this moment, output an empty list.\n\nEXCERPT:\nfull excerpt of eee {not a slot}\n"
+         }
+        ],
+        "role": "user"
+       }
+      ],
+      "generation_config": {
+       "max_output_tokens": 65536
+      }
+     }
+    }
+   ],
+   "records": {
+    "iteration": [
+     {
+      "action": "scaffold",
+      "asked": true,
+      "context_turns": "full",
+      "conversation_id": "c-aaa",
+      "labels": {
+       "rigor_present": false,
+       "scaffolding_present": true
+      },
+      "model": "vendor/golden-model",
+      "moment_id": "aaa",
+      "post_cut_dialogue_rows": 1,
+      "post_cut_rows": 2,
+      "prompt": "prompts/v2/classify_action/2/classify_action.md",
+      "prompt_sha256": "814b7ffe248e913906714dae2e2ddc753e440a1b879a8a9d08e89d095b41cfff",
+      "prompt_version": "2",
+      "provider": "anthropic",
+      "situation_type": "scaffold_only",
+      "skipped": null,
+      "split": "iteration",
+      "taxonomy": {
+       "actions": [
+        {
+         "category": "hint",
+         "evidence": "3",
+         "family": "scaffolding"
+        },
+        {
+         "category": "made_up",
+         "evidence": "4",
+         "family": null
+        }
+       ],
+       "error": null,
+       "parse_error": false,
+       "raw": "[{\"evidence\": \"3\", \"category\": \"hint\"}, {\"evidence\": \"4\", \"category\": \"made_up\"}]",
+       "unknown_categories": [
+        "made_up"
+       ],
+       "usage": {
+        "input_tokens": 10,
+        "output_tokens": 2,
+        "total_tokens": 12
+       }
+      },
+      "thinking": {
+       "effort": "high",
+       "thinking": {
+        "type": "adaptive"
+       }
+      },
+      "transcript_id": "t-aaa",
+      "usage": {
+       "input_tokens": 10,
+       "output_tokens": 2,
+       "total_tokens": 12
+      }
+     },
+     {
+      "action": "push for rigor",
+      "asked": true,
+      "context_turns": "full",
+      "conversation_id": "c-bbb",
+      "labels": {
+       "rigor_present": true,
+       "scaffolding_present": false
+      },
+      "model": "vendor/golden-model",
+      "moment_id": "bbb",
+      "post_cut_dialogue_rows": 1,
+      "post_cut_rows": 2,
+      "prompt": "prompts/v2/classify_action/2/classify_action.md",
+      "prompt_sha256": "814b7ffe248e913906714dae2e2ddc753e440a1b879a8a9d08e89d095b41cfff",
+      "prompt_version": "2",
+      "provider": "anthropic",
+      "situation_type": "rigor_maj",
+      "skipped": null,
+      "split": "iteration",
+      "taxonomy": {
+       "actions": null,
+       "error": null,
+       "parse_error": true,
+       "raw": "not json",
+       "unknown_categories": [],
+       "usage": {
+        "total_tokens": 3
+       }
+      },
+      "thinking": {
+       "effort": "high",
+       "thinking": {
+        "type": "adaptive"
+       }
+      },
+      "transcript_id": "t-bbb",
+      "usage": {
+       "total_tokens": 3
+      }
+     },
+     {
+      "action": "scaffold and push for rigor",
+      "asked": true,
+      "context_turns": "full",
+      "conversation_id": "c-ccc",
+      "labels": {
+       "rigor_present": true,
+       "scaffolding_present": true
+      },
+      "model": "vendor/golden-model",
+      "moment_id": "ccc",
+      "post_cut_dialogue_rows": 1,
+      "post_cut_rows": 2,
+      "prompt": "prompts/v2/classify_action/2/classify_action.md",
+      "prompt_sha256": "814b7ffe248e913906714dae2e2ddc753e440a1b879a8a9d08e89d095b41cfff",
+      "prompt_version": "2",
+      "provider": "anthropic",
+      "situation_type": "fifty_fifty",
+      "skipped": null,
+      "split": "iteration",
+      "taxonomy": {
+       "actions": null,
+       "error": "overloaded",
+       "parse_error": true,
+       "raw": "",
+       "unknown_categories": [],
+       "usage": {
+        "input_tokens": 0,
+        "output_tokens": 0,
+        "total_tokens": 0
+       }
+      },
+      "thinking": {
+       "effort": "high",
+       "thinking": {
+        "type": "adaptive"
+       }
+      },
+      "transcript_id": "t-ccc",
+      "usage": {
+       "input_tokens": 0,
+       "output_tokens": 0,
+       "total_tokens": 0
+      }
+     },
+     {
+      "action": null,
+      "asked": false,
+      "context_turns": "full",
+      "conversation_id": "c-fff",
+      "labels": {
+       "rigor_present": false,
+       "scaffolding_present": false
+      },
+      "model": "vendor/golden-model",
+      "moment_id": "fff",
+      "post_cut_dialogue_rows": 1,
+      "post_cut_rows": 2,
+      "prompt": "prompts/v2/classify_action/2/classify_action.md",
+      "prompt_sha256": "814b7ffe248e913906714dae2e2ddc753e440a1b879a8a9d08e89d095b41cfff",
+      "prompt_version": "2",
+      "provider": "anthropic",
+      "situation_type": "rigor_only",
+      "skipped": "gold_marks_neither",
+      "split": "iteration",
+      "taxonomy": null,
+      "thinking": {
+       "effort": "high",
+       "thinking": {
+        "type": "adaptive"
+       }
+      },
+      "transcript_id": "t-fff",
+      "usage": {
+       "input_tokens": 0,
+       "output_tokens": 0,
+       "total_tokens": 0
+      }
+     }
+    ],
+    "test": [
+     {
+      "action": null,
+      "asked": false,
+      "context_turns": "full",
+      "conversation_id": "c-ddd",
+      "labels": {
+       "rigor_present": false,
+       "scaffolding_present": true
+      },
+      "model": "vendor/golden-model",
+      "moment_id": "ddd",
+      "post_cut_dialogue_rows": 1,
+      "post_cut_rows": 0,
+      "prompt": "prompts/v2/classify_action/2/classify_action.md",
+      "prompt_sha256": "814b7ffe248e913906714dae2e2ddc753e440a1b879a8a9d08e89d095b41cfff",
+      "prompt_version": "2",
+      "provider": "anthropic",
+      "situation_type": "scaffold_maj",
+      "skipped": "no_post_cut_content",
+      "split": "test",
+      "taxonomy": null,
+      "thinking": {
+       "effort": "high",
+       "thinking": {
+        "type": "adaptive"
+       }
+      },
+      "transcript_id": "t-ddd",
+      "usage": {
+       "input_tokens": 0,
+       "output_tokens": 0,
+       "total_tokens": 0
+      }
+     },
+     {
+      "action": "push for rigor",
+      "asked": true,
+      "context_turns": "full",
+      "conversation_id": "c-eee",
+      "labels": {
+       "rigor_present": true,
+       "scaffolding_present": false
+      },
+      "model": "vendor/golden-model",
+      "moment_id": "eee",
+      "post_cut_dialogue_rows": 1,
+      "post_cut_rows": 2,
+      "prompt": "prompts/v2/classify_action/2/classify_action.md",
+      "prompt_sha256": "814b7ffe248e913906714dae2e2ddc753e440a1b879a8a9d08e89d095b41cfff",
+      "prompt_version": "2",
+      "provider": "anthropic",
+      "situation_type": "rigor_only",
+      "skipped": null,
+      "split": "test",
+      "taxonomy": {
+       "actions": [
+        {
+         "category": "define_term",
+         "evidence": "5",
+         "family": "rigor"
+        }
+       ],
+       "error": null,
+       "parse_error": false,
+       "raw": "```json\n[{\"evidence\": \"5\", \"category\": \"define_term\"}]\n```",
+       "unknown_categories": [],
+       "usage": {
+        "input_tokens": 0,
+        "output_tokens": 0,
+        "total_tokens": 0
+       }
+      },
+      "thinking": {
+       "effort": "high",
+       "thinking": {
+        "type": "adaptive"
+       }
+      },
+      "transcript_id": "t-eee",
+      "usage": {
+       "input_tokens": 0,
+       "output_tokens": 0,
+       "total_tokens": 0
+      }
+     }
+    ]
+   },
+   "report": "\nPredictions written\n\n  model:   vendor/golden-model (effort: high, thinking: {'type': 'adaptive'})\n  prompt:  prompts/v2/classify_action/2/classify_action.md (version 2)\n  excerpt: full\n  output:  out/\n\n  asked: 4\n    scaffold and push for rigor       1\n    scaffold                          1\n    push for rigor                    2\n  not asked, nothing after the cut:  1\n  not asked, gold marks neither:     1\n\n  labels returned:\n    hint                              1\n    made_up                           1  (not in prompt)\n    define_term                       1\n\n  unparsed responses: 2\n\n  tokens: 10 in / 2 out / 15 total\n"
+  }
+ },
+ "latest_version": "2"
+}
