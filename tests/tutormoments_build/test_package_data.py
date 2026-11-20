@@ -2,8 +2,8 @@
 
 Prompts are loaded from package resources at call time, so a file the
 package-data globs miss works in an editable checkout and is absent from a
-wheel. Setuptools globs do not cross directories: ``prompts/v2/*.md`` matches
-nothing under ``prompts/v2/1/``.
+wheel. Setuptools globs do not cross directories: ``prompts/v2/v2_scorer/*.md`` matches
+nothing under ``prompts/v2/v2_scorer/1/``.
 """
 
 import tomllib

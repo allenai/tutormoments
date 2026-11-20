@@ -1,6 +1,6 @@
 """Label the fine-grained tutor actions after the cut in human-human moment excerpts.
 
-Runs ``prompts/v2_helper/classify_action/<version>/classify_action.md`` over the
+Runs ``prompts/v2/classify_action/<version>/classify_action.md`` over the
 excerpts ``excerpts.py`` builds. ``--prompt-version`` defaults to the newest
 numbered version directory present, and each record names the version, path and
 hash of the prompt it was made with. The prompt lists scaffolding and rigor action types and asks which ones
@@ -85,7 +85,7 @@ logger = logging.getLogger("tutormoments_build.v2.taxonomy")
 
 # Numbered version directories, each holding PROMPT_FILE. A bare run uses the
 # newest one present (latest_prompt_version).
-PROMPT_ROOT = "prompts/v2_helper/classify_action"
+PROMPT_ROOT = "prompts/v2/classify_action"
 PROMPT_FILE = "classify_action.md"
 
 DEFAULT_OUT_DIR = "outputs/v2_taxonomy"

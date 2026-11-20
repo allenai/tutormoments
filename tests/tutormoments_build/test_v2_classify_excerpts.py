@@ -70,7 +70,7 @@ def _state(moment_id, facets=None):
         "adjudicators": ["J01"],
         "situation_method": "single",
         "model": "claude-opus-5-5",
-        "prompt": "prompts/v2_helper/student_state.md",
+        "prompt": "prompts/v2/student_state.md",
         "facets": [f"student facet ({moment_id})", "second facet"]
         if facets is None
         else facets,
@@ -289,7 +289,7 @@ def test_a_v8_record_names_where_its_facets_came_from():
         "adjudicators": ["J01"],
         "situation_method": "single",
         "model": "claude-opus-5-5",
-        "prompt": "prompts/v2_helper/student_state.md",
+        "prompt": "prompts/v2/student_state.md",
     }
 
 
@@ -884,7 +884,10 @@ def test_load_prompt_set_reads_the_version_asked_for():
     prompts = C.load_prompt_set("1")
 
     assert prompts.version == "1"
-    assert prompts.paths["action_direction"] == "prompts/v2/1/action_direction.md"
+    assert (
+        prompts.paths["action_direction"]
+        == "prompts/v2/v2_scorer/1/action_direction.md"
+    )
     assert set(prompts.templates) == {"action_direction", "over_scaffolding"}
     assert all(text.strip() for text in prompts.templates.values())
 

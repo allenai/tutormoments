@@ -2,7 +2,7 @@
 
 ``excerpts.py`` creates excerpts.
 
-Using prompts in ``tutormoments_build/prompts/v2/<version>/``:
+Using prompts in ``tutormoments_build/prompts/v2/v2_scorer/<version>/``:
 
   action_direction.md    scaffolding yes/no, rigor yes/no, plus a description
   over-scaffolding.md    over-scaffolding yes/no, plus a description
@@ -96,7 +96,7 @@ DEFAULT_SPLITS = ("iteration",)
 # that produced them. A prompt edit changes what the labels mean, so a run made
 # before it and one made after it are not comparable and must not land in the
 # same file.
-PROMPT_ROOT = "prompts/v2"
+PROMPT_ROOT = "prompts/v2/v2_scorer"
 
 # Version a bare run falls back to when the prompt root cannot be read at all.
 # The real default is the newest version present -- see latest_prompt_version.

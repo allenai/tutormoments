@@ -11,7 +11,7 @@ cut. Per moment those accounts are merged into one situation description:
 Each record stores the ratio, so another cutoff can be assessed without
 re-running.
 
-The merged description fills ``prompts/v2_helper/student_state.md``, which asks
+The merged description fills ``prompts/v2/student_state.md``, which asks
 for a JSON array of standalone facets describing the student's state, behaviour
 and actions. The array is parsed with the ground-truth pipeline's lenient facet
 parser (``tutormoments.scoring._parse_decomposed``).
@@ -79,7 +79,7 @@ logger = logging.getLogger("tutormoments_build.v2.decompose_situation")
 # reasoning parameters as in the benchmark.
 DEFAULT_MODEL = "claude-opus-5-5"
 
-PROMPT_PATH = "prompts/v2_helper/student_state.md"
+PROMPT_PATH = "prompts/v2/student_state.md"
 
 # Accounts at least this similar are treated as one and the longer is kept;
 # otherwise both are kept. Adjudicators often paste the same text and edit it

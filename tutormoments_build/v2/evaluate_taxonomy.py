@@ -39,7 +39,7 @@ Gold names are mapped onto the prompt's (``GOLD_ALIASES``): ``re_explain`` and
 ``simpler_language`` is scored as ``re_explain``. Only gold is remapped, so a
 predicted ``simpler_language`` never matches. Free-text "other" strategies have
 no category and are carried alongside, not compared. The history of these
-mappings is in ``prompts/v2_helper/classify_action/README.md``.
+mappings is in ``prompts/v2/classify_action/README.md``.
 
 A family's strategies count as gold only where the moment's gold label marks
 that family present (``FAMILY_LABELS``): scaffolding strategies when
@@ -116,7 +116,7 @@ logger = logging.getLogger("tutormoments_build.v2.evaluate_taxonomy")
 DEFAULT_GROUND_TRUTH_DIR = "data/ground_truth"
 
 # Gold strategy name -> the prompt's category name. Gold only: predictions are
-# not remapped. Keep prompts/v2_helper/classify_action/README.md in sync.
+# not remapped. Keep prompts/v2/classify_action/README.md in sync.
 GOLD_ALIASES = {
     "re_explain_procedure": "re_explain",
     "different_representation": "diff_rep",
