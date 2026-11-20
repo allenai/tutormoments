@@ -4,6 +4,8 @@ import pytest
 
 from tutormoments_build.v2 import classify_replays as R
 from tutormoments_build.v2 import scoring
+from tutormoments_build.v2 import taxonomy as T
+from tutormoments_build.v2.taxonomy_replays import PREDICTED_NEITHER
 
 
 def record(moment_id, scaffolding, rigor, over=None, *, situation=None, failed=False):
@@ -109,7 +111,148 @@ def test_main_reads_ground_truth_splits(tmp_path, capsys):
         scoring.main([str(classified), "--ground-truth", str(gt), "--json", str(out)])
         == 0
     )
-    scores = json.loads(out.read_text())[str(classified)]
+    scores = json.loads(out.read_text())["decisions"][str(classified)]
     assert scores["rigor_only"]["rate"] == 1.0
     assert scores["scaffold_only"]["rate"] == 1.0
     assert "rigor_only" in capsys.readouterr().out
+
+
+# ---------------------------------------------------------------------------
+# Action divergence
+# ---------------------------------------------------------------------------
+
+DIV_SITUATIONS = {
+    "s1": "scaffold_only",
+    "s2": "scaffold_maj",
+    "s3": "scaffold_only",
+    "r1": "rigor_only",
+    "r2": "rigor_maj",
+    "r3": "rigor_only",
+    "f1": "fifty_fifty",
+}
+
+
+def tax(moment_id, categories=(), *, skipped=None, actions=True, failed=False):
+    taxonomy = None
+    if skipped is None:
+        taxonomy = {
+            "actions": [{"category": c} for c in categories] if actions else None,
+            "error": "overloaded" if failed else None,
+            "raw": "" if failed else "x",
+        }
+    return {
+        "moment_id": moment_id,
+        "prompt_version": "2",
+        "asked": skipped is None,
+        "skipped": skipped,
+        "taxonomy": taxonomy,
+    }
+
+
+def test_each_moment_weighs_the_same_and_types_count_once():
+    records = [
+        tax("s1", ["hint", "hint", "co_solve"]),  # hint twice still counts once
+        tax("s2", ["co_solve"]),
+        tax("r1", ["justify_explain", "made_up"]),  # made_up is dropped
+        tax("r2", ["justify_explain"]),
+        tax("f1", ["define_term"]),  # fifty_fifty is in neither group
+    ]
+    d = scoring.action_divergence(records, DIV_SITUATIONS)
+    s, r = d["distributions"]["scaffolding"], d["distributions"]["rigor"]
+    # s1 = 1/2 hint + 1/2 co_solve, s2 = co_solve; mean over moments.
+    assert s["hint"] == pytest.approx(1 / 4)
+    assert s["co_solve"] == pytest.approx(3 / 4)
+    assert r["justify_explain"] == pytest.approx(1)
+    assert sum(s.values()) == pytest.approx(1) and s["define_term"] == 0
+    assert d["n"] == {"scaffolding": 2, "rigor": 2}
+    assert 0 < d["jsd"] < 1
+
+
+def test_moments_without_listed_types_count_as_none():
+    records = [
+        tax("s1", ["hint"]),
+        tax("s2", skipped=PREDICTED_NEITHER),
+        tax("r1", []),
+        tax("r2", ["justify_explain"]),
+        tax("r3", ["made_up"]),  # only unlisted labels
+    ]
+    d = scoring.action_divergence(records, DIV_SITUATIONS)
+    assert d["n"] == {"scaffolding": 2, "rigor": 3}
+    assert d["distributions"]["scaffolding"][scoring.NONE] == pytest.approx(1 / 2)
+    assert d["distributions"]["rigor"][scoring.NONE] == pytest.approx(2 / 3)
+    assert d["excluded"] == {}
+
+
+def test_unknown_answers_are_excluded():
+    records = [
+        tax("s1", ["hint"]),
+        tax("s2", skipped="action_direction unparseable"),
+        tax("s3", actions=False),
+        tax("r1", failed=True),
+        tax("r2", ["justify_explain"]),
+    ]
+    d = scoring.action_divergence(records, DIV_SITUATIONS)
+    assert d["n"] == {"scaffolding": 1, "rigor": 1}
+    assert d["excluded"] == {
+        "not asked: action_direction unparseable": 1,
+        "request failed": 1,
+        "unparseable": 1,
+    }
+
+
+def test_divergence_bounds():
+    same = [tax("s1", ["hint"]), tax("r1", ["hint"])]
+    assert scoring.action_divergence(same, DIV_SITUATIONS)["jsd"] == pytest.approx(0)
+    disjoint = [tax("s1", ["hint"]), tax("r1", skipped=PREDICTED_NEITHER)]
+    jsd = scoring.action_divergence(disjoint, DIV_SITUATIONS)["jsd"]
+    assert jsd == pytest.approx(1)
+    empty_side = [tax("s1", ["hint"]), tax("r1", failed=True)]
+    assert scoring.action_divergence(empty_side, DIV_SITUATIONS)["jsd"] is None
+
+
+def test_divergence_rejects_mixed_prompt_versions():
+    records = [tax("s1", ["hint"]), {**tax("r1", ["hint"]), "prompt_version": "1"}]
+    with pytest.raises(ValueError):
+        scoring.action_divergence(records, DIV_SITUATIONS)
+
+
+# ---------------------------------------------------------------------------
+# Action diversity
+# ---------------------------------------------------------------------------
+
+
+def test_diversity_counts_only_the_called_for_family_across_moments():
+    records = [
+        tax("s1", ["hint", "justify_explain"]),  # rigor type ignored here
+        tax("s2", ["co_solve"]),
+        tax("s3", skipped=PREDICTED_NEITHER),  # no scaffolding type
+        tax("r1", ["justify_explain"]),
+        tax("r2", ["justify_explain", "hint"]),
+        tax("f1", ["define_term"]),  # fifty_fifty ignored
+    ]
+    d = scoring.action_diversity(records, DIV_SITUATIONS)
+    s, r = d["scaffolding"], d["rigor"]
+    # Two scaffolding types used equally across moments (s3 left out): 1 bit.
+    assert s["entropy_bits"] == pytest.approx(1)
+    assert set(s["distribution"]) == {
+        c
+        for c, f in T.parse_categories(T.load_template("2")).items()
+        if f == "scaffolding"
+    }
+    # Every rigor moment used the same one rigor type: no diversity.
+    assert r["entropy_bits"] == pytest.approx(0)
+
+
+def test_diversity_moments_weigh_the_same():
+    records = [tax("s1", ["hint", "co_solve"]), tax("s2", ["hint"])]
+    s = scoring.action_diversity(records, DIV_SITUATIONS)["scaffolding"]
+    assert s["distribution"]["hint"] == pytest.approx(3 / 4)
+    assert s["distribution"]["co_solve"] == pytest.approx(1 / 4)
+
+
+def test_diversity_without_any_family_type_is_none():
+    records = [tax("r1", []), tax("r2", failed=True)]
+    d = scoring.action_diversity(records, DIV_SITUATIONS)
+    assert d["rigor"]["entropy_bits"] is None and d["rigor"]["distribution"] is None
+    assert d["scaffolding"]["entropy_bits"] is None
+    assert d["excluded"] == {"request failed": 1}
