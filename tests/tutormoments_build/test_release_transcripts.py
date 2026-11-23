@@ -58,6 +58,12 @@ def row_a(**session_extra):
         "eedi_content_link": [
             {"type": "quiz_session", "quiz_session_id": U(5), "start_seconds": -30}
         ],
+        "screenshots": [
+            {
+                "start_seconds": 1.5,
+                "path": f"screenshots/tutoring_provider_a/00/{U(1)}/1.5.jpg",
+            }
+        ],
     }
 
 
@@ -178,6 +184,14 @@ def test_unexpected_link_type_fails_instead_of_being_dropped(store):
     bad["eedi_content_link"][0]["type"] = "assessment"
     store.write_bytes("source/tutoring_provider_a.jsonl", jsonl(bad))
     with pytest.raises(SystemExit, match="'assessment'"):
+        build(store)
+
+
+def test_a_row_without_screenshots_fails_the_build(store):
+    bare = row_a()
+    del bare["screenshots"]
+    store.write_bytes("source/tutoring_provider_a.jsonl", jsonl(bare))
+    with pytest.raises(SystemExit, match="failed its checks"):
         build(store)
 
 
