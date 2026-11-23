@@ -23,11 +23,11 @@ CLI `tutormoments-build release snapshot|build|verify`.
 |---|---|---|---|
 | 0 | Plumbing: snapshot, build, checks, manifest, verify | Done; merged into `v2` (#97) | `verify` needs retries on long S3 reads if it times out again |
 | 1 | `transcripts/<provider>.jsonl` | Schemas approved 2026-11-04; writer done; first real build 2026-11-11 (below) | A's `screenshots` field (2026-11-19 delivery) added to the release schema on `feature/v2-screenshots`, checked on a local build |
-| 2 | `annotations/<provider>.jsonl` | Schema, writer and guide merged into `v2` (#98); first real build 2026-11-11 (below) | Review of the build by the annotation team; one data-quality decision pending (internal). The `transcript_selection` change (2026-11-11) is not in that build |
-| 3 | `benchmark/dev.jsonl`, `test.jsonl` | Schema approved 2026-11-11; schema and writer merged into `v2` (#99) | The stage 2 data-quality decision changes provider C's labels, so no C build is reviewed before it |
+| 2 | `annotations/<provider>.jsonl` | Schema, writer and guide merged into `v2` (#98); first real build 2026-11-11 (below) | Review of the build by the annotation team. The data-quality question was settled 2026-11-23 with no change: every entry ships. The `transcript_selection` change (2026-11-11) is not in that build |
+| 3 | `benchmark/dev.jsonl`, `test.jsonl` | Schema approved 2026-11-11; schema and writer merged into `v2` (#99) | None |
 | 4 | `benchmark/moments.jsonl` | Schema approved 2026-11-11; schema and writer merged into `v2` (#100) | Open research questions (persona, continuation length) are runtime choices; the runtime needs a v2 loader and a wait-time tool |
 | 5 | `assessments/<provider>.jsonl`, `reference/eedi_*.jsonl` | Schemas approved 2026-11-12; schemas and writer merged into `v2` (#102) | Asked Eedi: feedback text on unpublished questions, and the reference tables' licence. Duplicated provider A answers fixed upstream 2026-11-13; the writer now derives `batch` (first delivery) from `batches`, on `feature/v2-screenshots` |
-| 6 | `screenshots/tutoring_provider_a/` | De-identified set delivered 2026-11-19 (10,118 frames); snapshot input, writer and checks on `feature/v2-screenshots`, checked on a local build | Bucket snapshot and build wait on the annotations decision (Next, item 1) |
+| 6 | `screenshots/tutoring_provider_a/` | De-identified set delivered 2026-11-19 (10,118 frames); snapshot input, writer and checks on `feature/v2-screenshots`, checked on a local build | Bucket snapshot and build after #109 merges (#110) |
 | 7 | `manifest.json` schema, README dataset card | Not started (builds already write a manifest) | Needs the Hugging Face repo name and the dataset's licence (which depends on Eedi's answer if the reference tables ship). Card carries A's two dropped fields, the surrogate-name caveat, and stage 5's notes (Eedi attribution, what the quiz data can't be joined to) |
 | — | Publish | Not started | HF repo, full build, verify, dry-run push |
 
@@ -106,7 +106,7 @@ Plan for now (2026-11-11): finish the stages, make one release, bring the resear
 
 `release/annotations.py` builds `annotations/<provider>.jsonl` from the frozen `v2_annotations/source/<provider>_annotations.jsonl` (the nightly export) and `annotator_labels.json`. It fails on an annotator with no label and on any export field it does not list as kept or dropped, so upstream additions are reviewed before they ship. Builds also copy the packaged docs (`release/docs/`) to `docs/`.
 
-Open: the pending data-quality decision may change which entries ship; it will be applied in the writer and recorded here.
+Settled 2026-11-23: the data-quality question needs no writer change; every entry ships as built.
 
 ## Benchmark labels writer (stage 3)
 
@@ -114,7 +114,7 @@ Open: the pending data-quality decision may change which entries ship; it will b
 
 `build_ground_truth.py` is not changed for the release while the team's work on it is in progress (decided 2026-11-11): finish the data release first, then update the code. Before publishing, the code has to catch up with the schema's description, which says running the script on the released annotation files reproduces these files. Today it doesn't read the release format or write the release shape.
 
-Checked 2026-11-11 without writing to the bucket: the annotations and benchmark writers run on a local copy of snapshot `20261111T1636Z`'s annotation inputs (sha256-checked against the snapshot), with #99's writer code (re-run on `b0ebd3e`, after the rebase onto the `transcript_selection` change), pass every build check and give dev 640 (A 401, C 239) and test 631 (A 396, C 235), with the same labels, boundaries and annotators as the working ground truth. No bucket build has benchmark files yet; the first will be the one after the pending data-quality decision.
+Checked 2026-11-11 without writing to the bucket: the annotations and benchmark writers run on a local copy of snapshot `20261111T1636Z`'s annotation inputs (sha256-checked against the snapshot), with #99's writer code (re-run on `b0ebd3e`, after the rebase onto the `transcript_selection` change), pass every build check and give dev 640 (A 401, C 239) and test 631 (A 396, C 235), with the same labels, boundaries and annotators as the working ground truth. No bucket build has benchmark files yet; the first will be the next one (#110).
 
 ## Moments writer (stage 4)
 
@@ -150,7 +150,7 @@ Plan, red/green for each code change:
 
 Steps 1-3 done 2026-11-23 (schema text approved, with the screening details left out and a note on the per-transcript folders). `write_screenshots` runs after `write_assessments`, since the assessments writer must directly follow the transcripts. Step 5 done 2026-11-23: local snapshot `20261123T1920Z`, build `20261123T1921Z-473acf7` passes every check and `verify`, including the metadata check on all 10,118 frames (about 1 GB). Against the 2026-11-20 local build (same inputs, both guards patched by hand): `benchmark/` dev, test and moments byte-identical; annotations, provider C transcripts and assessments identical; provider A assessments differ only in `batch`, on the 37,764 rows whose upstream `batch` is now the latest delivery. Counts unchanged (dev 640 / test 631, 1,271 moments, annotations A 1,261 / C 661, assessments A 50,489 / C 30,574). Provider A quiz answers 245,082; 38,139 question links (38,499 answers on published questions less 360 unanswered); 8,866 null `date_completed`.
 
-The next bucket snapshot and build still wait on the pending annotations data-quality decision (Next, item 1), so this lands in the same build.
+The next bucket snapshot and build run after #109 merges (#110).
 
 ## Builds
 
@@ -158,13 +158,13 @@ All in the de-identified bucket, under `release-v2/`.
 
 | Build | Snapshot | Code | Contents | Status |
 |---|---|---|---|---|
-| `20261111T1640Z-a12705f` | `20261111T1636Z` (30 inputs, incl. the 2026-11-11 nightly annotation export) | `a12705f` (PR #98), clean tree | `transcripts/` A 40,176 / C 16,510 rows; `annotations/` A 1,261 / C 661 rows; `docs/annotation_guide.md`; 4 schemas; manifest | All checks passed, manifest written. For review; not for publishing (the pending decision may change it). `verify` not yet completed: the first run hit an S3 read timeout and the second was stopped on a slow connection; rerun from inside AWS |
+| `20261111T1640Z-a12705f` | `20261111T1636Z` (30 inputs, incl. the 2026-11-11 nightly annotation export) | `a12705f` (PR #98), clean tree | `transcripts/` A 40,176 / C 16,510 rows; `annotations/` A 1,261 / C 661 rows; `docs/annotation_guide.md`; 4 schemas; manifest | All checks passed, manifest written. For review; not for publishing (superseded by #110). `verify` not yet completed: the first run hit an S3 read timeout and the second was stopped on a slow connection; rerun from inside AWS |
 
 ## Next
 
 Decisions, in the order they unblock work:
 
-1. **The pending annotations data-quality decision (internal).** It blocks the most: it changes provider C's annotations, labels and moments, and the next snapshot and bucket build wait on it. That build is the first with benchmark labels and moments, and the one that would become the release. Once made: apply it in the annotations writer and record it here, then one new snapshot and build.
+1. **Bucket snapshot and build (#110)**, once #109 merges. The annotations data-quality question was settled 2026-11-23 with no writer change. This build is the first with benchmark labels and moments, and the one that would become the release.
 2. **Stage 7:** the Hugging Face repo name, and the dataset's licence. If the Eedi reference tables ship, their terms (CC BY-NC-ND 4.0 for the NeurIPS 2020 data) carry through, so the licence waits on Eedi's answer.
 3. **#101:** whether classifier excerpts cut where annotators drew the cut (some `cut_turn` values sit one turn from it; see "Benchmark moments" above). The team's call, for the research path.
 4. **Release workflow and provenance** (open decision above): needed before the second release, not the first.
