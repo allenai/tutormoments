@@ -23,7 +23,7 @@ CLI `tutormoments-build release snapshot|build|verify`.
 |---|---|---|---|
 | 0 | Plumbing: snapshot, build, checks, manifest, verify | Done; merged into `v2` (#97) | `verify` needs retries on long S3 reads if it times out again |
 | 1 | `transcripts/<provider>.jsonl` | Schemas approved 2026-11-04; writer done; first real build 2026-11-11 (below) | A's `screenshots` field (2026-11-19 delivery) added to the release schema on `feature/v2-screenshots`, checked on a local build |
-| 2 | `annotations/<provider>.jsonl` | Schema, writer and guide merged into `v2` (#98); first real build 2026-11-11 (below) | Review of the build by the annotation team. The data-quality question was settled 2026-11-23 with no change: every entry ships. The `transcript_selection` change (2026-11-11) is not in that build |
+| 2 | `annotations/<provider>.jsonl` | Schema, writer and guide merged into `v2` (#98); first real build 2026-11-11 (below) | Review of the build by the annotation team. The `transcript_selection` change (2026-11-11) is not in that build |
 | 3 | `benchmark/dev.jsonl`, `test.jsonl` | Schema approved 2026-11-11; schema and writer merged into `v2` (#99) | None |
 | 4 | `benchmark/moments.jsonl` | Schema approved 2026-11-11; schema and writer merged into `v2` (#100) | Open research questions (persona, continuation length) are runtime choices; the runtime needs a v2 loader and a wait-time tool |
 | 5 | `assessments/<provider>.jsonl`, `reference/eedi_*.jsonl` | Schemas approved 2026-11-12; schemas and writer merged into `v2` (#102) | Asked Eedi: feedback text on unpublished questions, and the reference tables' licence. Duplicated provider A answers fixed upstream 2026-11-13; the writer now derives `batch` (first delivery) from `batches`, on `feature/v2-screenshots` |
@@ -106,8 +106,6 @@ Plan for now (2026-11-11): finish the stages, make one release, bring the resear
 
 `release/annotations.py` builds `annotations/<provider>.jsonl` from the frozen `v2_annotations/source/<provider>_annotations.jsonl` (the nightly export) and `annotator_labels.json`. It fails on an annotator with no label and on any export field it does not list as kept or dropped, so upstream additions are reviewed before they ship. Builds also copy the packaged docs (`release/docs/`) to `docs/`.
 
-Settled 2026-11-23: the data-quality question needs no writer change; every entry ships as built.
-
 ## Benchmark labels writer (stage 3)
 
 `release/benchmark.py` builds `benchmark/dev.jsonl` and `test.jsonl` by running `v2/build_ground_truth.py` (unchanged) on the snapshot's annotation exports with the committed `splits.json`, and writes them in the release shape (`release_record`, in the writer). Nothing is copied from `synthetic/ground_truth_v2/`. It then rebuilds them from the `annotations/` files the annotations writer just wrote, reshaped back to the export's form, and fails the build unless both runs give the same bytes, so it runs after `write_annotations`.
@@ -164,7 +162,7 @@ All in the de-identified bucket, under `release-v2/`.
 
 Decisions, in the order they unblock work:
 
-1. **Bucket snapshot and build (#110)**, once #109 merges. The annotations data-quality question was settled 2026-11-23 with no writer change. This build is the first with benchmark labels and moments, and the one that would become the release.
+1. **Bucket snapshot and build (#110)**, now that #109 has merged. This build is the first with benchmark labels and moments, and the one that would become the release.
 2. **Stage 7:** the Hugging Face repo name, and the dataset's licence. If the Eedi reference tables ship, their terms (CC BY-NC-ND 4.0 for the NeurIPS 2020 data) carry through, so the licence waits on Eedi's answer.
 3. **#101:** whether classifier excerpts cut where annotators drew the cut (some `cut_turn` values sit one turn from it; see "Benchmark moments" above). The team's call, for the research path.
 4. **Release workflow and provenance** (open decision above): needed before the second release, not the first.
