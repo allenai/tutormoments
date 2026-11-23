@@ -7,8 +7,9 @@ match the packaged release schema exactly (``check_declared_changes``).
 
 Declared changes:
 
-* Provider A (Eedi quiz sessions): ``batches`` is dropped (it lists every delivery a
-  quiz session appeared in; ``batch``, the first of them, stays). An empty
+* Provider A (Eedi quiz sessions): ``batches`` (every delivery a quiz session
+  appeared in) is dropped, and ``batch`` becomes the first of them; upstream's
+  ``batch`` is the latest. An empty
   ``date_completed`` becomes null. ``question_url`` becomes null unless the question
   is in the reference questions, so the release links only questions Eedi has
   published, and on unanswered entries, where it is the bare host.
@@ -70,12 +71,7 @@ def a_rows(ctx: BuildContext) -> RowFilter:
     }
 
     def change(row: dict) -> dict:
-        deliveries = row.pop("batches")
-        if row["batch"] != min(deliveries):
-            raise SystemExit(
-                f"{row['quiz_session_id']}: batch {row['batch']!r} is not the first "
-                f"delivery in {deliveries}; the release describes it as the first"
-            )
+        row["batch"] = min(row.pop("batches"))
         if row["date_completed"] == "":
             row["date_completed"] = None
         for question in row["questions"]:

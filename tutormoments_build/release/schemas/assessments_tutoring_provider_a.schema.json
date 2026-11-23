@@ -116,12 +116,12 @@
         "question_sequence": {
           "type": "integer",
           "minimum": 1,
-          "description": "The question's number in the quiz, from 1. Repeats when the student answers the same question again (a retry or check-out)."
+          "description": "The question's number in the quiz, from 1. Retries and re-asks of a question keep its number. Eedi's numbering, except on quizzes whose source export repeated answers (about a fifth): there the repeats were removed and the number re-derived from the answer order, a question taking the next number on its first answer."
         },
         "answer_sequence": {
           "type": "integer",
           "minimum": 0,
-          "description": "Running count of the student's answers in this quiz, from 1."
+          "description": "Running count of the student's answers in this quiz, from 1; not a per-question attempt number. `0` marks an entry with no `answer_type`, which appears to be a question shown but not answered."
         },
         "parent_question_id": {
           "type": "string",

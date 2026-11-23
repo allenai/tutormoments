@@ -243,13 +243,17 @@ def test_a_applies_only_the_declared_changes(store):
     assert entry["schemas"] == ["assessments_tutoring_provider_a.schema.json"]
 
 
-def test_a_batch_that_is_not_the_first_delivery_fails(store):
-    late = quiz(batch="2026-05-29")
+def test_a_batch_ships_as_the_first_delivery(store):
+    # Upstream's batch is the latest delivery since 2026-11-13; the release keeps
+    # the first, which batches (dropped) is the only record of.
+    late = quiz(batch="2026-05-29", batches=["2026-05-29", "2026-03-24", "2026-04-10"])
     store.write_bytes(
         "source/tutoring_provider_a_eedi_quiz_sessions.jsonl", jsonl(late)
     )
-    with pytest.raises(SystemExit, match="first delivery"):
-        build(store)
+    manifest = build(store)
+    (row,) = released(store, manifest, "assessments/tutoring_provider_a.jsonl")
+    assert row["batch"] == "2026-03-24"
+    assert "batches" not in row
 
 
 def test_c_keeps_only_rows_that_join_a_released_transcript(store):
