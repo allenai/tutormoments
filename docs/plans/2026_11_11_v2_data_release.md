@@ -1,6 +1,6 @@
 # v2 data release: implementation status
 
-Status as of 2026-11-13. The release layout and principles live in the internal
+Status as of 2026-11-20. The release layout and principles live in the internal
 release plan doc; this file tracks implementation. Code: `tutormoments_build/release/`,
 CLI `tutormoments-build release snapshot|build|verify`.
 
@@ -22,12 +22,12 @@ CLI `tutormoments-build release snapshot|build|verify`.
 | # | Stage | Status | Open |
 |---|---|---|---|
 | 0 | Plumbing: snapshot, build, checks, manifest, verify | Done; merged into `v2` (#97) | `verify` needs retries on long S3 reads if it times out again |
-| 1 | `transcripts/<provider>.jsonl` | Schemas approved 2026-11-04; writer done; first real build 2026-11-11 (below) | Screenshot fields wait on stage 6 |
-| 2 | `annotations/<provider>.jsonl` | Schema, writer and guide merged into `v2` (#98); first real build 2026-11-11 (below) | Review of the build by the annotation team; one data-quality decision pending (internal). The `transcript_selection` change (2026-11-11) is not in that build |
-| 3 | `benchmark/dev.jsonl`, `test.jsonl` | Schema approved 2026-11-11; schema and writer merged into `v2` (#99) | The stage 2 data-quality decision changes provider C's labels, so no C build is reviewed before it |
+| 1 | `transcripts/<provider>.jsonl` | Schemas approved 2026-11-04; writer done; first real build 2026-11-11 (below) | A's `screenshots` field (2026-11-19 delivery) added to the release schema on `feature/v2-screenshots`, checked on a local build |
+| 2 | `annotations/<provider>.jsonl` | Schema, writer and guide merged into `v2` (#98); first real build 2026-11-11 (below) | Review of the build by the annotation team. The data-quality question was settled 2026-11-23 with no change: every entry ships. The `transcript_selection` change (2026-11-11) is not in that build |
+| 3 | `benchmark/dev.jsonl`, `test.jsonl` | Schema approved 2026-11-11; schema and writer merged into `v2` (#99) | None |
 | 4 | `benchmark/moments.jsonl` | Schema approved 2026-11-11; schema and writer merged into `v2` (#100) | Open research questions (persona, continuation length) are runtime choices; the runtime needs a v2 loader and a wait-time tool |
-| 5 | `assessments/<provider>.jsonl`, `reference/eedi_*.jsonl` | Schemas approved 2026-11-12; schemas and writer in PR #102, checked on a local build (below) | Asked Eedi: feedback text on unpublished questions, and the reference tables' licence. Duplicated provider A answers: being checked upstream |
-| 6 | `screenshots/<transcript_id>/` | Waiting on the de-identified set | Layout, transcript `seconds`/`path` fields, OCR text |
+| 5 | `assessments/<provider>.jsonl`, `reference/eedi_*.jsonl` | Schemas approved 2026-11-12; schemas and writer merged into `v2` (#102) | Asked Eedi: feedback text on unpublished questions, and the reference tables' licence. Duplicated provider A answers fixed upstream 2026-11-13; the writer now derives `batch` (first delivery) from `batches`, on `feature/v2-screenshots` |
+| 6 | `screenshots/tutoring_provider_a/` | De-identified set delivered 2026-11-19 (10,118 frames); snapshot input, writer and checks on `feature/v2-screenshots`, checked on a local build | Bucket snapshot and build after #109 merges (#110) |
 | 7 | `manifest.json` schema, README dataset card | Not started (builds already write a manifest) | Needs the Hugging Face repo name and the dataset's licence (which depends on Eedi's answer if the reference tables ship). Card carries A's two dropped fields, the surrogate-name caveat, and stage 5's notes (Eedi attribution, what the quiz data can't be joined to) |
 | — | Publish | Not started | HF repo, full build, verify, dry-run push |
 
@@ -78,11 +78,11 @@ CLI `tutormoments-build release snapshot|build|verify`.
   - Every student's assessments ship, not only annotated students'. The transcripts ship in full, and the annotated provider A sessions are the least connected to the quiz data (below).
   - Provider C ships only rows that join a released transcript: program assessments by `program_id`, exit cards (`post_session`) by `session_id`. This drops the assessments of the 490 sessions the transcript filters exclude (78 programs with no transcript at all, and 406 exit cards in other programs): 31,220 -> 30,574 rows. `batch` is pinned to `"2026-07-06"`.
   - Provider C's question HTML ships as authored, including images from the third-party LaTeX renderer `latex.codecogs.com`; each such image's `alt` holds its LaTeX, and the schema says rendering fetches from codecogs.
-  - Provider A drops `batches` (the deliveries a quiz session appeared in; more than one on 3,272 rows) and keeps `batch`, which is the first delivery: the bucket schema says the latest, but on every multi-delivery row it is the earliest, and the build fails if that ever changes. An empty `date_completed` (9,340 rows) becomes null; the bucket schema says `format: date`, which the build checks.
-  - Provider A's `question_url` (a public image of the whole question on Eedi's host) is null unless the question is in `reference/eedi_diagnostic_questions.jsonl`, so the release links only questions Eedi has published, and null on unanswered entries (where it is the bare host). The reference table covers 744 of the 5,042 questions in the quizzes (15% of answers), and Eedi won't supply more. Eedi's feedback text (`explanation`) ships on every answer for now; it often restates the question, and we have asked Eedi whether that is acceptable for unpublished questions.
+  - Provider A drops `batches` (the deliveries a quiz session appeared in) and keeps `batch` as the first delivery. Up to the 2026-11-11 snapshot the bucket's `batch` was always the earliest of `batches`, though its schema says the latest. The 2026-11-13 quiz file made it the latest (37,764 rows now list more than one delivery). Decided 2026-11-20: keep the release's meaning, so the writer sets `batch` to the earliest of `batches` rather than checking it. An empty `date_completed` (8,866 rows from the 2026-11-13 file, 9,340 before) becomes null; the bucket schema says `format: date`, which the build checks.
+  - Provider A's `question_url` (a public image of the whole question on Eedi's host) is null unless the question is in `reference/eedi_diagnostic_questions.jsonl`, so the release links only questions Eedi has published, and null on unanswered entries (where it is the bare host). The reference table covers 745 of the 5,089 questions in the quizzes (16% of answers, 2026-11-13 file), and Eedi won't supply more. Eedi's feedback text (`explanation`) ships on every answer for now; it often restates the question, and we have asked Eedi whether that is acceptable for unpublished questions.
   - The reference tables ship unchanged. `eedi_diagnostic_questions` holds 988 questions in 1,971 versions (unique on `intervention_id`); a quiz answer names the question, not the version. Their licence is being confirmed with Eedi: the NeurIPS 2020 data is CC BY-NC-ND 4.0, and the tables merge it with the NeurIPS 2022 and Kaggle Mining Misconceptions data. If Eedi says no, they come out of the release and the card points to Eedi's downloads.
   - Known limitation, for the card: all annotated provider A transcripts are from the first delivery (2025-10-16), which has no session dates and no quiz links, so an annotated session can't be placed among its student's quizzes. The quiz data joins only by student.
-  - Open: in 9,350 provider A quiz sessions, answers repeat exactly apart from `question_sequence` (60,202 of 299,614 entries), mostly within one delivery; it looks like an upstream join, and is being checked there. If it isn't fixed upstream before the release, it ships with a documented caveat.
+  - Fixed upstream 2026-11-13: in 9,350 provider A quiz sessions, answers repeated exactly apart from `question_sequence` (60,202 of 299,614 entries). The repeats are now removed upstream (245,082 entries, none repeated) and `question_sequence` re-derived on those quizzes; the bucket doc describes this, so no card caveat is needed.
 
 ## Open decision: release workflow and provenance
 
@@ -106,7 +106,7 @@ Plan for now (2026-11-11): finish the stages, make one release, bring the resear
 
 `release/annotations.py` builds `annotations/<provider>.jsonl` from the frozen `v2_annotations/source/<provider>_annotations.jsonl` (the nightly export) and `annotator_labels.json`. It fails on an annotator with no label and on any export field it does not list as kept or dropped, so upstream additions are reviewed before they ship. Builds also copy the packaged docs (`release/docs/`) to `docs/`.
 
-Open: the pending data-quality decision may change which entries ship; it will be applied in the writer and recorded here.
+Settled 2026-11-23: the data-quality question needs no writer change; every entry ships as built.
 
 ## Benchmark labels writer (stage 3)
 
@@ -114,7 +114,7 @@ Open: the pending data-quality decision may change which entries ship; it will b
 
 `build_ground_truth.py` is not changed for the release while the team's work on it is in progress (decided 2026-11-11): finish the data release first, then update the code. Before publishing, the code has to catch up with the schema's description, which says running the script on the released annotation files reproduces these files. Today it doesn't read the release format or write the release shape.
 
-Checked 2026-11-11 without writing to the bucket: the annotations and benchmark writers run on a local copy of snapshot `20261111T1636Z`'s annotation inputs (sha256-checked against the snapshot), with #99's writer code (re-run on `b0ebd3e`, after the rebase onto the `transcript_selection` change), pass every build check and give dev 640 (A 401, C 239) and test 631 (A 396, C 235), with the same labels, boundaries and annotators as the working ground truth. No bucket build has benchmark files yet; the first will be the one after the pending data-quality decision.
+Checked 2026-11-11 without writing to the bucket: the annotations and benchmark writers run on a local copy of snapshot `20261111T1636Z`'s annotation inputs (sha256-checked against the snapshot), with #99's writer code (re-run on `b0ebd3e`, after the rebase onto the `transcript_selection` change), pass every build check and give dev 640 (A 401, C 239) and test 631 (A 396, C 235), with the same labels, boundaries and annotators as the working ground truth. No bucket build has benchmark files yet; the first will be the next one (#110).
 
 ## Moments writer (stage 4)
 
@@ -128,32 +128,54 @@ Checked 2026-11-11 without writing to the bucket: a full local build (transcript
 
 Checked 2026-11-12 without writing to the bucket: a local build of this writer on snapshot `20261111T1636Z`'s inputs (sha256-checked against the snapshot; the C transcripts staged as the transcripts writer would write them) passes every check and `verify`: provider A 50,489 rows (137 MB), provider C 30,574 (197 MB: 7,032 programs' pre- and post-program assessments and 16,510 exit cards, one per released transcript), and the reference tables (3,277 constructs, 1,971 question versions, 2,587 misconceptions, 755 subjects). 44,468 question links remain: the 44,814 answers on published questions less 346 unanswered.
 
+## Processing the 2026-11-19 delivery
+
+Branch `feature/v2-screenshots` from `v2`. Upstream changed six snapshot inputs since `20261111T1636Z`: provider A transcripts (2026-11-19) and quiz sessions (2026-11-13), with their schemas and docs. Annotation exports, all provider C files and the Eedi tables are byte-identical. The bucket also has a new `screenshots/tutoring_provider_a/` prefix.
+
+What changed, checked 2026-11-20 against the 11-11 snapshot:
+
+- Transcripts A: same 40,176 transcripts. New required `screenshots` array (`start_seconds`, `path`) on every row; 4,376 transcripts have frames, 10,118 in all, each path an existing object and no object unlisted. Separately, `eedi_content_link` lost exact duplicate links on 3,441 transcripts, gained links on 344 and lost one on 1; all 48,324 links resolve to a quiz session. No annotated transcript has screenshots or link changes (all annotated A transcripts are from the 2025-10-16 delivery; frames are from 2026-02-13 to 2026-06-24), so turns, screen events and the moments they feed are unchanged.
+- Quiz sessions A: same 50,489 sessions. Repeated answers removed (above). `batch` is now the latest delivery and `batches` lists far more deliveries. Some values now appear to come from a later delivery: `actual_score` 601 rows, `predicted_score` 344, `lesson_length` 376, `date_completed` filled on 474. 1,020 sessions' `questions` changed beyond the repeat removal: upstream explained (2026-11-23) that an earlier single-delivery rebuild had dropped answers, now restored on 987 quizzes, and that completion fields now come from the finished lesson record. The other 33 swap only `explanation` or `question_url` text on some answers. Total answers 299,614 -> 245,082, matching upstream's figures. Schema change is description-only (`question_sequence`, `answer_sequence`), so drift checks pass.
+
+A local build at `v2` (`1628bd5`) on a local snapshot of these inputs (`temp/release-local/`) fails in two places, both build guards working as intended: the provider A transcript drift check (`screenshots` not in the release schema) and the quiz `batch` check (37,764 rows). With both patched it passes every check, with unchanged counts: dev 640 / test 631, 1,271 moments, annotations A 1,261 / C 661, assessments A 50,489 / C 30,574.
+
+Plan, red/green for each code change:
+
+1. **Transcripts schema (stage 1).** Add `$defs.Screenshot` and required `screenshots` to `release/schemas/tutoring_provider_a.schema.json`: rules copied from the bucket, description in release wording (paths resolve against the release root; the bucket name never appears). For approval before merging. Tests: drift fixture includes `screenshots`; a row without it fails.
+2. **Quiz `batch` (stage 5).** In `assessments.py`, set `batch` to the earliest of `batches` before dropping it, in place of the check. The release schema's `batch` rules don't change; its description stays "first arrived in". Update the `question_sequence` and `answer_sequence` descriptions to upstream's corrected meaning (re-derived numbering on de-duplicated quizzes; `answer_sequence` 0 = shown, not answered). Tests: replace `test_a_batch_that_is_not_the_first_delivery_fails` with one where a latest-delivery `batch` ships as the earliest.
+3. **Screenshots (stage 6).** Add `screenshots/tutoring_provider_a/` to `SNAPSHOT_INPUTS` (about 1 GB). New writer `write_screenshots`, run after `write_transcripts`: server-side copy of every frame the released transcripts list to the same path in the build, failing on a listed path missing from the snapshot or a snapshotted frame no transcript lists. Frames are not data files, so they carry no schema; the manifest hashes them like every other build object. Also check the JPEGs carry no EXIF or other embedded metadata, and fail if they do. Tests on a `LocalStore`: copies, missing frame, orphan frame, metadata.
+4. **Moments.** No change: moment rows carry no screenshots, and no benchmark moment has any. Revisit if a later annotation batch covers transcripts with frames.
+5. **Local build** in `temp/release-local/` on a fresh local snapshot: every check and `verify` pass; `benchmark/` byte-identical to a build of the 11-11 snapshot; record the stage 5 numbers again (question links etc.).
+6. **Status doc and card notes:** record the above; the card says the frames are a reviewed sample, not the video. It does not describe how frames were screened for content.
+
+Steps 1-3 done 2026-11-23 (schema text approved, with the screening details left out and a note on the per-transcript folders). `write_screenshots` runs after `write_assessments`, since the assessments writer must directly follow the transcripts. Step 5 done 2026-11-23: local snapshot `20261123T1920Z`, build `20261123T1921Z-473acf7` passes every check and `verify`, including the metadata check on all 10,118 frames (about 1 GB). Against the 2026-11-20 local build (same inputs, both guards patched by hand): `benchmark/` dev, test and moments byte-identical; annotations, provider C transcripts and assessments identical; provider A assessments differ only in `batch`, on the 37,764 rows whose upstream `batch` is now the latest delivery. Counts unchanged (dev 640 / test 631, 1,271 moments, annotations A 1,261 / C 661, assessments A 50,489 / C 30,574). Provider A quiz answers 245,082; 38,139 question links (38,499 answers on published questions less 360 unanswered); 8,866 null `date_completed`.
+
+The next bucket snapshot and build run after #109 merges (#110).
+
 ## Builds
 
 All in the de-identified bucket, under `release-v2/`.
 
 | Build | Snapshot | Code | Contents | Status |
 |---|---|---|---|---|
-| `20261111T1640Z-a12705f` | `20261111T1636Z` (30 inputs, incl. the 2026-11-11 nightly annotation export) | `a12705f` (PR #98), clean tree | `transcripts/` A 40,176 / C 16,510 rows; `annotations/` A 1,261 / C 661 rows; `docs/annotation_guide.md`; 4 schemas; manifest | All checks passed, manifest written. For review; not for publishing (the pending decision may change it). `verify` not yet completed: the first run hit an S3 read timeout and the second was stopped on a slow connection; rerun from inside AWS |
+| `20261111T1640Z-a12705f` | `20261111T1636Z` (30 inputs, incl. the 2026-11-11 nightly annotation export) | `a12705f` (PR #98), clean tree | `transcripts/` A 40,176 / C 16,510 rows; `annotations/` A 1,261 / C 661 rows; `docs/annotation_guide.md`; 4 schemas; manifest | All checks passed, manifest written. For review; not for publishing (superseded by #110). `verify` not yet completed: the first run hit an S3 read timeout and the second was stopped on a slow connection; rerun from inside AWS |
 
 ## Next
 
 Decisions, in the order they unblock work:
 
-1. **The pending annotations data-quality decision (internal).** It blocks the most: it changes provider C's annotations, labels and moments, and the next snapshot and bucket build wait on it. That build is the first with benchmark labels and moments, and the one that would become the release. Once made: apply it in the annotations writer and record it here, then one new snapshot and build.
+1. **Bucket snapshot and build (#110)**, once #109 merges. The annotations data-quality question was settled 2026-11-23 with no writer change. This build is the first with benchmark labels and moments, and the one that would become the release.
 2. **Stage 7:** the Hugging Face repo name, and the dataset's licence. If the Eedi reference tables ship, their terms (CC BY-NC-ND 4.0 for the NeurIPS 2020 data) carry through, so the licence waits on Eedi's answer.
 3. **#101:** whether classifier excerpts cut where annotators drew the cut (some `cut_turn` values sit one turn from it; see "Benchmark moments" above). The team's call, for the research path.
 4. **Release workflow and provenance** (open decision above): needed before the second release, not the first.
 
 Waiting on others:
 
-- Eedi: whether feedback text (`explanation`) can ship on unpublished questions, and the reference tables' licence. Each answer is a small writer change on #102 or a follow-up (null `explanation` on unlinked questions; drop the reference tables and point the card to Eedi's downloads).
-- Upstream check of provider A's duplicated answers: fixed upstream means a re-snapshot; otherwise they ship with a documented caveat.
-- Review of #102 (stage 5).
-- Stage 6: the de-identified screenshot set.
+- Eedi: whether feedback text (`explanation`) can ship on unpublished questions, and the reference tables' licence. Each answer is a small follow-up writer change (null `explanation` on unlinked questions; drop the reference tables and point the card to Eedi's downloads).
 
 Other work:
 
+- Open the PR for `feature/v2-screenshots` into `v2` (2026-11-19 delivery: screenshots, quiz `batch`; plan above).
 - Finish `verify` of build `20261111T1640Z-a12705f` (from inside AWS).
 - Make the first release and bring the research path into sync with it; then every experiment run logs the release (build) ID it used.
 - Runtime (separate from the release): a v2 moments loader, a wait-time tool for the replay tutor, runs recording the build ID and the moments file's sha256. Scorer: the over-scaffolding prompt is gated on the human tutor's gold scaffolding label, which a replay lacks.

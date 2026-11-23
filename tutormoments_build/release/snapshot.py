@@ -32,6 +32,7 @@ SNAPSHOT_INPUTS = (
     "v2_annotations/source/tutoring_provider_c_annotations.jsonl",
     "v2_annotations/annotator_labels.json",
     "synthetic/ground_truth_v2/",
+    "screenshots/tutoring_provider_a/",
     "schemas/tutoring_provider_a.schema.json",
     "schemas/tutoring_provider_c.schema.json",
     "schemas/tutoring_provider_a_eedi_quiz_sessions.schema.json",

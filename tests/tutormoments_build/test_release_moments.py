@@ -95,6 +95,7 @@ def transcript_a():
             "primary_language": "en",
         },
         "eedi_content_link": [],
+        "screenshots": [],  # no annotated transcript has frames
         "enrichments": copy.deepcopy(EVENTS_A),
     }
 
