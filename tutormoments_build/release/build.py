@@ -78,11 +78,13 @@ def default_writers() -> tuple[Writer, ...]:
     from tutormoments_build.release.assessments import write_assessments
     from tutormoments_build.release.benchmark import write_benchmark_labels
     from tutormoments_build.release.moments import write_moments
+    from tutormoments_build.release.screenshots import write_screenshots
     from tutormoments_build.release.transcripts import write_transcripts
 
     return (
         write_transcripts,
         write_assessments,
+        write_screenshots,
         write_annotations,
         write_benchmark_labels,
         write_moments,
