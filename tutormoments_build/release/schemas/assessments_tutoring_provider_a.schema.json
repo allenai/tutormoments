@@ -108,9 +108,7 @@
         "answer_type",
         "predicted_correctness",
         "actual_correctness",
-        "answer",
-        "explanation",
-        "question_url"
+        "answer"
       ],
       "properties": {
         "question_sequence": {
@@ -125,7 +123,7 @@
         },
         "parent_question_id": {
           "type": "string",
-          "description": "Eedi question ID. Joins to `reference/eedi_diagnostic_questions.jsonl` `parent_question_id`, which holds only the questions in Eedi's public datasets: most IDs here have no row there. One ID can have several versions there (different names or numbers), and this row doesn't say which version the student saw."
+          "description": "Eedi question ID. Joins to `reference/eedi_diagnostic_questions.jsonl` `parent_question_id`, which holds only the questions in Eedi's public Question-Anchored-Tutoring-Dialogues-2k dataset: most IDs here have no row there, and their entries carry no feedback text or image. One ID can have several versions there (different names or numbers); this row doesn't name the version the student saw, though `question_image_path` shows it."
         },
         "answer_type": {
           "type": "string",
@@ -145,15 +143,12 @@
         },
         "explanation": {
           "type": "string",
-          "description": "Eedi's feedback shown to the student for this answer. Written by Eedi, not the student. Empty where no answer was given."
+          "description": "Eedi's feedback shown to the student for this answer. Written by Eedi, not the student. Present only where the question is in `reference/eedi_diagnostic_questions.jsonl`; empty there where no answer was given, and on a few answered entries."
         },
-        "question_url": {
-          "type": [
-            "string",
-            "null"
-          ],
-          "format": "uri",
-          "description": "Eedi's public image of the question, with its answer options. Null unless the question is in `reference/eedi_diagnostic_questions.jsonl`, so the release links only questions Eedi has published, and null where no answer was given."
+        "question_image_path": {
+          "type": "string",
+          "pattern": "^eedi_question_images/[0-9a-f]{64}\\.jpg$",
+          "description": "The image of the question the student saw, with its answer options, relative to the dataset root: `eedi_question_images/<sha256>.jpg`, named by the SHA-256 of its bytes. Present only on answered entries whose question is in `reference/eedi_diagnostic_questions.jsonl`. A question Eedi revised can have several images; each entry points at the one the student saw."
         }
       }
     }

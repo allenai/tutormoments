@@ -14,8 +14,10 @@ them like every other build object. Runs after ``write_transcripts``, whose
 output it reads.
 """
 
+import hashlib
 import json
 import logging
+from typing import Callable
 
 from tutormoments_build.release.build import BuildContext, Output
 
@@ -33,12 +35,13 @@ _SOS, _EOI, _COM = 0xDA, 0xD9, 0xFE
 _STANDALONE = {0x01, *range(0xD0, 0xD8)}
 
 
-def embedded_metadata(data: bytes) -> list[str]:
+def embedded_metadata(data: bytes, allowed: frozenset[str] = frozenset()) -> list[str]:
     """What a JPEG's header carries beyond the image; empty for a clean frame.
 
     Walks the marker segments up to the start of the scan. A plain JFIF ``APP0``
     is allowed; a JFIF thumbnail, any other ``APP0``, ``APP1``-``APP15`` (EXIF,
-    XMP, ICC, vendor data) and ``COM`` comments are reported.
+    XMP, ICC, vendor data) and ``COM`` comments are reported, unless the SHA-256
+    of the segment's payload is in ``allowed`` (exact bytes someone reviewed).
     """
     if not data.startswith(_SOI):
         return ["not a JPEG"]
@@ -66,15 +69,18 @@ def embedded_metadata(data: bytes) -> list[str]:
         if marker == _SOS:
             return found
         payload = data[i + 4 : i + 2 + length]
+        kind = None
         if marker == 0xE0:
             if not payload.startswith(b"JFIF\x00"):
-                found.append(f"APP0 {payload[:4].decode('latin-1')}")
+                kind = f"APP0 {payload[:4].decode('latin-1')}"
             elif len(payload) >= 14 and (payload[12] or payload[13]):
-                found.append("JFIF thumbnail")
+                kind = "JFIF thumbnail"
         elif 0xE1 <= marker <= 0xEF:
-            found.append(f"APP{marker - 0xE0}")
+            kind = f"APP{marker - 0xE0}"
         elif marker == _COM:
-            found.append("COM")
+            kind = "COM"
+        if kind and hashlib.sha256(payload).hexdigest() not in allowed:
+            found.append(kind)
         i += 2 + length
 
 
@@ -88,26 +94,47 @@ def listed_frames(ctx: BuildContext) -> set[str]:
     return paths
 
 
-def write_screenshots(ctx: BuildContext) -> list[Output]:
-    listed = listed_frames(ctx)
-    frozen = {key for key in ctx.snapshot["inputs"] if key.startswith(FRAMES_PREFIX)}
+def ship_listed_files(
+    ctx: BuildContext,
+    label: str,
+    listed: set[str],
+    prefix: str,
+    lister: str,
+    check: Callable[[str, bytes], list[str]],
+) -> None:
+    """Copy each listed snapshot file to the same path in the build.
 
+    Fails before copying anything on a listed path missing from the snapshot, a
+    snapshotted file under ``prefix`` that no ``lister`` lists, or a file ``check``
+    (given its path and bytes) reports problems with.
+    """
+    frozen = {key for key in ctx.snapshot["inputs"] if key.startswith(prefix)}
     problems = [f"listed but not in the snapshot: {p}" for p in sorted(listed - frozen)]
     problems += [
-        f"in the snapshot but no released transcript lists it: {p}"
+        f"in the snapshot but no {lister} lists it: {p}"
         for p in sorted(frozen - listed)
     ]
     for path in sorted(listed & frozen):
-        found = embedded_metadata(ctx.store.read_bytes(ctx.snapshot_key(path)))
-        if found:
-            problems.append(f"{path}: embedded {', '.join(found)}")
+        data = ctx.store.read_bytes(ctx.snapshot_key(path))
+        problems += [f"{path}: {problem}" for problem in check(path, data)]
     if problems:
         raise SystemExit(
-            f"screenshots: {len(problems)} problem(s), e.g. "
+            f"{label}: {len(problems)} problem(s), e.g. "
             + "; ".join(problems[:MAX_EXAMPLES])
         )
-
     for path in sorted(listed):
         ctx.copy_from_snapshot(path, path)
+
+
+def _clean_frame(path: str, data: bytes) -> list[str]:
+    found = embedded_metadata(data)
+    return [f"embedded {', '.join(found)}"] if found else []
+
+
+def write_screenshots(ctx: BuildContext) -> list[Output]:
+    listed = listed_frames(ctx)
+    ship_listed_files(
+        ctx, "screenshots", listed, FRAMES_PREFIX, "released transcript", _clean_frame
+    )
     logger.info("wrote %d screenshots", len(listed))
     return []

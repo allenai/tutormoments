@@ -2,7 +2,7 @@
   "$schema": "https://json-schema.org/draft/2020-12/schema",
   "$id": "eedi_diagnostic_questions.schema.json",
   "title": "reference/eedi_diagnostic_questions.jsonl",
-  "description": "One version of an Eedi diagnostic question per line, unique on `intervention_id`: text, multiple-choice answers, subjects and, where known, construct, year group and level. A question (`parent_question_id`) can have several versions, which differ in names or numbers. Covers only the questions in Eedi's public datasets, a small share of those in provider A's quizzes. Public Eedi data, shipped unchanged. See the dataset card for its sources and licences.",
+  "description": "One version of an Eedi diagnostic question per line, unique on `intervention_id`: text, multiple-choice answers and subjects. A question (`parent_question_id`) can have several versions, which differ in names or numbers. Covers only the questions in Eedi's public Question-Anchored-Tutoring-Dialogues-2k dataset, a small share of those in provider A's quizzes. Public Eedi data, shipped unchanged. See the dataset card for its source and licence.",
   "type": "object",
   "additionalProperties": false,
   "required": [
@@ -10,11 +10,7 @@
     "intervention_id",
     "question_text",
     "answers",
-    "subjects",
-    "construct_id",
-    "construct_name",
-    "year_group",
-    "curriculum_level"
+    "subjects"
   ],
   "properties": {
     "parent_question_id": {
@@ -78,34 +74,6 @@
           }
         }
       }
-    },
-    "construct_id": {
-      "type": [
-        "string",
-        "null"
-      ],
-      "description": "Joins to `reference/eedi_constructs.jsonl` `construct_id`. Null where Eedi's data gives no construct."
-    },
-    "construct_name": {
-      "type": [
-        "string",
-        "null"
-      ],
-      "description": "Null where the construct is unknown or unnamed."
-    },
-    "year_group": {
-      "type": [
-        "string",
-        "null"
-      ],
-      "description": "UK National Curriculum year group."
-    },
-    "curriculum_level": {
-      "type": [
-        "string",
-        "null"
-      ],
-      "description": "Eedi's curriculum level."
     }
   }
 }

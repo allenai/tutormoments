@@ -85,17 +85,22 @@ def test_name_keys_flags_nested_person_name_fields():
     ]
 
 
-def test_name_keys_allows_known_non_person_fields_only_where_listed():
+def test_name_keys_allows_known_non_person_fields_only_where_listed(monkeypatch):
     assert (
-        checks.name_keys({"construct_name": "Fractions"}, checks.allowed_name_keys("x"))
+        checks.name_keys({"quiz_name": "Fractions"}, checks.allowed_name_keys("x"))
         == []
+    )
+    # The Eedi construct and misconception tables no longer ship, so their keys
+    # fail closed again.
+    assert checks.name_keys(
+        {"construct_name": "Fractions"}, checks.allowed_name_keys("x")
+    ) == ["construct_name"]
+    monkeypatch.setitem(
+        checks.ALLOWED_NAME_KEYS, "reference/t.jsonl", frozenset({"name"})
     )
     subjects = {"name": "Number"}
     assert (
-        checks.name_keys(
-            subjects, checks.allowed_name_keys("reference/eedi_subjects.jsonl")
-        )
-        == []
+        checks.name_keys(subjects, checks.allowed_name_keys("reference/t.jsonl")) == []
     )
     assert checks.name_keys(
         subjects, checks.allowed_name_keys("annotations/a.jsonl")
