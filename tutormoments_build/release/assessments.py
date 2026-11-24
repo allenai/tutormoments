@@ -1,7 +1,7 @@
-"""Write ``assessments/<provider>.jsonl`` and ``reference/eedi_*.jsonl``.
+"""Write ``assessments/<provider>.jsonl`` and ``reference/eedi_diagnostic_questions.jsonl``.
 
 The assessment files ship as the bucket has them, apart from the changes declared
-here; the Eedi reference tables ship unchanged. As for transcripts, every build
+here; the Eedi reference table ships unchanged. As for transcripts, every build
 applies the declared changes to the frozen bucket schema and requires the rules to
 match the packaged release schema exactly (``check_declared_changes``).
 
@@ -9,10 +9,9 @@ Declared changes:
 
 * Provider A (Eedi quiz sessions): ``batches`` (every delivery a quiz session
   appeared in) is dropped, and ``batch`` becomes the first of them; upstream's
-  ``batch`` is the latest. An empty
-  ``date_completed`` becomes null. ``question_url`` becomes null unless the question
-  is in the reference questions, so the release links only questions Eedi has
-  published, and on unanswered entries, where it is the bare host.
+  ``batch`` is the latest. An empty ``date_completed`` becomes null. Upstream
+  already limits Eedi's content (feedback text, question image) to the questions
+  in the reference table; ``write_question_images`` ships the images.
 * Provider C: only rows joining a released transcript ship. A program's assessments
   need a transcript with its ``program_id``; an exit card (``post_session``) needs a
   transcript with its ``session_id``. The rest belong to sessions the transcript
@@ -36,14 +35,13 @@ ASSESSMENTS_DIR = "assessments/"
 REFERENCE_DIR = "reference/"
 TRANSCRIPTS_DIR = "transcripts/"
 
-# Public Eedi tables, shipped unchanged under the same names.
-REFERENCE = (
-    "eedi_constructs",
-    "eedi_diagnostic_questions",
-    "eedi_misconceptions",
-    "eedi_subjects",
-)
+# Public Eedi tables (from Eedi's Question-Anchored-Tutoring-Dialogues-2k
+# dataset), shipped unchanged under the same names.
+REFERENCE = ("eedi_diagnostic_questions",)
 QUESTIONS = "eedi_diagnostic_questions"
+# Quiz-entry fields holding Eedi's question content, released only for the
+# questions in QUESTIONS.
+EEDI_CONTENT = frozenset({"explanation", "question_image_path"})
 
 RowFilter = Callable[[dict], dict | None]
 
@@ -52,10 +50,6 @@ def _a_schema_changes(rules: dict) -> None:
     del rules["properties"]["batches"]
     rules["required"].remove("batches")
     rules["properties"]["date_completed"]["type"] = ["string", "null"]
-    rules["$defs"]["Question"]["properties"]["question_url"]["type"] = [
-        "string",
-        "null",
-    ]
 
 
 def _c_schema_changes(rules: dict) -> None:
@@ -64,8 +58,9 @@ def _c_schema_changes(rules: dict) -> None:
 
 
 def a_rows(ctx: BuildContext) -> RowFilter:
-    """Provider A's declared changes, given the build's reference questions."""
-    published = {
+    """Provider A's declared changes, and a guard: Eedi's content (feedback text,
+    question image) only on questions in the build's reference table."""
+    released = {
         json.loads(line)["parent_question_id"]
         for line in ctx.store.iter_lines(ctx.snapshot_key(f"source/{QUESTIONS}.jsonl"))
     }
@@ -75,11 +70,14 @@ def a_rows(ctx: BuildContext) -> RowFilter:
         if row["date_completed"] == "":
             row["date_completed"] = None
         for question in row["questions"]:
-            if (
-                question["answer"] == ""
-                or question["parent_question_id"] not in published
-            ):
-                question["question_url"] = None
+            if question["parent_question_id"] not in released:
+                content = sorted(EEDI_CONTENT & question.keys())
+                if content:
+                    raise SystemExit(
+                        f"quiz session {row['quiz_session_id']}: question "
+                        f"{question['parent_question_id']} is not in {QUESTIONS} "
+                        f"but carries {', '.join(content)}"
+                    )
         return row
 
     return change

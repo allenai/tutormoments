@@ -1,5 +1,6 @@
-"""Assessments writer: provider A's declared changes, provider C's transcript join,
-reference tables copied unchanged, and schema-drift detection.
+"""Assessments writer: provider A's declared changes and its guard on Eedi content,
+provider C's transcript join, the reference table copied unchanged, and schema-drift
+detection.
 
 All rows are synthetic. The "bucket" schemas are rebuilt from the packaged release
 schemas by undoing the declared changes, so the tests track the real schemas.
@@ -39,15 +40,16 @@ from tutormoments_build.release.transcripts import write_transcripts
 
 PUBLISHED = "100561"  # in the reference questions
 UNPUBLISHED = "156172"  # not in them
-IMG = "https://images.diagnosticquestions.com/uploads/questions/{}.jpg".format
-BARE_HOST = "https://images.diagnosticquestions.com"
+IMAGE = "eedi_question_images/" + "ab" * 32 + ".jpg"
 
 # row_c()'s transcript: program U(15), session U(12).
 PROGRAM, SESSION = U(15), U(12)
 
 
-def answer(seq, question_id, letter="B", url=None):
-    return {
+def answer(seq, question_id, letter="B"):
+    """An entry as upstream writes it: Eedi's content only on published questions,
+    the image only where an answer was given."""
+    entry = {
         "question_sequence": seq,
         "answer_sequence": seq,
         "parent_question_id": question_id,
@@ -55,9 +57,14 @@ def answer(seq, question_id, letter="B", url=None):
         "predicted_correctness": "-",
         "actual_correctness": "Correct" if letter else "Incorrect",
         "answer": letter,
-        "explanation": "Synthetic feedback: add the two parts." if letter else "",
-        "question_url": url or (IMG(seq) if letter else BARE_HOST),
     }
+    if question_id == PUBLISHED:
+        entry["explanation"] = (
+            "Synthetic feedback: add the two parts." if letter else ""
+        )
+        if letter:
+            entry["question_image_path"] = IMAGE
+    return entry
 
 
 def quiz(**extra):
@@ -122,12 +129,6 @@ C_ROWS = {
 }
 
 REFERENCE_ROWS = {
-    "eedi_constructs": {
-        "construct_id": "402",
-        "construct_name": "Synthetic construct",
-        "subject_id": "200",
-        "prerequisite_construct_ids": ["479"],
-    },
     "eedi_diagnostic_questions": {
         "parent_question_id": PUBLISHED,
         "intervention_id": "6358",
@@ -136,20 +137,6 @@ REFERENCE_ROWS = {
         "subjects": [
             {"SubjectName": "Number", "SubjectLevel": 1, "SubjectType": "Subject"}
         ],
-        "construct_id": "402",
-        "construct_name": None,
-        "year_group": "8",
-        "curriculum_level": "35",
-    },
-    "eedi_misconceptions": {
-        "misconception_id": "0",
-        "misconception_name": "Synthetic misconception",
-    },
-    "eedi_subjects": {
-        "subject_id": "3",
-        "name": "Maths",
-        "parent_id": None,
-        "level": 0,
     },
 }
 
@@ -166,7 +153,6 @@ def bucket_schemas():
     }
     a["required"].insert(2, "batches")
     a["properties"]["date_completed"]["type"] = "string"
-    a["$defs"]["Question"]["properties"]["question_url"]["type"] = "string"
     c = json.loads(packaged["assessments_tutoring_provider_c.schema.json"])
     del c["properties"]["batch"]["const"]
     schemas = {
@@ -230,13 +216,8 @@ def test_a_applies_only_the_declared_changes(store):
 
     expected = quiz()
     del expected["batches"]
-    expected["questions"][1]["question_url"] = None  # not a published question
-    expected["questions"][2]["question_url"] = None  # unanswered: the bare host
-    assert first == expected
+    assert first == expected  # Eedi's content passes through as upstream limits it
     assert no_date["date_completed"] is None
-    assert no_date["questions"][0]["question_url"] == IMG(1)
-    # The feedback stays on every answer, published question or not.
-    assert first["questions"][1]["explanation"] == quiz()["questions"][1]["explanation"]
 
     entry = manifest["files"]["assessments/tutoring_provider_a.jsonl"]
     assert entry["rows"] == 2
@@ -254,6 +235,16 @@ def test_a_batch_ships_as_the_first_delivery(store):
     (row,) = released(store, manifest, "assessments/tutoring_provider_a.jsonl")
     assert row["batch"] == "2026-03-24"
     assert "batches" not in row
+
+
+@pytest.mark.parametrize("field", ["explanation", "question_image_path"])
+def test_eedi_content_on_an_unreleased_question_fails_the_build(store, field):
+    # Eedi releases its content only for the questions in the reference table.
+    row = quiz()
+    row["questions"][1][field] = "explanation" if field == "explanation" else IMAGE
+    store.write_bytes("source/tutoring_provider_a_eedi_quiz_sessions.jsonl", jsonl(row))
+    with pytest.raises(SystemExit, match=f"{UNPUBLISHED} is not in .* carries {field}"):
+        build(store)
 
 
 def test_c_keeps_only_rows_that_join_a_released_transcript(store):
@@ -294,7 +285,7 @@ def test_text_only_upstream_changes_are_not_drift():
     [
         ("tutoring_provider_a_eedi_quiz_sessions", "quiz_name"),
         ("tutoring_provider_c_assessments", "assessment_type"),
-        ("eedi_subjects", "level"),
+        ("eedi_diagnostic_questions", "question_text"),
     ],
 )
 def test_upstream_rule_change_is_drift(name, field):

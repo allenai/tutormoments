@@ -20,8 +20,7 @@ NAME_KEY = re.compile(r"(^|_)name$")
 
 # Keys ending in "name" that hold no person's name, by release path ("*" = any).
 ALLOWED_NAME_KEYS = {
-    "*": frozenset({"construct_name", "misconception_name", "quiz_name"}),
-    "reference/eedi_subjects.jsonl": frozenset({"name"}),
+    "*": frozenset({"quiz_name"}),
 }
 
 # Stop collecting after this many problems per file; the count stays exact.
