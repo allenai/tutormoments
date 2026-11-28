@@ -326,7 +326,7 @@ def _build_parser() -> argparse.ArgumentParser:
 def _add_release_parser(subs, log_parent) -> None:
     release_p = subs.add_parser(
         "release",
-        help="Snapshot, build and verify the public data release (works in the bucket)",
+        help="Snapshot, build, verify and pull the public data release (works in the bucket)",
     )
     release_subs = release_p.add_subparsers(dest="release_command")
     common = argparse.ArgumentParser(add_help=False, parents=[log_parent])
@@ -376,6 +376,36 @@ def _add_release_parser(subs, log_parent) -> None:
     )
     verify_p.add_argument("--build", required=True, dest="build_id")
 
+    pull_p = release_subs.add_parser(
+        "pull",
+        help="Fetch the build the v2 research code is pinned to into a local folder",
+        parents=[common],
+    )
+    pull_p.add_argument(
+        "--build",
+        dest="build_id",
+        default=None,
+        help="Build to fetch (default: the one tutormoments_build/v2/release.json "
+        "pins; another build is fetched without a manifest hash to check)",
+    )
+    pull_p.add_argument(
+        "--dest",
+        default=None,
+        help="Local folder holding builds/<build_id>/ (default: temp/release)",
+    )
+    pull_p.add_argument(
+        "--only",
+        nargs="+",
+        default=None,
+        metavar="PREFIX",
+        help="Fetch only files under these release paths, e.g. benchmark/ transcripts/",
+    )
+    pull_p.add_argument(
+        "--prune",
+        action="store_true",
+        help="Delete every other local build afterwards",
+    )
+
 
 def _cmd_release(args) -> None:
     from tutormoments_build.release.build import run_build, verify_build
@@ -397,6 +427,8 @@ def _cmd_release(args) -> None:
             store, args.snapshot_id, release=args.release, allow_dirty=args.allow_dirty
         )
         logger.info("build id: %s", manifest["build_id"])
+    elif args.release_command == "pull":
+        _cmd_release_pull(args, store)
     else:
         problems = verify_build(store, args.build_id, release=args.release)
         for problem in problems:
@@ -404,6 +436,26 @@ def _cmd_release(args) -> None:
         if problems:
             raise SystemExit(f"build {args.build_id}: {len(problems)} problem(s)")
         logger.info("build %s verified", args.build_id)
+
+
+def _cmd_release_pull(args, store) -> None:
+    from pathlib import Path
+
+    from tutormoments_build.release.pull import pull_build
+    from tutormoments_build.v2 import release_data
+
+    pinned = release_data.pinned_build()
+    build_id = args.build_id or pinned["build_id"]
+    sha = pinned["manifest_sha256"] if build_id == pinned["build_id"] else None
+    pull_build(
+        store,
+        build_id,
+        Path(args.dest or release_data.LOCAL_ROOT),
+        manifest_sha256=sha,
+        release=args.release,
+        only=args.only,
+        prune=args.prune,
+    )
 
 
 def _cmd_build_action_taxonomy(args, command_line: str) -> None:

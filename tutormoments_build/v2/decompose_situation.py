@@ -19,7 +19,7 @@ parser (``tutormoments.scoring._parse_decomposed``).
 Only ground-truth moments are decomposed. Output is
 ``data/ground_truth/student_state.jsonl``: one record per ground-truth moment, in
 ground-truth order, with ``moment_id`` and ``split`` for joining against
-``data/ground_truth/<split>.jsonl``. Moments no adjudicator described are still
+the release build's ``benchmark/<split>.jsonl``. Moments no adjudicator described are still
 written (``facets`` None, ``skipped`` giving the reason), so every moment joins.
 
 ``--model`` defaults to ``claude-opus-5-5`` and must be configured as for
@@ -58,7 +58,6 @@ from tutormoments_build.v2.build_ground_truth import (
     load_excluded_annotators,
     read_rows,
 )
-from tutormoments_build.v2.build_ground_truth import DEFAULT_OUT_DIR as DEFAULT_GT_DIR
 from tutormoments_build.v2.classify_excerpts import (
     DEFAULT_STUDENT_STATE,
     PLACEHOLDER,
@@ -70,6 +69,7 @@ from tutormoments_build.v2.classify_excerpts import (
     phase_config,
     run_entries,
 )
+from tutormoments_build.v2.excerpts import DEFAULT_GROUND_TRUTH_DIR as DEFAULT_GT_DIR
 from tutormoments_build.v2.splits import DEFAULT_ANNOTATIONS_FILES
 
 logger = logging.getLogger("tutormoments_build.v2.decompose_situation")

@@ -17,7 +17,7 @@ def _excerpt(
     over_scaffolding_present=False,
     rigor_present=False,
     situation_type="scaffold_only",
-    split="iteration",
+    split="dev",
     described=True,
 ):
     record = {
@@ -66,11 +66,13 @@ def _state(moment_id, facets=None):
     """A student-state record as decompose_situation.py writes it."""
     return {
         "moment_id": moment_id,
-        "split": "iteration",
+        "split": "dev",
         "adjudicators": ["J01"],
         "situation_method": "single",
         "model": "claude-opus-5-5",
         "prompt": "prompts/v2_helper/student_state.md",
+        # Added in memory by load_student_state.
+        C.STATE_SOURCE_KEY: {"student_state.jsonl": "f" * 64},
         "facets": [f"student facet ({moment_id})", "second facet"]
         if facets is None
         else facets,
@@ -290,6 +292,7 @@ def test_a_v8_record_names_where_its_facets_came_from():
         "situation_method": "single",
         "model": "claude-opus-5-5",
         "prompt": "prompts/v2_helper/student_state.md",
+        "file": {"student_state.jsonl": "f" * 64},
     }
 
 
@@ -331,6 +334,17 @@ def test_load_student_state_drops_records_without_facets(tmp_path):
     found = LOAD_STUDENT_STATE(str(path))
     # An empty list is an answer ("nothing about the student"); None is not.
     assert sorted(found) == ["a", "b"]
+
+
+def test_load_student_state_records_the_file_it_read(tmp_path):
+    import hashlib
+
+    path = tmp_path / "student_state.jsonl"
+    path.write_text(json.dumps(_state("a")) + "\n", encoding="utf-8")
+    sha = hashlib.sha256(path.read_bytes()).hexdigest()
+
+    found = LOAD_STUDENT_STATE(str(path))
+    assert found["a"][C.STATE_SOURCE_KEY] == {str(path): sha}
 
 
 def test_load_student_state_names_the_command_when_missing(tmp_path):
@@ -522,6 +536,17 @@ def test_build_record_carries_both_passes_and_the_gold_labels():
     assert record["labels"] == SCAFFOLDED["labels"]
 
 
+def test_build_record_carries_the_excerpts_release_block():
+    release = {"build_id": "20261124T2322Z-081a944", "pinned": True, "files": {}}
+    record = C.build_record({**SCAFFOLDED, "release": release}, RAW, CFG, PROMPTS)
+    assert record["release"] == release
+
+
+def test_splits_are_the_releases_dev_and_test():
+    assert C.SPLIT_STEMS == ("dev", "test")
+    assert C.DEFAULT_SPLITS == ("dev",)
+
+
 def test_build_record_sums_usage_across_both_passes():
     record = C.build_record(SCAFFOLDED, RAW, CFG, PROMPTS)
 
@@ -574,10 +599,10 @@ def test_classify_splits_results_back_apart(monkeypatch):
     monkeypatch.setattr(C, "run_entries", lambda entries, cfg, batch_id=None: RAW)
 
     out, counts = C.classify(
-        {"iteration": [SCAFFOLDED], "test": [UNSCAFFOLDED]}, CFG, PROMPTS
+        {"dev": [SCAFFOLDED], "test": [UNSCAFFOLDED]}, CFG, PROMPTS
     )
 
-    assert [r["moment_id"] for r in out["iteration"]] == ["aaa"]
+    assert [r["moment_id"] for r in out["dev"]] == ["aaa"]
     assert [r["moment_id"] for r in out["test"]] == ["bbb"]
     assert counts["action_direction"] == 2
     assert counts["action_direction_unparsed"] == 0
@@ -590,7 +615,7 @@ def test_classify_counts_unparsed_responses(monkeypatch):
         lambda entries, cfg, batch_id=None: {"action__aaa": {"text": "nope"}},
     )
 
-    _, counts = C.classify({"iteration": [SCAFFOLDED]}, CFG, PROMPTS)
+    _, counts = C.classify({"dev": [SCAFFOLDED]}, CFG, PROMPTS)
 
     assert counts["action_direction_unparsed"] == 1
     assert counts["over_scaffolding_unparsed"] == 1
@@ -854,13 +879,13 @@ def test_an_unrostered_model_is_refused_with_the_roster_listed():
 
 
 def test_load_excerpts_skips_a_missing_split(tmp_path):
-    path = tmp_path / "iteration.jsonl"
+    path = tmp_path / "dev.jsonl"
     path.write_text(json.dumps(SCAFFOLDED) + "\n", encoding="utf-8")
 
     out = C.load_excerpts(str(tmp_path))
 
-    assert list(out) == ["iteration"]
-    assert out["iteration"][0]["moment_id"] == "aaa"
+    assert list(out) == ["dev"]
+    assert out["dev"][0]["moment_id"] == "aaa"
 
 
 def test_load_excerpts_raises_when_nothing_is_there(tmp_path):
@@ -941,7 +966,7 @@ def test_prediction_dir_files_a_prompt_version_apart_from_its_predecessor():
 
 def test_write_split_round_trips(tmp_path):
     record = C.build_record(SCAFFOLDED, RAW, CFG, PROMPTS)
-    path = C.write_split(str(tmp_path), "iteration", [record])
+    path = C.write_split(str(tmp_path), "dev", [record])
 
     with open(path, encoding="utf-8") as fh:
         assert json.loads(fh.readline()) == record
@@ -958,7 +983,7 @@ def _on_disk(record):
 
 
 def _write_excerpts(tmp_path):
-    (tmp_path / "iteration.jsonl").write_text(
+    (tmp_path / "dev.jsonl").write_text(
         json.dumps(_on_disk(SCAFFOLDED))
         + "\n"
         + json.dumps(_on_disk(UNSCAFFOLDED))
@@ -979,9 +1004,7 @@ def test_the_test_split_is_held_out_unless_asked_for_by_name(tmp_path, monkeypat
     out_dir = tmp_path / "out"
 
     assert C.main(["--excerpt-dir", excerpt_dir, "--out-dir", str(out_dir)]) == 0
-    assert [p.name for p in sorted(out_dir.glob("*/*/*/*.jsonl"))] == [
-        "iteration.jsonl"
-    ]
+    assert [p.name for p in sorted(out_dir.glob("*/*/*/*.jsonl"))] == ["dev.jsonl"]
 
     assert (
         C.main(
@@ -997,7 +1020,7 @@ def test_the_test_split_is_held_out_unless_asked_for_by_name(tmp_path, monkeypat
         == 0
     )
     assert [p.name for p in sorted(out_dir.glob("*/*/*/*.jsonl"))] == [
-        "iteration.jsonl",
+        "dev.jsonl",
         "test.jsonl",
     ]
 
@@ -1016,7 +1039,7 @@ def test_dry_run_makes_no_api_calls_and_writes_nothing(tmp_path, monkeypatch, ca
             "--out-dir",
             str(out_dir),
             "--splits",
-            "iteration",
+            "dev",
             "--dry-run",
         ]
     )
@@ -1042,7 +1065,7 @@ def test_limit_truncates_each_split(tmp_path, monkeypatch):
             "--out-dir",
             str(tmp_path / "out"),
             "--splits",
-            "iteration",
+            "dev",
             "--limit",
             "1",
         ]
@@ -1063,7 +1086,7 @@ def test_predictions_are_filed_under_the_model_that_made_them(tmp_path, monkeypa
             "--out-dir",
             str(out_dir),
             "--splits",
-            "iteration",
+            "dev",
             "--model",
             "claude-sonnet-5",
             # Pinned: this test is about the model directory, not the version.
@@ -1073,7 +1096,7 @@ def test_predictions_are_filed_under_the_model_that_made_them(tmp_path, monkeypa
     )
 
     assert code == 0
-    path = out_dir / "claude-sonnet-5" / "1" / "20" / "iteration.jsonl"
+    path = out_dir / "claude-sonnet-5" / "1" / "20" / "dev.jsonl"
     assert path.exists()
     record = json.loads(path.read_text(encoding="utf-8").splitlines()[0])
     assert record["model"] == "claude-sonnet-5"
@@ -1090,13 +1113,13 @@ def test_the_default_model_gets_its_own_directory_too(tmp_path, monkeypatch):
             "--out-dir",
             str(out_dir),
             "--splits",
-            "iteration",
+            "dev",
             "--prompt-version",
             "1",
         ]
     )
 
-    assert (out_dir / "claude-opus-5" / "1" / "20" / "iteration.jsonl").exists()
+    assert (out_dir / "claude-opus-5" / "1" / "20" / "dev.jsonl").exists()
 
 
 def test_the_chosen_model_reaches_the_batch(tmp_path, monkeypatch):
@@ -1115,7 +1138,7 @@ def test_the_chosen_model_reaches_the_batch(tmp_path, monkeypatch):
             "--out-dir",
             str(tmp_path / "out"),
             "--splits",
-            "iteration",
+            "dev",
             "--model",
             "claude-sonnet-5",
         ]
@@ -1157,7 +1180,7 @@ def test_the_report_names_the_model_that_ran(tmp_path, monkeypatch, capsys):
             "--out-dir",
             str(tmp_path / "out"),
             "--splits",
-            "iteration",
+            "dev",
             "--model",
             "claude-sonnet-5",
         ]
@@ -1197,13 +1220,13 @@ def test_bare_print_picks_a_random_moment(tmp_path, monkeypatch, capsys):
     out = capsys.readouterr().out
 
     assert code == 0
-    assert "moment bbb (iteration)" in out
+    assert "moment bbb (dev)" in out
     assert ACTION_PROMPT_PATH in out
 
 
 def test_random_pick_draws_from_every_loaded_split():
     seen = set()
-    excerpts = {"iteration": [SCAFFOLDED], "test": [UNSCAFFOLDED]}
+    excerpts = {"dev": [SCAFFOLDED], "test": [UNSCAFFOLDED]}
     for _ in range(50):
         seen.add(C.pick_moment(excerpts, C.RANDOM)["moment_id"])
 
@@ -1211,7 +1234,7 @@ def test_random_pick_draws_from_every_loaded_split():
 
 
 def test_random_pick_respects_a_narrowed_pool():
-    picked = C.pick_moment({"iteration": [SCAFFOLDED]}, C.RANDOM)
+    picked = C.pick_moment({"dev": [SCAFFOLDED]}, C.RANDOM)
 
     assert picked["moment_id"] == "aaa"
 
@@ -1219,15 +1242,15 @@ def test_random_pick_respects_a_narrowed_pool():
 def test_print_names_the_moment_so_a_random_pick_is_reproducible(tmp_path, capsys):
     C.main(["--excerpt-dir", _write_excerpts(tmp_path), "--print", "aaa"])
 
-    assert "===== moment aaa (iteration) =====" in capsys.readouterr().out
+    assert "===== moment aaa (dev) =====" in capsys.readouterr().out
 
 
 def test_pick_moment_returns_none_on_an_empty_pool():
-    assert C.pick_moment({"iteration": []}, C.RANDOM) is None
+    assert C.pick_moment({"dev": []}, C.RANDOM) is None
 
 
 def test_bare_print_reports_an_empty_pool(tmp_path, capsys):
-    (tmp_path / "iteration.jsonl").write_text("", encoding="utf-8")
+    (tmp_path / "dev.jsonl").write_text("", encoding="utf-8")
 
     code = C.main(["--excerpt-dir", str(tmp_path), "--print"])
 
@@ -1281,16 +1304,16 @@ def test_skipped_moment_still_gets_a_record_naming_the_reason():
 def test_skipped_moments_are_not_counted_as_parse_failures(monkeypatch):
     monkeypatch.setattr(C, "run_entries", lambda entries, cfg, batch_id=None: {})
 
-    out, counts = C.classify({"iteration": [EMPTY_POST_CUT]}, CFG, PROMPTS)
+    out, counts = C.classify({"dev": [EMPTY_POST_CUT]}, CFG, PROMPTS)
 
     assert counts["action_direction_unparsed"] == 0
-    assert len(out["iteration"]) == 1
+    assert len(out["dev"]) == 1
 
 
 def test_report_names_the_skipped_moments(monkeypatch, capsys):
     monkeypatch.setattr(C, "run_entries", lambda entries, cfg, batch_id=None: RAW)
 
-    out, counts = C.classify({"iteration": [SCAFFOLDED, EMPTY_POST_CUT]}, CFG, PROMPTS)
+    out, counts = C.classify({"dev": [SCAFFOLDED, EMPTY_POST_CUT]}, CFG, PROMPTS)
 
     assert "1 moment(s) not classified" in C.report(out, counts, dry_run=False)
 
@@ -1299,7 +1322,7 @@ def test_report_says_why_over_scaffolding_was_not_asked(monkeypatch, capsys):
     monkeypatch.setattr(C, "run_entries", lambda entries, cfg, batch_id=None: RAW)
 
     out, counts = C.classify(
-        {"iteration": [SCAFFOLDED, UNSCAFFOLDED, OVERSCAFFOLDED]}, CFG, PROMPTS
+        {"dev": [SCAFFOLDED, UNSCAFFOLDED, OVERSCAFFOLDED]}, CFG, PROMPTS
     )
     text = C.report(out, counts, dry_run=False)
 
@@ -1386,8 +1409,8 @@ def test_context_turns_is_recorded_and_files_the_round_apart(tmp_path, monkeypat
     assert C.main(args) == 0
     assert C.main(args + ["--context-turns", "full"]) == 0
 
-    (whole,) = out_dir.glob("*/*/full/iteration.jsonl")
-    assert (whole.parent.parent / "20" / "iteration.jsonl").exists()
+    (whole,) = out_dir.glob("*/*/full/dev.jsonl")
+    assert (whole.parent.parent / "20" / "dev.jsonl").exists()
     record = json.loads(whole.read_text(encoding="utf-8").splitlines()[0])
     assert record["context_turns"] == {
         "action_direction": "full",
@@ -1430,14 +1453,14 @@ def test_a_second_round_refuses_to_replace_the_first(tmp_path, monkeypatch):
     ]
 
     assert C.main(argv) == 0
-    written = (out_dir / "claude-opus-5" / "1" / "20" / "iteration.jsonl").read_text(
+    written = (out_dir / "claude-opus-5" / "1" / "20" / "dev.jsonl").read_text(
         encoding="utf-8"
     )
 
     with pytest.raises(FileExistsError, match="--overwrite"):
         C.main(argv)
 
-    assert (out_dir / "claude-opus-5" / "1" / "20" / "iteration.jsonl").read_text(
+    assert (out_dir / "claude-opus-5" / "1" / "20" / "dev.jsonl").read_text(
         encoding="utf-8"
     ) == written
 
@@ -1473,7 +1496,7 @@ def test_overwrite_replaces_the_earlier_round(tmp_path, monkeypatch):
 
     assert C.main(argv) == 0
     assert C.main(argv + ["--overwrite"]) == 0
-    assert (out_dir / "claude-opus-5" / "1" / "20" / "iteration.jsonl").exists()
+    assert (out_dir / "claude-opus-5" / "1" / "20" / "dev.jsonl").exists()
 
 
 def test_a_new_prompt_version_is_not_an_overwrite(tmp_path, monkeypatch):
@@ -1493,8 +1516,8 @@ def test_a_new_prompt_version_is_not_an_overwrite(tmp_path, monkeypatch):
     assert C.main(argv + ["--prompt-version", "1"]) == 0
     assert C.main(argv + ["--prompt-version", "2"]) == 0
 
-    assert (out_dir / "claude-opus-5" / "1" / "20" / "iteration.jsonl").exists()
-    assert (out_dir / "claude-opus-5" / "2" / "20" / "iteration.jsonl").exists()
+    assert (out_dir / "claude-opus-5" / "1" / "20" / "dev.jsonl").exists()
+    assert (out_dir / "claude-opus-5" / "2" / "20" / "dev.jsonl").exists()
 
 
 # ===========================================================================
@@ -1558,7 +1581,7 @@ def test_an_over_scaffolding_only_round_runs_and_writes(tmp_path, monkeypatch, c
     assert code == 0
     assert sent == ["overscaffold__aaa"]
     assert "passes:  over_scaffolding only" in capsys.readouterr().out
-    (path,) = out_dir.glob("*/*/*/iteration.jsonl")
+    (path,) = out_dir.glob("*/*/*/dev.jsonl")
     records = [json.loads(line) for line in path.read_text().splitlines()]
     assert [r["action_direction"] for r in records] == [None, None]
     assert records[0]["prompt_slots"]["over_scaffolding"]["descriptions"] == (

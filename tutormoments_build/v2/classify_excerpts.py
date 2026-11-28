@@ -37,8 +37,12 @@ Examples of models this script could run with:
 Predictions go to ``<out-dir>/<model>/<prompt version>/<width>/<split>.jsonl``.
 Existing files are only replaced with ``--overwrite``.
 
-Only the ``iteration`` split runs by default. The ``test`` split is held out
+Only the ``dev`` split runs by default. The ``test`` split is held out
 unless specified w/ ``--splits test``.
+
+Each prediction carries its excerpt's ``release`` block (the release build and
+input hashes, see ``release_data``), and ``description_from`` names the
+student-state file and its sha256.
 
 Usage::
 
@@ -75,7 +79,7 @@ from tutormoments.models import (
     resolve_thinking,
 )
 from tutormoments_build.resources import resource_path, resource_text
-from tutormoments_build.v2 import excerpts
+from tutormoments_build.v2 import excerpts, release_data
 
 logger = logging.getLogger("tutormoments_build.v2.classify_excerpts")
 
@@ -83,13 +87,13 @@ DEFAULT_EXCERPT_DIR = "data/excerpts"
 DEFAULT_OUT_DIR = "outputs/v2_predictions"
 
 # Excerpt file stems, which are also the prediction output stems.
-SPLIT_STEMS = ("iteration", "test")
+SPLIT_STEMS = excerpts.SPLIT_STEMS
 
-# Only the iteration split is classified unless the test split is asked for by
+# Only the dev split is classified unless the test split is asked for by
 # name. The test split is the held-out half: every prediction run over it while
-# the prompts are still being revised turns it into a second iteration set. It
+# the prompts are still being revised turns it into a second dev set. It
 # is classified once the prompts are frozen, with `--splits test`.
-DEFAULT_SPLITS = ("iteration",)
+DEFAULT_SPLITS = ("dev",)
 
 # Prompts are versioned: each revision is a numbered directory under
 # PROMPT_ROOT holding a full set, and predictions are filed under the version
@@ -137,6 +141,10 @@ DESCRIPTION_KEY = "student_state"
 
 # decompose_situation.py's output: one record per ground-truth moment.
 DEFAULT_STUDENT_STATE = "data/ground_truth/student_state.jsonl"
+
+# Student-state record key (in memory only) for {file path: sha256} of the
+# file it was read from, so a prediction names the exact facets file it used.
+STATE_SOURCE_KEY = "source_file"
 
 # {descriptions} when decomposition found no facets about the student, e.g.
 # the adjudicators wrote only about the tutor.
@@ -454,12 +462,14 @@ def load_student_state(path: str = DEFAULT_STUDENT_STATE) -> dict[str, dict]:
             f"no student-state file at {path}; run "
             "`python -m tutormoments_build.v2.decompose_situation` first"
         )
+    source = release_data.provenance([path])["files"]
     out: dict[str, dict] = {}
     with open(path, encoding="utf-8") as fh:
         for line in fh:
             if line.strip():
                 record = json.loads(line)
                 if record.get("facets") is not None:
+                    record[STATE_SOURCE_KEY] = source
                     out[record["moment_id"]] = record
     return out
 
@@ -937,6 +947,7 @@ def build_record(
                 "situation_method": state["situation_method"],
                 "model": state["model"],
                 "prompt": state["prompt"],
+                "file": state.get(STATE_SOURCE_KEY),
             }
 
     return {
@@ -981,6 +992,8 @@ def build_record(
         "over_scaffolding": over,
         "over_scaffolding_asked": over is not None,
         "labels": excerpt_record.get("labels"),
+        # The release build the excerpt was rendered from (see release_data).
+        "release": excerpt_record.get("release"),
         "usage": _sum_usage((action or {}).get("usage"), (over or {}).get("usage")),
     }
 
@@ -1298,7 +1311,7 @@ def build_parser() -> argparse.ArgumentParser:
         nargs="+",
         choices=SPLIT_STEMS,
         default=list(DEFAULT_SPLITS),
-        help="Which excerpt splits to classify. Defaults to the iteration "
+        help="Which excerpt splits to classify. Defaults to the dev "
         "split alone; pass `test` explicitly to spend the held-out split.",
     )
     parser.add_argument(

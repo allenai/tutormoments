@@ -1,23 +1,21 @@
-### Putting together teacher-annotated human-human data
+### Getting the data: the release build
 
-Data is first pulled from AWS. From the `tutormoments` root:  
-
-```
-cd data/v2_annotations/source
-aws s3 cp s3://<bucket>/v2_annotations/source/tutoring_provider_a_annotations.jsonl ./
-aws s3 cp s3://<bucket>/v2_annotations/source/tutoring_provider_c_annotations.jsonl ./
-aws s3 cp s3://<bucket>/source/tutoring_provider_a.jsonl ./
-aws s3 cp s3://<bucket>/source/tutoring_provider_c.jsonl ./
-```
-
-Two files that are not in the repo also go in `data/v2_annotations/`, both keyed on `annotator_id`: `annotator_labels.json` (id → de-identified label) and `excluded_annotators.json` (a list of project staff ids to drop).
-
-Ground truth files are also on s3: 
+The research scripts read a v2 release build: the benchmark labels (`benchmark/dev.jsonl`, `benchmark/test.jsonl`) and transcripts (`transcripts/<provider>.jsonl`). Which build is pinned in `release.json` beside this README. Fetch it from the `tutormoments` root:
 
 ```
-cd data/ground_truth
-aws s3 cp s3://<bucket>/synthetic/ground_truth_v2/*.jsonl ./ 
+export TUTORMOMENTS_RELEASE_ROOT=s3://<bucket>
+tutormoments-build release pull
 ```
+
+This puts the build in `temp/release/builds/<build_id>/`. Every file is checked against the build's manifest, and the manifest against the hash in `release.json`. Files a local build already has are hard-linked, not downloaded again. `--prune` deletes other local builds, and `--only benchmark/ transcripts/` fetches just what these scripts read.
+
+- **New builds.** Moving to a new build is a PR that changes `release.json`. After pulling that change, the scripts stop with a message to run `release pull` until you've fetched the build.
+- **Trying a build before its PR.** Point `TUTORMOMENTS_V2_RELEASE` at its folder. Outputs record that it wasn't the pinned build.
+- **What every output records.** Excerpts and predictions carry a `release` block: the build ID, whether it is the pinned build, and the sha256 of each input read.
+
+The splits are `dev` and `test`. `iteration` is retired: regenerate old excerpts, and rename old prediction files from `iteration.jsonl` to `dev.jsonl` (or regenerate them).
+
+`build_ground_truth`, `splits`, `adjudicator_agreement` and `decompose_situation` still read the raw annotation exports for now (`data/v2_annotations/source/<provider>_annotations.jsonl` and `annotator_labels.json`). `classify_excerpts` reads the student-state facets from `data/ground_truth/student_state.jsonl`.
 
 Excerpts exist because they format what's shown to LMs (the tutor and action classifiers): the entire transcript up to the moment to the moment's end. Once created, these are saved in `data/excerpts/`. 
 

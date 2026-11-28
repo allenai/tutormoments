@@ -21,7 +21,7 @@ def _account(adjudicator, text):
     return {"adjudicator": adjudicator, "text": text}
 
 
-def _gt(moment_id, split="iteration"):
+def _gt(moment_id, split="dev"):
     return {
         "moment_id": moment_id,
         "transcript_id": f"t-{moment_id}",
@@ -184,7 +184,7 @@ def test_unparseable_response_is_none_not_empty():
 
 @pytest.fixture
 def gt_dir(tmp_path):
-    for stem, ids in (("iteration", ["m1", "m2"]), ("test", ["m3"])):
+    for stem, ids in (("dev", ["m1", "m2"]), ("test", ["m3"])):
         with open(tmp_path / f"{stem}.jsonl", "w") as fh:
             for moment_id in ids:
                 fh.write(json.dumps(_gt(moment_id, stem)) + "\n")
@@ -237,8 +237,8 @@ def test_main_writes_one_record_per_ground_truth_moment(gt_dir, run):
 
     records = _read(gt_dir / "student_state.jsonl")
     assert [(r["moment_id"], r["split"]) for r in records] == [
-        ("m1", "iteration"),
-        ("m2", "iteration"),
+        ("m1", "dev"),
+        ("m2", "dev"),
         ("m3", "test"),
     ]
     by_id = {r["moment_id"]: r for r in records}
@@ -284,7 +284,7 @@ def test_splits_and_limit_narrow_the_moments(gt_dir, run):
             "--out",
             str(gt_dir / "student_state.jsonl"),
             "--splits",
-            "iteration",
+            "dev",
             "--limit",
             "1",
         ]

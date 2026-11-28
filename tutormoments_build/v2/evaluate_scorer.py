@@ -29,8 +29,12 @@ is ``post_cut_dialogue_rows``, written by the excerpt builder -- dialogue turns
 only, so the screen-activity rows in the span are not counted as turns.
 
 Per-annotator values are not in the prediction records, so the agreement flags
-are read back from the ground truth (``--ground-truth-dir``) and joined on
-``moment_id``. Where a moment's gold labels there no longer match the ones the
+are read back from the ground truth (``--ground-truth-dir``, by default the
+pinned release build's ``benchmark/``) and joined on ``moment_id``.
+
+Predictions name the release build their excerpts came from (``release``). A
+prediction file from a build other than the ground truth's is not scored unless
+``--allow-build-mismatch`` is given: its gold labels and moments may differ. Where a moment's gold labels there no longer match the ones the
 prediction was made against, the predictions are stale relative to the ground
 truth and the run says so.
 
@@ -56,9 +60,9 @@ Usage::
     python -m tutormoments_build.v2.evaluate_scorer --model claude-opus-5
     python -m tutormoments_build.v2.evaluate_scorer --prompt-version 1
     python -m tutormoments_build.v2.evaluate_scorer --context-turns 20
-    python -m tutormoments_build.v2.evaluate_scorer --splits iteration test
+    python -m tutormoments_build.v2.evaluate_scorer --splits dev test
     python -m tutormoments_build.v2.evaluate_scorer --short-turns 3
-    python -m tutormoments_build.v2.evaluate_scorer --ground-truth-dir data/ground_truth
+    python -m tutormoments_build.v2.evaluate_scorer --ground-truth-dir temp/release/builds/<build_id>/benchmark
 
 Without ``--prompt-version`` or ``--context-turns``, every prompt version and
 excerpt width found is scored, so a bare run compares them all against the same
@@ -73,10 +77,7 @@ import sys
 from collections import Counter
 
 from tutormoments.logging_setup import logging_args_parent, setup_logging
-from tutormoments_build.v2 import excerpts
-from tutormoments_build.v2.build_ground_truth import (
-    DEFAULT_OUT_DIR as DEFAULT_GROUND_TRUTH_DIR,
-)
+from tutormoments_build.v2 import excerpts, release_data
 from tutormoments_build.v2.classify_excerpts import (
     DEFAULT_OUT_DIR,
     DEFAULT_SPLITS,
@@ -84,6 +85,8 @@ from tutormoments_build.v2.classify_excerpts import (
 )
 
 logger = logging.getLogger("tutormoments_build.v2.evaluate_scorer")
+
+DEFAULT_GROUND_TRUTH_DIR = excerpts.DEFAULT_GROUND_TRUTH_DIR
 
 # Moments with at most this many dialogue turns after the cut get their own
 # report block: a short post-cut span gives less to classify from, so we check
@@ -277,6 +280,23 @@ def agreement_by_moment(ground_truth: list[dict]) -> dict[str, dict] | None:
     if not any("agreement" in r for r in ground_truth):
         return None
     return {r["moment_id"]: (r.get("agreement") or {}) for r in ground_truth}
+
+
+def prediction_builds(predictions: list[dict]) -> list[str | None]:
+    """The release builds a prediction file's records name, in first-seen order."""
+    seen: dict[str | None, None] = {}
+    for record in predictions:
+        seen.setdefault((record.get("release") or {}).get("build_id"))
+    return list(seen)
+
+
+def build_mismatch(predictions: list[dict], gold_build: str | None) -> list:
+    """Builds named by the predictions other than the ground truth's.
+
+    None stands for predictions that name no build (made before builds were
+    recorded, or from loose files).
+    """
+    return [b for b in prediction_builds(predictions) if b != gold_build]
 
 
 def stale_moments(predictions: list[dict], ground_truth: list[dict]) -> list[str]:
@@ -512,6 +532,12 @@ def build_parser() -> argparse.ArgumentParser:
         "to read per-construct agreement flags from where its records carry them.",
     )
     parser.add_argument(
+        "--allow-build-mismatch",
+        action="store_true",
+        help="Score predictions made from a release build other than the "
+        "ground truth's (refused by default)",
+    )
+    parser.add_argument(
         "--model",
         default=None,
         metavar="MODEL",
@@ -562,9 +588,13 @@ def main(argv: list[str] | None = None) -> int:
 
     # One read per split, shared across every model and prompt version: they are
     # all scored against the same gold.
-    agreement, ground_truths = {}, {}
+    agreement, ground_truths, gold_builds = {}, {}, {}
     for split in args.splits:
         ground_truth = read_ground_truth(args.ground_truth_dir, split)
+        if ground_truth is not None:
+            gold_builds[split] = release_data.provenance(
+                [os.path.join(args.ground_truth_dir, f"{split}.jsonl")]
+            )["build_id"]
         agreement[split] = (
             agreement_by_moment(ground_truth) if ground_truth is not None else None
         )
@@ -578,6 +608,7 @@ def main(argv: list[str] | None = None) -> int:
                 )
 
     results = []
+    refused = 0
     for model in find_models(args.pred_dir, args.model):
         model_dir = os.path.join(args.pred_dir, model)
         versions = find_prompt_versions(model_dir, args.prompt_version)
@@ -597,6 +628,19 @@ def main(argv: list[str] | None = None) -> int:
                         logger.warning("no predictions at %s; skipping", path)
                         continue
                     predictions = read_predictions(path)
+                    if split in gold_builds:
+                        others = build_mismatch(predictions, gold_builds[split])
+                        if others and not args.allow_build_mismatch:
+                            logger.error(
+                                "%s was made from release build(s) %s, not the "
+                                "ground truth's %s; not scored (re-run excerpts and "
+                                "classify_excerpts, or pass --allow-build-mismatch)",
+                                path,
+                                ", ".join(map(str, others)),
+                                gold_builds[split],
+                            )
+                            refused += 1
+                            continue
                     if split in ground_truths:
                         stale = stale_moments(predictions, ground_truths[split])
                         if stale:
@@ -615,12 +659,13 @@ def main(argv: list[str] | None = None) -> int:
                             "prompt_version": version,
                             "context_turns": width,
                             "split": split,
+                            "release_builds": prediction_builds(predictions),
                             "tasks": rows,
                         }
                     )
                     print(report(model, version, width, split, rows))
 
-    if not results:
+    if not results and not refused:
         logger.error("no prediction files found under %s", args.pred_dir)
         return 1
 
@@ -630,7 +675,7 @@ def main(argv: list[str] | None = None) -> int:
             fh.write("\n")
         logger.info("wrote %s", args.json_out)
 
-    return 0
+    return 1 if refused else 0
 
 
 if __name__ == "__main__":
