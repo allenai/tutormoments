@@ -1,9 +1,11 @@
 """Render transcript excerpts for the v2 ground-truth moments.
 
-This script combines ``data/ground_truth/{iteration,test}.jsonl`` with one
-transcripts file per provider, ``data/v2_annotations/source/<provider>.jsonl``.
-Each moment is read from the file named after its ``source``.
-The output is used to format transcript excerpts for action classification.
+This script combines the release build's ``benchmark/{dev,test}.jsonl`` with
+one transcripts file per provider, ``transcripts/<provider>.jsonl``, from the
+build ``release.json`` pins (see ``release_data``). Each moment is read from the
+file named after its ``source``. The output is used to format transcript
+excerpts for action classification. Every excerpt record carries a ``release``
+block naming the build and the sha256 of each input read.
 
 Providers differ in what their transcripts carry: tutoring_provider_a's list
 enrichments (screen activity, pauses) beside the dialogue, and
@@ -42,20 +44,23 @@ from tutormoments_build.annotation_viewer.transcripts import (
     TranscriptIndex,
     locate_span,
 )
+from tutormoments_build.v2 import release_data
 
 logger = logging.getLogger("tutormoments_build.v2.excerpts")
 
-DEFAULT_GROUND_TRUTH_DIR = "data/ground_truth"
+# Inside the pinned release build (or $TUTORMOMENTS_V2_RELEASE), resolved at
+# import. Other v2 modules take their defaults from these names.
+DEFAULT_GROUND_TRUTH_DIR = release_data.build_path("benchmark")
 # One file per provider, named ``<provider>.jsonl`` after the ``source`` its
 # moments carry in the ground truth.
 DEFAULT_TRANSCRIPTS = (
-    "data/v2_annotations/source/tutoring_provider_a.jsonl",
-    "data/v2_annotations/source/tutoring_provider_c.jsonl",
+    release_data.build_path("transcripts", "tutoring_provider_a.jsonl"),
+    release_data.build_path("transcripts", "tutoring_provider_c.jsonl"),
 )
 DEFAULT_OUT_DIR = "data/excerpts"
 
-# Ground-truth split stems, which are also the excerpt output stems.
-SPLIT_STEMS = ("iteration", "test")
+# The release's split files, which are also the excerpt output stems.
+SPLIT_STEMS = ("dev", "test")
 
 DEFAULT_CONTEXT_TURNS = 20
 
@@ -121,8 +126,8 @@ def load_ground_truth(ground_truth_dir: str) -> dict[str, list[dict]]:
         out[stem] = records
     if not out:
         raise FileNotFoundError(
-            f"no ground-truth splits found in {ground_truth_dir}; run "
-            "`python -m tutormoments_build.v2.build_ground_truth` first"
+            f"no ground-truth splits found in {ground_truth_dir} "
+            f"(expected {', '.join(f'{s}.jsonl' for s in SPLIT_STEMS)})"
         )
     return out
 
@@ -379,8 +384,13 @@ def build(
     ``transcripts_paths`` holds one file per provider; a moment is looked up only
     in the file named after its ``source``.
     """
+    release_data.require_local([ground_truth_dir, *transcripts_paths])
     ground_truth = load_ground_truth(ground_truth_dir)
     moments = [moment for records in ground_truth.values() for moment in records]
+    release = release_data.provenance(
+        [os.path.join(ground_truth_dir, f"{stem}.jsonl") for stem in ground_truth]
+        + list(transcripts_paths)
+    )
 
     indexes: dict[str, TranscriptIndex] = {}
     for path in transcripts_paths:
@@ -440,6 +450,7 @@ def build(
                 dropped["boundaries_out_of_range"] += 1
                 logger.warning("moment %s: %s", moment["moment_id"], error)
                 continue
+            record["release"] = release
             out[stem].append(record)
 
     return out, dropped

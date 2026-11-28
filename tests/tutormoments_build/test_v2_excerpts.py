@@ -274,7 +274,7 @@ class TestBuildRecord:
         moment = {
             "moment_id": "m1",
             "transcript_id": "t1",
-            "split": "iteration",
+            "split": "dev",
             "labels": {"scaffolding_present": True},
             **_boundaries(5, 6, 7, 4, 4, 5),
         }
@@ -377,7 +377,7 @@ class TestInsideMomentReport:
 
     def test_counts_per_width_across_every_split(self):
         out = {
-            "iteration": [self._record(False, True), self._record(False, False)],
+            "dev": [self._record(False, True), self._record(False, False)],
             "test": [self._record(True, True)],
         }
 
@@ -388,14 +388,14 @@ class TestInsideMomentReport:
         assert lines[3].split() == ["@5", "2", "of", "3", "(67%)"]
 
     def test_full_is_reported_widest_first(self):
-        out = {"iteration": [self._record(False, True)]}
+        out = {"dev": [self._record(False, True)]}
         widths = E.sort_widths(["5", "full", "20"])
 
         assert widths == ["full", "20", "5"]
         assert E._inside_moment_lines(out, ["20"])[2].split()[0] == "@20"
 
     def test_no_records_no_section(self):
-        assert E._inside_moment_lines({"iteration": []}, ["20"]) == []
+        assert E._inside_moment_lines({"dev": []}, ["20"]) == []
 
 
 # ===========================================================================
@@ -476,14 +476,14 @@ class TestBuildAcrossProviders:
         gt = tmp_path / "gt"
         gt.mkdir()
         moment = {
-            "split": "iteration",
+            "split": "dev",
             "start_turn": 2,
             "cut_turn": 2,
             "end_turn": 3,
             "labels": {},
         }
         _write_jsonl(
-            gt / "iteration.jsonl",
+            gt / "dev.jsonl",
             [
                 moment
                 | {
@@ -516,7 +516,7 @@ class TestBuildAcrossProviders:
 
     def test_each_moment_is_read_from_its_own_providers_file(self, sources):
         out, dropped = E.build(*sources, context_widths=(E.FULL,))
-        by_id = {r["moment_id"]: r for r in out["iteration"]}
+        by_id = {r["moment_id"]: r for r in out["dev"]}
 
         assert sorted(by_id) == ["ma", "mc"]
         assert by_id["ma"]["source"] == "tutoring_provider_a"
@@ -528,7 +528,7 @@ class TestBuildAcrossProviders:
 
     def test_enrichments_render_only_where_the_provider_has_them(self, sources):
         out, _ = E.build(*sources, context_widths=(E.FULL,))
-        by_id = {r["moment_id"]: r for r in out["iteration"]}
+        by_id = {r["moment_id"]: r for r in out["dev"]}
         a, c = by_id["ma"], by_id["mc"]
 
         assert a["excerpts"]["full"]["excerpt"].splitlines() == [
@@ -550,7 +550,7 @@ class TestBuildAcrossProviders:
         text = E.report(out, dropped, dry_run=True)
 
         assert any(
-            line.split()[:3] == ["iteration", "tutoring_provider_c", "1"]
+            line.split()[:3] == ["dev", "tutoring_provider_c", "1"]
             for line in text.splitlines()
         )
 
@@ -558,6 +558,83 @@ class TestBuildAcrossProviders:
         gt, (a, _) = sources
         with pytest.raises(ValueError, match="tutoring_provider_a"):
             E.build(gt, [a, a])
+
+    def test_every_record_names_the_inputs_it_was_built_from(self, sources):
+        gt, (a, c) = sources
+        out, _ = E.build(gt, [a, c], context_widths=(E.FULL,))
+        release = out["dev"][0]["release"]
+
+        assert release["build_id"] is None  # loose files, not a release build
+        assert set(release["files"]) == {f"{gt}/dev.jsonl", a, c}
+        assert all(r["release"] == release for r in out["dev"])
+
+
+class TestBuildFromARelease:
+    """Inputs inside a release build are recorded by build ID and release path."""
+
+    def test_records_the_build_and_its_release_paths(self, tmp_path):
+        import hashlib
+
+        build = tmp_path / "builds" / "20261124T2322Z-081a944"
+        (build / "benchmark").mkdir(parents=True)
+        (build / "transcripts").mkdir()
+        transcript = {
+            "transcript_id": "tc",
+            "turns": [_turn(1, "tutor", "Hi"), _turn(2, "student", "Hello")],
+        }
+        moment = {
+            "moment_id": "mc",
+            "source": "tutoring_provider_c",
+            "transcript_id": "tc",
+            "split": "dev",
+            "start_turn": 1,
+            "cut_turn": 1,
+            "end_turn": 2,
+            "labels": {},
+        }
+        _write_jsonl(build / "transcripts/tutoring_provider_c.jsonl", [transcript])
+        _write_jsonl(build / "benchmark/dev.jsonl", [moment])
+        files = {
+            p: {"sha256": hashlib.sha256((build / p).read_bytes()).hexdigest()}
+            for p in ("benchmark/dev.jsonl", "transcripts/tutoring_provider_c.jsonl")
+        }
+        (build / "manifest.json").write_text(
+            json.dumps({"build_id": "20261124T2322Z-081a944", "files": files})
+        )
+
+        out, _ = E.build(
+            str(build / "benchmark"),
+            [str(build / "transcripts/tutoring_provider_c.jsonl")],
+            context_widths=(E.FULL,),
+        )
+
+        assert out["dev"][0]["release"] == {
+            "build_id": "20261124T2322Z-081a944",
+            "pinned": True,
+            "files": {p: e["sha256"] for p, e in files.items()},
+        }
+
+    def test_a_build_that_was_never_pulled_says_how_to_get_it(self, tmp_path):
+        build = tmp_path / "builds" / "20261124T2322Z-081a944"
+        with pytest.raises(FileNotFoundError, match="release pull"):
+            E.build(
+                str(build / "benchmark"),
+                [str(build / "transcripts/tutoring_provider_c.jsonl")],
+            )
+
+
+class TestDefaults:
+    def test_read_the_pinned_release_build(self):
+        from tutormoments_build.v2 import release_data
+
+        assert E.DEFAULT_GROUND_TRUTH_DIR == release_data.build_path("benchmark")
+        assert E.DEFAULT_TRANSCRIPTS == (
+            release_data.build_path("transcripts", "tutoring_provider_a.jsonl"),
+            release_data.build_path("transcripts", "tutoring_provider_c.jsonl"),
+        )
+
+    def test_splits_are_the_releases_dev_and_test(self):
+        assert E.SPLIT_STEMS == ("dev", "test")
 
 
 # ===========================================================================
@@ -567,11 +644,11 @@ class TestBuildAcrossProviders:
 
 class TestLoadGroundTruth:
     def test_reads_both_splits(self, tmp_path):
-        (tmp_path / "iteration.jsonl").write_text('{"moment_id": "a"}\n\n')
+        (tmp_path / "dev.jsonl").write_text('{"moment_id": "a"}\n\n')
         (tmp_path / "test.jsonl").write_text('{"moment_id": "b"}\n')
         loaded = E.load_ground_truth(str(tmp_path))
         assert loaded == {
-            "iteration": [{"moment_id": "a"}],
+            "dev": [{"moment_id": "a"}],
             "test": [{"moment_id": "b"}],
         }
 
@@ -580,14 +657,14 @@ class TestLoadGroundTruth:
         assert list(E.load_ground_truth(str(tmp_path))) == ["test"]
 
     def test_no_splits_at_all_raises(self, tmp_path):
-        with pytest.raises(FileNotFoundError, match="build_ground_truth"):
+        with pytest.raises(FileNotFoundError, match="no ground-truth splits"):
             E.load_ground_truth(str(tmp_path))
 
 
 def test_write_split_is_atomic_and_roundtrips(tmp_path):
     out = tmp_path / "excerpts"
-    path = E.write_split(str(out), "iteration", [{"moment_id": "a", "excerpt": "x"}])
-    assert not (out / "iteration.jsonl.tmp").exists()
+    path = E.write_split(str(out), "dev", [{"moment_id": "a", "excerpt": "x"}])
+    assert not (out / "dev.jsonl.tmp").exists()
     with open(path, encoding="utf-8") as fh:
         assert [json.loads(line) for line in fh] == [{"moment_id": "a", "excerpt": "x"}]
 

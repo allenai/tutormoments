@@ -7,6 +7,13 @@ import pytest
 E = pytest.importorskip("tutormoments_build.v2.evaluate_scorer")
 
 
+@pytest.fixture(autouse=True)
+def _no_local_release(tmp_path, monkeypatch):
+    """The default ground truth is the pinned release build, which may or may
+    not be pulled on the machine running the tests; point it nowhere instead."""
+    monkeypatch.setattr(E, "DEFAULT_GROUND_TRUTH_DIR", str(tmp_path / "no-release"))
+
+
 def record(
     moment_id,
     *,
@@ -144,7 +151,7 @@ def test_report_gives_each_not_scored_reason_its_own_column():
         record("b", gold=GOLD_NO, scaffolding=False, rigor=False),
     ]
 
-    text = E.report("m", "1", "full", "iteration", E.evaluate(records))
+    text = E.report("m", "1", "full", "dev", E.evaluate(records))
 
     header = next(line for line in text.splitlines() if "not asked" in line)
     over = next(line for line in text.splitlines() if "over-scaffolding" in line)
@@ -322,7 +329,7 @@ def test_the_short_threshold_is_configurable():
 
 
 def _write_predictions(
-    tmp_path, model="claude-opus-5", split="iteration", prompt_version="1", width="full"
+    tmp_path, model="claude-opus-5", split="dev", prompt_version="1", width="full"
 ):
     # Predictions live under their own directory: every subdirectory of
     # --pred-dir is read as a model name, so the ground truth cannot sit beside
@@ -347,7 +354,7 @@ def _write_predictions(
     return str(tmp_path / "preds")
 
 
-def _write_ground_truth(tmp_path, split="iteration", agreement=None):
+def _write_ground_truth(tmp_path, split="dev", agreement=None):
     """Ground truth for the two moments _write_predictions writes."""
     gt_dir = tmp_path / "ground_truth"
     gt_dir.mkdir(exist_ok=True)
@@ -378,7 +385,7 @@ def test_cli_reports_and_writes_json(tmp_path, capsys):
     assert scores[0]["model"] == "claude-opus-5"
     assert scores[0]["prompt_version"] == "1"
     assert scores[0]["context_turns"] == "full"
-    assert scores[0]["split"] == "iteration"
+    assert scores[0]["split"] == "dev"
     scaffolding = scores[0]["tasks"][0]
     assert (scaffolding["all"]["tp"], scaffolding["all"]["fp"]) == (1, 1)
     assert scaffolding["all"]["f1"] == pytest.approx(2 / 3)
@@ -456,7 +463,7 @@ def test_cli_skips_the_agreed_block_for_majority_vote_ground_truth(tmp_path, cap
         {"moment_id": "a", "labels": GOLD_YES, "action_ties": []},
         {"moment_id": "b", "labels": GOLD_NO, "action_ties": []},
     ]
-    (gt_dir / "iteration.jsonl").write_text(
+    (gt_dir / "dev.jsonl").write_text(
         "".join(json.dumps(r) + "\n" for r in records), encoding="utf-8"
     )
     out_json = tmp_path / "scores.json"
@@ -486,7 +493,7 @@ def test_cli_warns_when_the_predictions_are_stale(tmp_path, caplog):
     pred_dir = _write_predictions(tmp_path)
     gt_dir = tmp_path / "ground_truth"
     gt_dir.mkdir()
-    (gt_dir / "iteration.jsonl").write_text(
+    (gt_dir / "dev.jsonl").write_text(
         json.dumps({"moment_id": "a", "labels": GOLD_NO, "agreement": AGREED}) + "\n",
         encoding="utf-8",
     )
@@ -580,3 +587,81 @@ def test_a_pass_left_out_of_the_round_is_not_run_rather_than_failed():
 
     assert action == {"not_run": 1}
     assert pairs == [(True, True)] and over == {}
+
+
+# ===========================================================================
+# Release builds
+# ===========================================================================
+
+BUILD = "20261124T2322Z-081a944"
+OTHER = "20261201T0000Z-1234567"
+
+
+def test_predictions_from_the_gold_build_match():
+    preds = [{"moment_id": "a", "release": {"build_id": BUILD}}]
+    assert E.build_mismatch(preds, BUILD) == []
+
+
+def test_predictions_from_another_build_are_listed():
+    preds = [
+        {"moment_id": "a", "release": {"build_id": OTHER}},
+        {"moment_id": "b", "release": {"build_id": BUILD}},
+    ]
+    assert E.build_mismatch(preds, BUILD) == [OTHER]
+
+
+def test_predictions_naming_no_build_do_not_match_a_release():
+    assert E.build_mismatch([{"moment_id": "a"}], BUILD) == [None]
+
+
+def _stamp(pred_dir, build_id):
+    """Rewrite every prediction file as if made from ``build_id``."""
+    import pathlib
+
+    for path in pathlib.Path(pred_dir).rglob("*.jsonl"):
+        records = [json.loads(line) for line in path.read_text().splitlines()]
+        path.write_text(
+            "".join(
+                json.dumps({**r, "release": {"build_id": build_id}}) + "\n"
+                for r in records
+            )
+        )
+
+
+def test_cli_refuses_predictions_from_another_build(tmp_path, caplog):
+    pred_dir = _write_predictions(tmp_path)
+    _stamp(pred_dir, OTHER)
+    gt_dir = _write_ground_truth(tmp_path)  # loose files: no build
+
+    assert E.main(["--pred-dir", pred_dir, "--ground-truth-dir", gt_dir]) == 1
+    assert OTHER in caplog.text
+
+
+def test_cli_scores_mismatched_builds_when_told_to(tmp_path):
+    pred_dir = _write_predictions(tmp_path)
+    _stamp(pred_dir, OTHER)
+    gt_dir = _write_ground_truth(tmp_path)
+    out = tmp_path / "scores.json"
+
+    assert (
+        E.main(
+            [
+                "--pred-dir",
+                pred_dir,
+                "--ground-truth-dir",
+                gt_dir,
+                "--allow-build-mismatch",
+                "--json",
+                str(out),
+            ]
+        )
+        == 0
+    )
+    assert json.loads(out.read_text())[0]["release_builds"] == [OTHER]
+
+
+def test_ground_truth_defaults_to_the_release_build(monkeypatch):
+    from tutormoments_build.v2 import excerpts
+
+    monkeypatch.undo()  # drop the autouse redirect
+    assert E.DEFAULT_GROUND_TRUTH_DIR == excerpts.DEFAULT_GROUND_TRUTH_DIR
